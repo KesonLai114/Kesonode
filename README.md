@@ -2,319 +2,201 @@
   <img src="public/icons/wordmark.svg" alt="Kesonode" width="320">
 </p>
 
-> **Fork notice.** Kesonode is an independent fork of
-> [Konode](https://github.com/konabe-studio/konode) by Kōnabe Studio, released under
-> [MPL-2.0](LICENSE). That link is the licence attribution to the upstream project, not
-> this fork's home. Sync file names, the default folder name, storage keys, data formats
-> and extension IDs are deliberately unchanged so existing data stays compatible;
-> see [Which folder?](#which-folder-three-compatibility-modes). Kesonode has no store
-> listings of its own.
-
 <p align="center">
-  <strong>Sync your browser to storage you own: no middleman, no account, no tracking.</strong>
+  <strong>把浏览器同步到你自己的存储：没有中间商、不用注册账号、不收集数据。</strong>
 </p>
 
 <p align="center">
-  Bookmarks · Open tabs · History · Extension list &nbsp;•&nbsp; Google Drive · GitHub · WebDAV &nbsp;•&nbsp; Optional end-to-end encryption
+  <strong>简体中文</strong> · <a href="README.en.md">English</a> ·
+  <a href="LICENSE">MPL-2.0</a> ·
+  <a href="插件版本/安装说明.md">中文安装说明</a> ·
+  <a href="https://github.com/KesonLai114/Kesonode/releases">下载安装包</a>
 </p>
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-brightgreen" alt="License: MPL-2.0"></a>
-</p>
+> **Fork 说明**：Kesonode 是
+> [Konode](https://github.com/konabe-studio/konode)（Kōnabe Studio，MPL-2.0）的独立分支。
+> 上面的链接仅是许可证要求的来源归属，不是本项目的主页。同步文件名、默认文件夹名、存储键、
+> 数据格式与扩展 ID 都刻意保持不变，让已有数据继续可用，详见[兼容模式](#兼容模式重要)。
+> **本分支没有上架任何扩展商店，也没有自己的服务器、账号体系、赞助页面或问题追踪器。**
 
 <p align="center">
-  <img src="docs/hero.png" alt="Sync across your devices: the Kesonode popup showing synced status, four active data streams, two missing extensions, and open sessions from a Windows 10 Helium and a Linux Firefox device" width="100%">
+  <img src="docs/hero.png" alt="Kesonode 中文主视觉示意图：书签、打开的标签页、历史记录、扩展列表四类同步，写入 Google Drive、GitHub 或 WebDAV，可选端到端加密" width="100%">
 </p>
 
 ---
 
-Kesonode keeps your bookmarks, open tabs, history, and installed-extension list in sync
-across your browsers, but instead of routing everything through a company's servers,
-it writes to **storage you already own**: your Google Drive, a GitHub repository, or
-any WebDAV server.
+Kesonode 让**书签、打开的标签页、历史记录、已安装扩展列表**在你的浏览器之间保持同步，
+但不经过任何公司的服务器，而是直接写进**你自己已有的存储**：Google Drive、一个 GitHub
+仓库，或任意 WebDAV 服务。
 
-There's no Kesonode account to create and no Kesonode server to trust. Your data goes
-straight from your browser to the place you picked, and your credentials never leave
-your device. If you want, you can turn on end-to-end encryption so even your storage
-provider can't read it.
+没有 Kesonode 账号要注册，也没有 Kesonode 服务器要信任。数据从浏览器直达你选的位置，
+凭据只留在本机。需要的话可以打开端到端加密，让存储服务商也读不到内容。
 
-## Why Kesonode
+## 这个分支与上游有什么不同
 
-- **Your storage, your rules.** Pick Google Drive, GitHub, or WebDAV. Delete your data
-  any time, straight from the provider.
-- **No server, no telemetry.** Kesonode operates nothing in the middle. There's nothing
-  to log, sell, or breach, because we never see your data.
-- **Optional end-to-end encryption.** AES-256-GCM, chosen explicitly during setup. On
-  or off, it's your call. Nothing is silently uploaded behind a hidden default.
-- **Works across browsers.** Any Chromium browser, plus Firefox and Firefox-based browsers.
-- **Light by design.** No background bloat, no third-party scripts, no external
-  requests beyond your own storage backend.
+| 项目 | 本分支的实际情况 |
+|------|------------------|
+| **分发方式** | 只通过本仓库的 [Release](https://github.com/KesonLai114/Kesonode/releases) 和源码里的 [`插件版本/`](插件版本/) 目录提供本地安装包；**没有商店版本**，浏览器里需要「加载已解压的扩展程序」 |
+| **构建变体** | 发布的包是不含内置 Google OAuth 密钥的 `source` 构建：GitHub、WebDAV 开箱即用；要用 Google Drive 需自己创建 OAuth 客户端（`drive.file` 权限） |
+| **三种兼容模式** | 上游兼容 / 自有文件名 / 完全独立，决定数据写到哪个文件夹、用哪种文件名前缀；默认模式沿用上游，保证旧数据可读 |
+| **设置导入 / 导出** | 「设置 → 高级 → 导入/导出」可把后端账号、设备 ID、加密口令、Drive 授权导出成 JSON 并在新安装里恢复；备份格式带版本号与迁移链 |
+| **冲突与设备信息** | 手动解决冲突前可看到双方差异；设备列表显示最近上传时间、浏览器引擎与不活跃标记；被阻止的批量删除会列出具体书签 |
+| **链接与文案** | 界面、日志、图标与文档统一为 Kesonode；指向上游商店、评分、反馈和站点的链接已移除（集中在一个空的 `FORK_LINKS` 常量里，等有自己的地址再填） |
+| **协议契约** | **冻结不变**：`konode_*` 文件前缀、`Konode` 文件夹名、SyncPacket v1.0、SHA-256 校验、AES-256-GCM / PBKDF2 参数、扩展 ID 与 OAuth 配置。改这些会破坏已有数据 |
 
-## What you can sync
+上游的新功能与修复会持续对照、移植；只搬代码逻辑，不搬上游的品牌、商店、赞助与作者信息。
+本分支独有的改动记录在 [CHANGELOG.md](CHANGELOG.md) 顶部的「Kesonode fork」段落。
 
-| Data | What it does |
-|------|--------------|
-| **Bookmarks** | Two-way sync that preserves your folder structure. Renames, moves and folder reorders travel too, and so do deletions, so no old bookmarks quietly come back. Keep any folder or bookmark out of the sync on a device, for example one another extension fills. |
-| **Open tabs / sessions** | Save the current tab set and restore another device's session whenever you want, tab groups included (with their names and colours, if you allow it). Restoring opens only the tabs you don't already have. |
-| **History** | Keep a synced, de-duplicated history list. *(On Firefox the original visit time is preserved; on Chrome the API can't set visit times, so restored entries show the sync moment.)* |
-| **Installed extensions** | Sync the list and see at a glance which extensions are missing on the device you're on. |
+## 能同步什么
 
-When two devices disagree, you choose how it's resolved: newest change wins, always
-prefer this device, always prefer the other, or resolve it yourself from the popup.
+| 数据 | 说明 |
+|------|------|
+| **书签** | 双向同步并保留文件夹结构，重命名、移动、排序与删除都会传递；可把指定书签或整个文件夹排除在同步之外 |
+| **打开的标签页 / 会话** | 保存当前标签组、随时恢复其他设备的会话，标签组的名称与颜色可选保留；恢复时只打开本机还没有的标签页 |
+| **历史记录** | 去重合并的浏览记录列表（Firefox 可保留原始访问时间；Chrome 的 API 无法设置访问时间，恢复的条目显示为同步时刻） |
+| **已安装扩展列表** | 同步清单，并一眼看出当前设备缺了哪些扩展；此权限只读，Kesonode 不会安装或移除任何扩展 |
 
-## Where your data goes
+两个设备不一致时由你决定怎么合并：最新更改优先、始终保留本机、始终使用远端，
+或从弹窗里手动处理 —— 手动模式下可以先到「设置 → 活动」查看双方具体差异再选择。
 
-| Backend | Auth | Notes |
-|---------|------|-------|
-| **Google Drive** | One-time sign-in | Scoped to `drive.file`, so Kesonode only ever touches the files it creates. |
-| **GitHub** | Fine-grained token | Point it at a single private repository. |
-| **WebDAV** | Username + password | Presets fill in the address for Nextcloud / ownCloud, pCloud, Koofr, Fastmail, and Nutstore (坚果云), which works from mainland China where Google Drive can't be reached. **WebDAV (other)** takes Synology, kDrive, or any standard WebDAV server. |
+还有几个用得上的安全设计：每个同步包都带 SHA-256 校验；书签删除用墓碑机制传递且有
+批量删除保护（异常删除会被拦下并保存还原点）；还原点可随时手动创建。
 
-## How Kesonode compares
+## 数据存在哪里
 
-**Pick by what you need.** Your browser's own sync is the least work if you use one
-browser everywhere, and Firefox and Brave encrypt it end to end by default. floccus is the
-one to look at if you want your bookmarks in a phone app, or synced to Nextcloud
-Bookmarks, Linkwarden or Karakeep. Kesonode is for mixing browser families, Chromium and
-Firefox, and syncing open tabs, history and the extension list along with your bookmarks,
-to storage you already have.
+| 后端 | 认证方式 | 说明 |
+|------|----------|------|
+| **Google Drive** | 一次性登录 | 权限限定 `drive.file`，只碰自己创建的文件；本地包需自建 OAuth 客户端 |
+| **GitHub** | 细粒度个人访问令牌 | 指向你自己的单个仓库，建议使用私有仓库 |
+| **WebDAV** | 用户名 + 密码 | 内置 Nextcloud / ownCloud / pCloud / Koofr / Fastmail / 坚果云预设，坚果云在国内可用；「WebDAV（其他）」支持群晖、kDrive 及任何标准服务 |
 
-| | Kesonode | floccus | Built-in sync |
-|---|---|---|---|
-| **What syncs** | Bookmarks, open tabs with their groups, history, extension list | Bookmarks, or open tabs (one per profile) | Bookmarks, tabs, history, passwords, settings and more |
-| **Where it is stored** | Google Drive, GitHub, WebDAV | Nextcloud Bookmarks, WebDAV, Git, Google Drive, Dropbox, Linkwarden, Karakeep | The browser maker's servers |
-| **Mixes Chromium and Firefox** | Yes | Yes | No, each syncs only with itself |
-| **On phones** | Firefox for Android: open tabs and the extension list | Android and iOS apps, with your bookmarks inside the app | Everything, in the browser's own app |
-| **End-to-end encryption** | Optional, on every backend | Optional, on WebDAV, Google Drive and Dropbox | Firefox and Brave always. Chrome only with a sync passphrase |
-| **Account** | None beyond your storage | None beyond your storage | A Mozilla or Google account. Brave uses a sync code |
-| **Around since** | 2026 | Years, with a much larger user base | As long as the browser |
-| **Open source** | Yes, MPL-2.0 | Yes, MPL-2.0 | Clients open. Firefox's server too, Chrome's not |
+所有后端都只是普通文件存储，没有推送通知能力，所以设备之间靠定时拉取发现彼此的变化。
 
-A few details the cells are too small for. floccus syncs open tabs as an alternative to
-bookmarks inside one sync profile, so doing both means setting up a second profile. Its
-phone apps keep your bookmarks inside the app rather than in the phone's browser. Chrome's
-sync passphrase covers everything except payment methods and addresses. xBrowserSync,
-which this table used to list, has had no release since 2020. Checked November 2026 from
-each project's own documentation and store pages.
+## 隐私与安全
 
-**Running Kesonode alongside your browser's own sync.** You can, and people do, but it is
-untested rather than known to work, so here is what to expect. The concern isn't that the
-two will fight over your data. It's churn. The bookmarks API tells an extension that a
-bookmark appeared, changed or was removed, and never who did it, so a bookmark that Chrome
-Sync or Brave Sync has just brought in looks exactly like one you added yourself. Kesonode
-publishes it, the other system carries it to its own devices, and the same change travels
-twice. If both systems cover the same devices, you end up where you would have with either
-one alone, just with more writes to your storage along the way. If they cover different
-sets of devices, they bridge those sets together, deletions included, which may not be what
-you had in mind. Picking one system for bookmarks is the simple answer.
+- **没有 Kesonode 服务器**。数据只发往你配置的后端，不会发给第三方，也没有遥测。
+- **可选端到端加密**：AES-256-GCM + PBKDF2-SHA256（60 万轮），安装向导里显式选择，默认关闭。
+  加密文件放在别人能读到的存储上，口令可被离线猜测，因此要求至少 12 个字符，建议使用生成的密钥。
+- **凭据只留在本机**：访问令牌、GitHub Token、WebDAV 密码与加密口令只存在浏览器的
+  `storage.local` 里，从不上传。该存储不加密落盘，建议使用细粒度 GitHub Token 和
+  WebDAV 应用专用密码。
+- **按需申请权限**：`history`、`tabs`、`management` 只在你打开对应数据类型时申请。
+- **完整性校验**：每个同步包带 SHA-256 校验和，下载后先验再导入。
 
-## Privacy & security
+## 兼容模式（重要）
 
-- **No Kesonode servers exist.** Your data goes only to the backend you configure, and
-  none of it is ever sent to us or to any third party.
-- **Optional E2EE** (AES-256-GCM, PBKDF2-SHA256, 600k iterations): encrypt every
-  payload before it leaves your browser. It's an explicit choice you make during
-  onboarding. Default off, never silently enabled or disabled. Honest threat model:
-  encrypted files sit on storage others can read, so a passphrase is guessable
-  *offline*. The 600k-round derivation makes each guess slow, a new passphrase must
-  be 12+ characters, and the generated key (recommended) is effectively unguessable.
-- **Credentials stay local.** Access tokens, GitHub tokens, WebDAV passwords, and your
-  encryption passphrase live only in the browser's own extension storage
-  (`storage.local`) on your device and are
-  never uploaded. (That store isn't encrypted at rest, so a fine-grained GitHub token
-  and a dedicated WebDAV app password are good habits.)
-- **Integrity checks.** Every payload carries a SHA-256 checksum that's verified on
-  download before anything is imported.
-- **Least privilege.** `history`, `tabs`, and `management` are requested only when you
-  turn those data types on. The extension-list permission is read-only: Kesonode never
-  installs or removes anything.
+「设置 → 高级 → 兼容性」决定这台设备把数据写到哪里。**同一个同步组里的所有设备必须选同一个模式**，
+文件夹就是设备互相找到对方的地方。
 
-## Browser support
+| 模式 | 文件夹（WebDAV/GitHub · Google Drive） | 文件 |
+|------|----------------------------------------|------|
+| **上游兼容**（默认） | `konode` · `Konode` | 读写 `konode_*` |
+| **自有文件名** | `konode` · `Konode` | 写 `kesonode_*`，两种前缀都读 |
+| **完全独立** | `kesonode` · `Kesonode` | 只读写 `kesonode_*` |
 
-- **Chromium**: Chrome, Edge, Brave, Helium, ungoogled-chromium, and other Chromium
-  browsers. Fully supported, on the Chrome Web Store and on Microsoft Edge Add-ons
-  (the same package in both).
-- **Firefox**: Firefox and Firefox-based browsers (e.g. Waterfox, Zen), from a
-  dedicated build that ships on Firefox Add-ons. Same sync folder and same files as your
-  Chromium browsers, so a Firefox install joins a group that is already running. In Zen,
-  only the workspace in front shares its open tabs ([why](TROUBLESHOOTING.md#zen)).
-- **Firefox for Android**: open tabs and the extension list, on GitHub or WebDAV storage.
-  Firefox for Android gives extensions no bookmarks, history or Google sign-in
-  ([details](TROUBLESHOOTING.md#firefox-for-android)).
+上游文件夹名属于冻结的线上数据，不是产品文案，所以默认模式仍会创建一个叫 `konode` 的文件夹。
+**切换模式不会搬移已有文件**：新文件夹一开始是空的，本设备会重新上传自己的数据；在
+「完全独立」模式下，上游 Konode 设备看不到这台设备的数据。无论哪种模式，协议参数、存储键
+与扩展 ID 都不变。
 
-> On non-Chrome Chromium browsers, Google Drive sign-in uses the OAuth PKCE flow
-> (`launchWebAuthFlow`), so Drive sync works even where `chrome.identity.getAuthToken`
-> isn't available.
+开启 E2EE 时，载荷在设备端加密，校验和仍对明文计算，因此内容相同的设备可以互相匹配，
+又不会向后端泄露内容。
 
-## Translations
+## 什么时候会同步
 
-Kesonode speaks **English, Hungarian, German, Spanish, Italian, Russian and Chinese
-(Simplified and Traditional)**, and follows your browser's language. Every screen is
-translated: the popup, the setup wizard, and Settings. Dates and numbers follow your
-browser's locale everywhere.
+只有三件事会触发同步：
 
-**Japanese**, **Estonian** and **Arabic** have been started. A language reaches a release
-once it is complete, because a screen that is half translated reads worse than an English
-one. Arabic also needs the pages laid out right to left, which comes with it.
+- **本机书签发生变化** —— 约 1 秒后上传，另有 30 秒兜底；仅书签，且需要开启「更改时同步」（默认开启，位于「设置 → 设备」）。
+- **定时拉取** —— 默认每 60 秒一次，覆盖所有已开启的数据类型，也是设备得知其他设备变化的途径；可在「设置 → 设备 → 同步间隔」调到 30–600 秒，或用「自动同步」关掉。
+- **在弹窗里点「立即同步」**。
 
-Translations are edited on
-[Hosted Weblate](https://hosted.weblate.org/projects/konode/). You don't need git, a
-pull request, or any knowledge of the code to help. If your language is missing, ask
-for it there and it will appear. The strings themselves live in this repository, under
-`public/_locales/<lang>/messages.json`.
+启动浏览器本身不会同步，只会重新排定定时器。历史记录、标签页和扩展列表没有即时通道，
+靠定时拉取传递。浏览器对扩展后台定时器的最快限制就是 30 秒，这是平台下限而不是保守设置。
 
-About half the strings carry a note explaining what they are and why they are worded the
-way they are; a few of them make promises about not losing your data, and those have to be
-translated literally. If a string's meaning isn't clear, leave it and ask. An
-untranslated string falls back to English, which is safe.
+## 界面语言
 
-## Install
+界面跟随浏览器语言。已完整翻译：**英语、匈牙利语、德语、西班牙语、意大利语、俄语、
+简体中文、繁体中文**（弹窗、设置向导、设置页全部覆盖，日期与数字按浏览器区域格式化）。
+日语、爱沙尼亚语、阿拉伯语尚未完成，没有随包发布（阿拉伯语还需要 RTL 排版）。
 
-Kesonode is distributed as a local package, not through any extension store. Pick a
-version folder under [`插件版本/`](插件版本/) and follow its
-[中文安装说明](插件版本/安装说明.md): the Chromium build loads from `dist/`, the Firefox
-build from `dist-firefox/manifest.json`. If you already have Kesonode installed from an
-earlier package, keep that install — a second install joins the sync group as a new device.
+文案在 `public/_locales/<lang>/messages.json`，直接改本仓库的文件即可 —— 本分支**不使用**
+上游的 Weblate 平台。文档方面：本页是中文主文档，英文版见 [README.en.md](README.en.md)，
+[安装说明](插件版本/安装说明.md) 为中文；`GETTING_STARTED.md`、`TROUBLESHOOTING.md`、
+`PRIVACY.md` 目前仍是英文（沿用上游文档）。
 
-New to Kesonode? The **[Getting Started guide](GETTING_STARTED.md)** walks through setup
-and connecting each backend.
+## 安装
 
-## Build from source
+1. 打开 [Releases](https://github.com/KesonLai114/Kesonode/releases)，下载对应版本的
+   `kesonode-chrome-<版本>.zip`（Chrome / Edge / Brave 等）或
+   `kesonode-firefox-<版本>.zip`（Firefox）；源码里的 [`插件版本/`](插件版本/) 也按版本存放了同样的包。
+2. **先解压**，浏览器加载的是文件夹而不是 zip；解压后打开应能直接看到 `manifest.json`。
+3. 按每个版本目录里附带的**中文《安装说明》**操作：Chromium 在 `chrome://extensions`
+   开启开发者模式后「加载已解压的扩展程序」，Firefox 在 `about:debugging` 里「临时载入附加组件」。
+
+几个要紧的提醒：
+
+- **升级 1.5.1 → 1.5.2**：1.5.2 的包没有固定扩展 ID，请把新版文件**覆盖到当前正在加载的同一个文件夹**
+  再点刷新，不要新建文件夹直接加载，否则扩展 ID 变化会导致设置读不到。稳妥做法是先到
+  「设置 → 高级 → 导入/导出」导出配置，必要时再导入。用
+  `npm run package:source:pinned` 自建的包带固定 ID，可避免这个迁移步骤。
+- **Firefox 临时加载在浏览器重启后会失效**，需要重新载入一次；本分支没有上架商店，因此没有签名版。
+- 导出的配置是**明文**（含令牌与口令），只保存在本机，不要上传或分享。
+- 如果已经装过旧包，保留原安装即可；再装一份会被当成一台新设备加入同步组。
+
+完整上手见 [GETTING_STARTED.md](GETTING_STARTED.md)（英文），异常排查见
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md)（英文）。
+
+## 从源码构建
 
 ```bash
-npm install          # install dependencies
-npm run type-check   # tsc --noEmit, should be clean
-npm run build        # → dist/           (Chromium)
-npm run build:firefox # → dist-firefox/  (Firefox)
+npm ci
+npm run check            # type-check + lint + 测试
+npm run build            # → dist/           (Chromium)
+npm run build:firefox    # → dist-firefox/  (Firefox)
+npm run package:source   # → web-ext-artifacts/source/ 下两个可分发 zip
 ```
 
-**Chromium:** open `chrome://extensions`, enable Developer mode, click **Load
-unpacked**, and select `dist/`. After any rebuild, click ↻ reload on the extension
-(MV3 won't swap a running service worker automatically).
+- **Chromium**：打开 `chrome://extensions` → 开启开发者模式 → 「加载已解压的扩展程序」→ 选 `dist/`。
+  每次重新构建后要点扩展卡片上的 ↻ 刷新（MV3 不会自动替换运行中的 service worker）。
+- **Firefox**：打开 `about:debugging` → 「此 Firefox」→ 「临时载入附加组件」→ 选 `dist-firefox/manifest.json`。
+- 自己构建 Google Drive 后端需要自己的 Google OAuth 客户端（`drive.file` 权限）；
+  GitHub 与 WebDAV 只需填自己的凭据。
 
-**Firefox:** open `about:debugging` → **This Firefox** → **Load Temporary Add-on** and
-pick `dist-firefox/manifest.json`.
+`npm run checksum` 会对构建出的 `dist/` 计算确定性的 SHA-256 指纹，用于验证可复现构建。
+注意：带 Google OAuth 密钥的构建与不带密钥的 source 构建指纹不同；Release 说明目前还不附带该指纹。
 
-> Building the Google Drive backend yourself requires your own Google OAuth client
-> (scope `drive.file`). GitHub and WebDAV need no setup beyond your own credentials.
+## 工作原理
 
-## Verifying a build
+每台设备、每类数据各写一个 JSON 文件（`SyncPacket`）到后端的同步文件夹。每次同步拉取其他
+设备的文件、做非破坏性合并，再把结果写回。书签用墓碑机制让删除在设备间传递而不复活旧条目，
+并有安全阈值防止损坏的删除日志清空整棵树。
 
-`npm run checksum` prints a **build fingerprint**, a deterministic SHA-256 over the built
-`dist/`. Check out a release tag and run:
+## 不支持什么
 
-```bash
-npm ci && npm run build && npm run checksum
-```
+- **密码同步**：浏览器扩展读不到浏览器原生密码库，这是平台的安全边界。密码请用
+  [Bitwarden](https://bitwarden.com)、[Proton Pass](https://proton.me/pass) 或自建
+  [Vaultwarden](https://github.com/dani-garcia/vaultwarden)。
+- **手机端**：Firefox for Android 上可同步标签页与扩展列表，平台不向扩展提供书签、历史记录
+  和 Google 登录（详见 [TROUBLESHOOTING.md](TROUBLESHOOTING.md#firefox-for-android)）。
 
-Two honest caveats. The release notes don't carry the fingerprint yet, so today this shows
-you that the build reproduces, not that a particular download came from this tag. It also
-assumes a comparable toolchain; the pinned lockfile keeps dependencies identical. A build
-with a Google OAuth client compiled in cannot match one without it.
+## 已实现与后续计划
 
-## How it works
+- **已实现**：四类数据同步 · 三种后端与 WebDAV 预设（含坚果云）· 多设备合并 · 逐项冲突处理 ·
+  可选 E2EE · Drive OAuth PKCE 刷新 · 跨浏览器扩展匹配 · 书签排除同步 · 会话标签组 ·
+  三种兼容模式 · 设置导入/导出 · 冲突差异展示 · 设备活跃状态 · 还原点与删除保护 · 多语言界面。
+- **后续**（详见 [ROADMAP.md](ROADMAP.md)，该文件是上游历史文档，其中的 issue 编号属于上游）：
+  阅读清单 · 更多后端（Dropbox、S3 兼容、OneDrive）· 更快的历史同步 · 更多语言 · RTL 排版 ·
+  超大书签树的增量 diff。
 
-For each device and data type, Kesonode writes one JSON file (a `SyncPacket`) to a sync
-folder on your backend. Every sync pulls in each peer device's file, merges it
-non-destructively, and pushes the result back. Bookmarks use tombstones so deletions
-travel between devices without resurrecting old entries, and a safety cap stops a
-corrupt deletion log from wiping your tree.
+## 反馈与排查
 
-### Which folder? Three compatibility modes
+先查 [TROUBLESHOOTING.md](TROUBLESHOOTING.md)。本分支目前没有独立的 issue tracker、
+商店页面或支持邮箱；界面里原本指向上游这些地址的链接已清空，等有自己的地址再统一填写。
 
-Settings → Advanced → Compatibility decides where this device publishes. **Every device
-in one sync group must pick the same mode** — the folder is where devices find each other.
+## 许可
 
-| Mode | Folder (WebDAV/GitHub · Google Drive) | Files |
-|------|---------------------------------------|-------|
-| **Upstream** (default) | `konode` · `Konode` | writes and reads `konode_*` |
-| **Own file names** | `konode` · `Konode` | writes `kesonode_*`, reads both prefixes |
-| **Fully separate** | `kesonode` · `Kesonode` | writes and reads `kesonode_*` only |
-
-The upstream folder name is frozen wire data, not product copy: that is why the default
-mode still creates a folder called `konode`. Switching modes does **not** move existing
-files — the new folder starts empty and this device re-uploads its own data. In "Fully
-separate" mode an upstream Konode device cannot see this device's data. The `konode_*`
-file prefix, SyncPacket format, E2EE parameters, storage keys and extension IDs are
-unchanged in every mode.
-
-When E2EE is on, the payload is encrypted on the device and the checksum is still
-computed over the plaintext, so identical content matches across devices without
-revealing anything to the backend.
-
-## When Kesonode syncs
-
-Three things start a sync, and nothing else does:
-
-- **A bookmark changes on this device.** The upload goes out about a second later, with a
-  30-second backstop in case the browser suspends the extension mid-edit. Bookmarks only,
-  and only while **Sync on change** is on (it is by default, under Settings → Device).
-- **The scheduled pull**, every 60 seconds by default. This is how a device learns about
-  its *peers'* changes, and it covers every data type you have enabled. Adjust it from 30
-  to 600 seconds under **Settings → Device → Sync interval**, or turn it off with **Auto
-  sync**.
-- **You press Sync now** in the popup.
-
-That's the whole list. History, open tabs and the extension list have no instant path, so
-they travel on the scheduled pull. Starting the browser doesn't sync by itself either: it
-re-arms the schedule, and the first pull arrives on the next tick.
-
-Why the receiving side waits at all: Drive, GitHub and WebDAV are ordinary file storage
-with no way to tell a device that something changed, so Kesonode has to go and look. 30
-seconds is also the fastest a browser will run an extension's background timer, whichever
-backend you pick, so that's the floor rather than a setting we're being cautious with.
-
-## Why there's no password sync
-
-Browser extensions **cannot** read the browser's native password store. That's an
-intentional security boundary in the browser, not a Kesonode limitation. For passwords,
-use a dedicated manager like [Bitwarden](https://bitwarden.com),
-[Proton Pass](https://proton.me/pass), or self-hosted
-[Vaultwarden](https://github.com/dani-garcia/vaultwarden).
-
-## Roadmap
-
-- **Shipped**: bookmarks / sessions / history / extension-list sync · Google Drive +
-  GitHub + WebDAV · WebDAV provider presets, Nutstore (坚果云) included · multi-device
-  merge · per-item conflict resolution · opt-in E2EE · Drive OAuth refresh (PKCE) ·
-  cross-browser extension matching · bookmarks kept out of sync · tab groups in sessions ·
-  three compatibility modes · **translated interface** (English, Hungarian, German,
-  Spanish, Italian, Russian, Chinese (Simplified and Traditional)).
-- **Next**: a held-back deletion that lists the bookmarks it holds (#23) · a device list
-  that says when each device was last active (#10) · a conflict card that shows what
-  differs (#35) · the reading list (#77) · more backends, cheapest sign-in first (Dropbox
-  token and S3-compatible, then Dropbox OAuth and OneDrive) · faster history sync · more
-  languages (Japanese, Estonian, Arabic).
-- **Later**: right-to-left languages · incremental diff for very large bookmark trees ·
-  diffs between restore points.
-
-## Support & feedback
-
-Something not working? Check **[Troubleshooting](TROUBLESHOOTING.md)** first. Kesonode is
-built and distributed locally: the release folders under [`插件版本/`](插件版本/) are the
-authoritative packages. This fork has no store listing, issue tracker or support address
-of its own; the section below describes the upstream project and is kept for attribution.
-
-## License
-
-See [LICENSE](LICENSE).
-
-## How it's built
-
-The following section describes the upstream project (Konode) and is kept verbatim for
-attribution.
-
-Konode is designed, tested and maintained by Kōnabe Studio. Much of the code is written with
-an AI coding assistant (Claude Code), much as a project might work with a contractor: the
-design decisions, the review before release and the testing stay with us. In practice:
-
-- each release goes through a QA pass on real browsers and devices (Chromium browsers,
-  Firefox, Firefox for Android), plus headless runs that play out multi-device scenarios;
-- close to 900 automated tests run on every change;
-- builds are reproducible, see [Verifying a build](#verifying-a-build);
-- bug reports get an answer, and when the bug is ours, a fix with an explanation of what
-  went wrong.
+[MPL-2.0](LICENSE)。上游归属见本页顶部的 Fork 说明，许可证原文逐字保留在 `LICENSE` 中。
 
 ---
 
-<p align="center"><sub>Kesonode is not affiliated with Google, GitHub, Mozilla, or any storage provider.</sub></p>
+<p align="center"><sub>Kesonode 与 Google、GitHub、Mozilla 及任何存储服务商均无关联。</sub></p>
