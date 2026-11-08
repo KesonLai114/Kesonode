@@ -3,9 +3,49 @@
 All notable changes to Konode. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+> **Kesonode fork note.** This file is kept in sync with the upstream project's changelog
+> so upstream fixes can be ported. "Konode" in the historical entries below refers to
+> upstream releases, not to this fork's product name. Kesonode-only changes are recorded
+> in the section immediately below and never change the upstream wire contract.
+
+## Kesonode fork (not upstream)
+
+### Added
+
+- **Three compatibility modes** under Settings → Advanced → Compatibility: **Upstream**
+  (default, `konode` / `Konode` folder + `konode_*` files), **Own file names** (same folder,
+  `kesonode_*` files while still reading upstream ones), and **Fully separate**
+  (`kesonode` / `Kesonode` folder + `kesonode_*` files only). The frozen upstream folder
+  names stay byte-for-byte unchanged; the new ones are separate data. No double-read of two
+  folders: switching starts a separate sync group and this device re-uploads its own data,
+  because both the destination tag and the upload tag change with the mode.
+
+### Fixed
+
+- No user-facing links pointed at this fork's own home: the About GitHub link, feedback
+  issue/email links, the store-rating row and popup card, and the crash-screen issue URL
+  all referred to the upstream project or its store listings. They are now removed or read
+  from a single `FORK_LINKS` constant, empty until the fork has addresses of its own.
+- Activity log lines and the Drive-folder placeholder no longer present the upstream
+  folder name as the product's name; the Settings page now shows the folder name the
+  selected mode actually uses and explains why the default one is frozen.
+
 ## [Unreleased]
 
 ### Added
+
+- **Settings can be exported and imported, so an unpacked upgrade no longer has to start
+  from an empty setup.** Settings → Advanced → Import / Export has two new buttons that
+  save and restore the backend accounts, the device ID, the encryption passphrase and the
+  Google Drive refresh token as a JSON file. Chrome isolates `chrome.storage.local` per
+  extension ID, and an unpacked build loaded from a new version folder gets a new ID, so
+  until now every upgrade meant re-entering the backend and the passphrase. Export from the
+  old install, import into the new one, and the wizard stays away. The file holds
+  credentials in plain text and is kept on the user's machine; no data is sent anywhere.
+  **From 1.5.3, local packages also keep the manifest `key`** (`npm run
+  package:source:pinned`), which pins the ID so upgrading to a new folder needs no export
+  at all. 1.5.2 deliberately ships without the key: it has to be loaded over the old folder
+  so the old settings are still readable when they are exported.
 
 - **A conflict shows what differs before you choose (#35).** With conflict resolution set
   to Manual, the popup asked you to Keep local or Use remote and said nothing about either
@@ -61,6 +101,15 @@ All notable changes to Konode. Format loosely follows
   It is one word now, in every language Konode ships.
 
 ### Fixed
+
+- **Renaming a device now reaches the device list and the other devices.** The name rides
+  on each sync packet, but the "already uploaded" check compared only the data inside it,
+  so editing the name in Settings → Device changed nothing in the storage folder until a
+  bookmark happened to change. Settings → Activity then read that stale file and showed
+  the old name, or "Unnamed device" for a file written by an older build. The name is now
+  part of that check, so a rename re-uploads each file once; the Activity list takes this
+  device's name straight from its own settings, and looks in another file when the
+  smallest one is too old to carry a name.
 
 - **A new device on a Chromium-based browser is named after the engine, not after Chrome.**
   Every Chromium-based browser carries Chrome's name in what it tells websites, so a fresh

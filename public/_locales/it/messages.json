@@ -1,4 +1,23 @@
 {
+  "opt_compat_section": {
+    "message": "Compatibilità con la versione originale",
+    "description": "Settings section heading for the compatibility mode switch."
+  },
+  "opt_compat_mode_label": {
+    "message": "Dove questo dispositivo pubblica i dati"
+  },
+  "opt_compat_mode_desc": {
+    "message": "Tutti i dispositivi di uno stesso gruppo di sincronizzazione devono scegliere la stessa modalità. Il cambio non sposta i file esistenti: la nuova cartella parte vuota e questo dispositivo ricarica i propri dati."
+  },
+  "opt_compat_mode_upstream": {
+    "message": "Originale (predefinito) — cartella konode + file konode_*"
+  },
+  "opt_compat_mode_isolated": {
+    "message": "Nomi propri — cartella konode + file kesonode_*"
+  },
+  "opt_compat_mode_standalone": {
+    "message": "Completamente separato — cartella Kesonode + file kesonode_*"
+  },
   "extension_description": {
     "message": "Sincronizzazione del browser incentrata sulla privacy, sul tuo spazio di archiviazione: Google Drive, WebDAV, GitHub."
   },
@@ -678,7 +697,16 @@
     "message": "(facoltativo)"
   },
   "opt_drive_folder_placeholder": {
-    "message": "Lascia vuoto per creare automaticamente una cartella “Konode”"
+    "message": "Lascia vuoto per creare automaticamente la cartella di sincronizzazione"
+  },
+  "opt_compat_folder_label": {
+    "message": "Nome della cartella di sincronizzazione"
+  },
+  "opt_compat_folder_desc": {
+    "message": "Il nome a destra segue la modalità. `konode` (`Konode` su Google Drive) è il nome fisso della versione originale; `kesonode` (`Kesonode` su Drive) avvia un gruppo di sincronizzazione separato."
+  },
+  "opt_source_bundled": {
+    "message": "Incluso in questo pacchetto"
   },
   "opt_region_label": {
     "message": "Regione"
@@ -1582,6 +1610,18 @@
   },
   "opt_import_error": {
     "message": "Errore"
+  },
+  "opt_cfg_export_label": {
+    "message": "Esporta impostazioni"
+  },
+  "opt_cfg_export_desc": {
+    "message": "Salva account dei backend, passphrase di cifratura e ID dispositivo in un file JSON. Il file contiene credenziali in chiaro: conservalo in un luogo privato."
+  },
+  "opt_cfg_import_label": {
+    "message": "Importa impostazioni"
+  },
+  "opt_cfg_import_desc": {
+    "message": "Ripristina la configurazione dopo un aggiornamento senza reimpostare tutto. Sostituisce le impostazioni attuali."
   },
   "opt_feedback_section": {
     "message": "Feedback"

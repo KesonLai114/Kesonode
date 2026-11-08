@@ -4,7 +4,7 @@ import { DEFAULT_STATE } from "@/lib/utils/storage";
 import type { SyncState } from "@/lib/types";
 
 // Whenever a sync was not running, the old inline derivation collapsed to "synced" +
-// green for every enabled type — before the first sync had ever run, and right after one
+// blue for every enabled type — before the first sync had ever run, and right after one
 // that failed. The dots claimed all was well while the error banner above them didn't.
 
 const base: StreamInput = {
@@ -26,7 +26,7 @@ describe("streamState", () => {
 
   it("does NOT claim synced before the first cycle has ever run", () => {
     expect(streamState({ ...base, syncedCount: 0 })).toBe("never");
-    expect(streamColor("never")).not.toBe(streamColor("synced")); // and not green
+    expect(streamColor("never")).not.toBe(streamColor("synced")); // and not blue
   });
 
   it("does NOT claim synced right after a failed cycle", () => {

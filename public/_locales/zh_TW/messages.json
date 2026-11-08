@@ -1,4 +1,23 @@
 {
+  "opt_compat_section": {
+    "message": "上游相容性",
+    "description": "Settings section heading for the compatibility mode switch."
+  },
+  "opt_compat_mode_label": {
+    "message": "本裝置的資料發佈位置"
+  },
+  "opt_compat_mode_desc": {
+    "message": "同一同步群組內的所有裝置必須選擇同一模式。切換不會搬移既有檔案：新資料夾一開始是空的，本裝置會重新上傳自己的資料。"
+  },
+  "opt_compat_mode_upstream": {
+    "message": "相容上游（預設）— konode 資料夾 + konode_* 檔案"
+  },
+  "opt_compat_mode_isolated": {
+    "message": "獨立檔名 — konode 資料夾 + kesonode_* 檔案"
+  },
+  "opt_compat_mode_standalone": {
+    "message": "完全獨立 — Kesonode 資料夾 + kesonode_* 檔案"
+  },
   "datatype_bookmarks": {
     "message": "書籤"
   },
@@ -678,7 +697,16 @@
     "message": "（選填）"
   },
   "opt_drive_folder_placeholder": {
-    "message": "留空會自動建立一個「Konode」資料夾"
+    "message": "留空會自動建立同步資料夾"
+  },
+  "opt_compat_folder_label": {
+    "message": "同步資料夾名稱"
+  },
+  "opt_compat_folder_desc": {
+    "message": "右側名稱隨所選模式變化。`konode`（Google Drive 為 `Konode`）是凍結的上游相容名稱；`kesonode`（Drive 為 `Kesonode`）會開啟獨立的同步群組。"
+  },
+  "opt_source_bundled": {
+    "message": "隨本安裝包提供"
   },
   "opt_region_label": {
     "message": "地區"
@@ -1582,6 +1610,18 @@
   },
   "opt_import_error": {
     "message": "錯誤"
+  },
+  "opt_cfg_export_label": {
+    "message": "匯出設定"
+  },
+  "opt_cfg_export_desc": {
+    "message": "將後端帳號、加密密碼、裝置 ID 等設定存成 JSON 檔案。檔案內含明文憑證，請妥善保管，不要分享。"
+  },
+  "opt_cfg_import_label": {
+    "message": "匯入設定"
+  },
+  "opt_cfg_import_desc": {
+    "message": "升級或更換瀏覽器後還原設定，不必重新設定。匯入會取代目前的設定。"
   },
   "opt_feedback_section": {
     "message": "意見回饋"

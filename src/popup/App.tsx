@@ -398,7 +398,7 @@ export default function PopupApp() {
         <div className="flex items-center gap-2.5">
           <span className="relative flex h-2 w-2 items-center justify-center">
             {pulsing && (
-              <span className={`absolute h-2 w-2 rounded-full border-[1.5px] ${statusCfg.ring} animate-konode-pulse`} />
+              <span className={`absolute h-2 w-2 rounded-full border-[1.5px] ${statusCfg.ring} animate-kesonode-pulse`} />
             )}
             <span className={`h-2 w-2 rounded-full ${statusCfg.dot}`} />
           </span>
@@ -593,7 +593,7 @@ export default function PopupApp() {
             const Icon = DATA_TYPE_META[type].icon;
             const typeLabel = t(`datatype_${type}`);
             // Derived in one tested place — see popup/stream-state.ts. Inline, this
-            // collapsed to green/"synced" for every enabled type whenever a sync wasn't
+            // collapsed to blue/"synced" for every enabled type whenever a sync wasn't
             // running, including before the first one and right after a failure.
             const ss = streamState(
               streamInputFor(type, {

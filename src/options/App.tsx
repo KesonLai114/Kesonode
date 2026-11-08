@@ -40,9 +40,8 @@ import { ConflictsSection } from "@/options/conflicts-section";
 // Shown in the About section. The manifest is the single source of truth for the
 // version — bump `package.json` and the build stamps it into the manifest.
 const APP_VERSION = browser.runtime.getManifest().version;
-// The store this install came from, for the rating row under Feedback. The row is always
-// there; following it also ends the popup's one-time card (lib/rate-prompt.ts), so nobody
-// is asked for a rating they already gave. Null on a build no store knows.
+// A self-built package has no store listing of its own, so reviewPageFor() answers null
+// and the rating row/card stay hidden. Kept so a future listing needs one change, not two.
 const REVIEW_PAGE = reviewPageFor(browser.runtime.id);
 
 function useScrollEdges<T extends HTMLElement>(axis: "x" | "y", revision: unknown = 0) {
@@ -81,11 +80,18 @@ function useScrollEdges<T extends HTMLElement>(axis: "x" | "y", revision: unknow
 }
 
 
-// Kesonode brand mark — the glyph only; the container supplies the green tile.
+// Kesonode brand mark — the glyph only; the container supplies the blue tile.
+// Mirrors the sync arrows + node in public/icons/icon.svg.
 function BrandMark({ size = 14, color = "currentColor" }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="48 48 160 160" fill="none" aria-hidden="true">
-      <path d="M152 192C152 196.418 155.582 200 160 200H192C196.418 200 200 196.418 200 192V157.601C200 154.322 197.342 151.664 194.063 151.664H178.723C176.899 151.664 175.231 150.635 174.413 149.005C170.523 141.251 172.071 131.874 178.249 125.783L198.313 105.999C199.392 104.935 200 103.482 200 101.966V64C200 59.5817 196.418 56 192 56H157.119C153.998 56 151.163 57.8143 149.855 60.6475L107.816 151.732C106.917 153.679 104 153.039 104 150.894V111.329C104 106.91 100.418 103.329 96 103.329H64C59.5817 103.329 56 106.91 56 111.329V192C56 196.418 59.5817 200 64 200H100.67C102.801 200 104.845 199.149 106.346 197.637L141.743 161.993C145.516 158.193 152 160.866 152 166.221V192Z" fill={color} />
+      <g stroke={color} strokeWidth={22} strokeLinecap="round" fill="none">
+        <path d="M69.73 106.79 A62 62 0 0 1 186.27 106.79" />
+        <path d="M186.27 149.21 A62 62 0 0 1 69.73 149.21" />
+      </g>
+      <path d="M198.49 102.34 L193.11 125.59 L174.05 111.24 Z" fill={color} />
+      <path d="M57.51 153.66 L62.89 130.41 L81.95 144.76 Z" fill={color} />
+      <rect x="111" y="111" width="34" height="34" rx="10" fill={color} />
     </svg>
   );
 }
@@ -97,7 +103,8 @@ import { isSafeContentUrl } from "@/lib/utils/url";
 import { defaultOtherRootId } from "@/lib/utils/bookmark-roots";
 import { browser, currentStore } from "@/lib/utils/ext";
 import { missingLocally, installOrSearchUrl, storeUrlFor, inferStore, STORE_NAME, type LocalExtLike } from "@/lib/utils/extensions-match";
-import { BACKEND_LABEL, PERMISSION_LOST_PREFIX, STATE_UPDATE } from "@/lib/constants";
+import { BACKEND_LABEL, FORK_LINKS, PERMISSION_LOST_PREFIX, STATE_UPDATE } from "@/lib/constants";
+import { folderPathFor } from "@/lib/compat/protocol";
 import {
   providerCards, providerById, providerFromConfig, providerLabel, nextcloudUrl, nextcloudBaseFromUrl, pcloudRegionOf,
   webdavUrlForCard,
@@ -381,6 +388,8 @@ export default function OptionsApp() {
   const [exportStatus, setExportStatus] = useState<"idle" | "ok" | "error">("idle");
   const [importStatus, setImportStatus] = useState<"idle" | "ok" | "error">("idle");
   const [importCount, setImportCount] = useState(0);
+  const [configExportStatus, setConfigExportStatus] = useState<"idle" | "ok" | "error">("idle");
+  const [configImportStatus, setConfigImportStatus] = useState<"idle" | "ok" | "error">("idle");
 
   // Extensions diff
   const [remoteExtensions, setRemoteExtensions] = useState<SyncExtension[] | null>(null);
@@ -1270,6 +1279,58 @@ export default function OptionsApp() {
     } catch {
       setImportStatus("error");
       setTimeout(() => setImportStatus("idle"), 3000);
+    }
+  };
+
+  // ─── Settings backup ──────────────────────────────────────────────────
+
+  const exportConfig = async () => {
+    setConfigExportStatus("idle");
+    const sent = await request({ type: "EXPORT_SETTINGS" });
+    if (!sent.ok || sent.res.type !== "SETTINGS_BACKUP") {
+      setConfigExportStatus("error");
+      setTimeout(() => setConfigExportStatus("idle"), 3000);
+      return;
+    }
+    try {
+      const blob = new Blob([JSON.stringify(sent.res.payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kesonode-settings-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setConfigExportStatus("ok");
+      setTimeout(() => setConfigExportStatus("idle"), 3000);
+    } catch {
+      setConfigExportStatus("error");
+      setTimeout(() => setConfigExportStatus("idle"), 3000);
+    }
+  };
+
+  const importConfig = async (file: File) => {
+    setConfigImportStatus("idle");
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      const sent = await request({ type: "IMPORT_SETTINGS", payload: parsed });
+      if (!sent.ok) {
+        setConfigImportStatus("error");
+        setTimeout(() => setConfigImportStatus("idle"), 3000);
+        return;
+      }
+      // The worker has already reinitialised the engine; bring this page's copy of the
+      // settings, and the Drive account chip, in line with what it just wrote.
+      await load();
+      const r = await browser.storage.local.get(KEYS.GDRIVE_SESSION);
+      const s = r[KEYS.GDRIVE_SESSION] as { email?: string; displayName?: string } | undefined;
+      setGdriveUser(s ? { email: s.email ?? "", displayName: s.displayName ?? "" } : null);
+      setConfigImportStatus("ok");
+      setTimeout(() => setConfigImportStatus("idle"), 4000);
+    } catch {
+      setConfigImportStatus("error");
+      setTimeout(() => setConfigImportStatus("idle"), 3000);
     }
   };
 
@@ -2588,50 +2649,87 @@ export default function OptionsApp() {
                     />
                   </label>
                 </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_cfg_export_label")}</div>
+                      <div className="row-desc">{t("opt_cfg_export_desc")}</div>
+                    </div>
+                  </div>
+                  <button className="btn-secondary" onClick={exportConfig}>
+                    {configExportStatus === "ok" ? <><CheckCircle2 size={12} /> {t("opt_exported")}</> :
+                     configExportStatus === "error" ? <><XCircle size={12} /> {t("opt_export_failed")}</> :
+                     t("opt_export")}
+                  </button>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_cfg_import_label")}</div>
+                      <div className="row-desc">{t("opt_cfg_import_desc")}</div>
+                    </div>
+                  </div>
+                  <label className="btn-secondary" style={{ cursor: "pointer" }}>
+                    {configImportStatus === "ok" ? <><CheckCircle2 size={12} /> {t("opt_import_done")}</> :
+                     configImportStatus === "error" ? <><XCircle size={12} /> {t("opt_import_bad_file")}</> :
+                     t("opt_import")}
+                    <input
+                      type="file" accept=".json" style={{ display: "none" }}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) importConfig(f); e.target.value = ""; }}
+                    />
+                  </label>
+                </div>
               </div>
 
-              <div className="settings-section">
-                <div className="settings-card-head">
-                  {t("opt_feedback_section")}
-                  <span className="head-sub">{t("opt_feedback_section_sub")}</span>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-left">
-                    <div>
-                      <div className="row-label">{t("opt_report_label")}</div>
-                      <div className="row-desc">{t("opt_report_desc")}</div>
-                    </div>
+              {(FORK_LINKS.issues || FORK_LINKS.email || REVIEW_PAGE) && (
+                <div className="settings-section">
+                  <div className="settings-card-head">
+                    {t("opt_feedback_section")}
+                    <span className="head-sub">{t("opt_feedback_section_sub")}</span>
                   </div>
-                  <a className="link-external" href="https://github.com/konabe-studio/konode/issues" target="_blank" rel="noreferrer">
-                    <Github size={12} /> {t("opt_open_issues")} <ExternalLink size={10} />
-                  </a>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-left">
-                    <div>
-                      <div className="row-label">{t("opt_email_label")}</div>
-                      <div className="row-desc">{t("opt_email_desc")}</div>
-                    </div>
-                  </div>
-                  <a className="link-external" href="mailto:konabe@proton.me">
-                    <Mail size={12} /> konabe@proton.me
-                  </a>
-                </div>
-                {REVIEW_PAGE && (
-                  <div className="settings-row">
-                    <div className="settings-row-left">
-                      <div>
-                        <div className="row-label">{t("opt_rate_label")}</div>
-                        <div className="row-desc">{t("opt_rate_desc")}</div>
+                  {FORK_LINKS.issues && (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div>
+                          <div className="row-label">{t("opt_report_label")}</div>
+                          <div className="row-desc">{t("opt_report_desc")}</div>
+                        </div>
                       </div>
+                      <a className="link-external" href={FORK_LINKS.issues} target="_blank" rel="noreferrer">
+                        <Github size={12} /> {t("opt_open_issues")} <ExternalLink size={10} />
+                      </a>
                     </div>
-                    <a className="link-external" href={REVIEW_PAGE.url} target="_blank" rel="noreferrer"
-                      onClick={() => void setRateAnswered(new Date().toISOString())}>
-                      <Star size={12} /> {REVIEW_PAGE.store} <ExternalLink size={10} />
-                    </a>
-                  </div>
-                )}
-              </div>
+                  )}
+                  {FORK_LINKS.email && (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div>
+                          <div className="row-label">{t("opt_email_label")}</div>
+                          <div className="row-desc">{t("opt_email_desc")}</div>
+                        </div>
+                      </div>
+                      <a className="link-external" href={`mailto:${FORK_LINKS.email}`}>
+                        <Mail size={12} /> {FORK_LINKS.email}
+                      </a>
+                    </div>
+                  )}
+                  {REVIEW_PAGE && (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div>
+                          <div className="row-label">{t("opt_rate_label")}</div>
+                          <div className="row-desc">{t("opt_rate_desc")}</div>
+                        </div>
+                      </div>
+                      <a className="link-external" href={REVIEW_PAGE.url} target="_blank" rel="noreferrer"
+                        onClick={() => void setRateAnswered(new Date().toISOString())}>
+                        <Star size={12} /> {REVIEW_PAGE.store} <ExternalLink size={10} />
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="settings-section">
                 <div className="settings-card-head">{t("opt_developer_section")}</div>
@@ -2648,6 +2746,42 @@ export default function OptionsApp() {
               </div>
 
               <div className="settings-section">
+                <div className="settings-card-head">{t("opt_compat_section")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_compat_mode_label")}</div>
+                      <div className="row-desc">{t("opt_compat_mode_desc")}</div>
+                    </div>
+                  </div>
+                </div>
+                {([
+                  { value: "upstream",   labelKey: "opt_compat_mode_upstream" },
+                  { value: "isolated",   labelKey: "opt_compat_mode_isolated" },
+                  { value: "standalone", labelKey: "opt_compat_mode_standalone" },
+                ] as const).map(({ value, labelKey }) => (
+                  <label key={value} className="settings-row radio-row">
+                    <div className="settings-row-left">
+                      <div><div className="row-label">{t(labelKey)}</div></div>
+                    </div>
+                    <input type="radio" name="compat" className="radio-input"
+                      value={value} checked={(settings.compat_mode ?? "upstream") === value}
+                      onChange={() => update({ compat_mode: value })} />
+                    <span className="radio-circle" aria-hidden="true" />
+                  </label>
+                ))}
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_compat_folder_label")}</div>
+                      <div className="row-desc">{t("opt_compat_folder_desc")}</div>
+                    </div>
+                  </div>
+                  <span className="mono-value">{folderPathFor(settings.compat_mode)}</span>
+                </div>
+              </div>
+
+              <div className="settings-section">
                 <div className="settings-card-head">{t("opt_about_section")}</div>
                 <div className="settings-row">
                   <div className="settings-row-left"><div><div className="row-label">{t("opt_version_label")}</div></div></div>
@@ -2657,9 +2791,13 @@ export default function OptionsApp() {
                   <div className="settings-row-left">
                     <div><div className="row-label">{t("opt_source_label")}</div><div className="row-desc">{t("opt_source_desc")}</div></div>
                   </div>
-                  <a href="https://github.com/konabe-studio/konode" target="_blank" rel="noreferrer" className="link-external">
-                    <Github size={12} /> GitHub <ExternalLink size={10} />
-                  </a>
+                  {FORK_LINKS.repository ? (
+                    <a href={FORK_LINKS.repository} target="_blank" rel="noreferrer" className="link-external">
+                      <Github size={12} /> GitHub <ExternalLink size={10} />
+                    </a>
+                  ) : (
+                    <span className="mono-value">{t("opt_source_bundled")}</span>
+                  )}
                 </div>
               </div>
 
@@ -2711,7 +2849,7 @@ const STYLES = `
      tabbar (overflow-x:auto below). */
   .topbar-inner { display: flex; align-items: center; justify-content: flex-start; gap: var(--sp-xl); width: 100%; max-width: var(--content-max); height: 100%; padding: 0 var(--sp-xl); }
   .topbar-brand { display: flex; align-items: center; gap: var(--sp-ms); flex-shrink: 0; }
-  .topbar-logo { width: 24px; height: 24px; background: var(--accent); border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0; }
+  .topbar-logo { width: 24px; height: 24px; background: var(--brand-tile); border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0; }
   .topbar-title { font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); }
   .tabbar { display: flex; align-items: stretch; height: 100%; gap: var(--sp-3xs); overflow-x: auto; scrollbar-width: none; }
   .tabbar::-webkit-scrollbar { display: none; }
@@ -2774,7 +2912,7 @@ const STYLES = `
   .backend-card.selected { background: var(--bg-card-sel); }
   .backend-card-header { display: flex; align-items: flex-start; gap: var(--sp-md); }
   .backend-icon-wrap { width: 30px; height: 30px; background: var(--bg-hover); border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); flex-shrink: 0; margin-top: 1px; }
-  .backend-card.selected .backend-icon-wrap { background: var(--accent); color: white; }
+  .backend-card.selected .backend-icon-wrap { background: var(--accent-solid); color: var(--on-accent); }
   .backend-info { flex: 1; min-width: 0; }
   .backend-name { display: flex; align-items: center; gap: var(--sp-xs); font-size: var(--fs-sm); color: var(--text-primary); margin-bottom: var(--sp-3xs); }
   .backend-desc { font-size: var(--fs-xs); color: var(--text-secondary); line-height: 1.4; }
@@ -2796,9 +2934,9 @@ const STYLES = `
   .field-label .optional { opacity: .7; }
   .field-input { width: 100%; padding: var(--sp-sm) var(--sp-md); background: var(--bg-input); border: 1px solid var(--border-input); border-radius: var(--r-md); font-family: var(--font); font-size: var(--fs-sm); color: var(--text-primary); outline: none; transition: border-color .15s, box-shadow .15s; }
   .field-input.mono { font-family: var(--font-mono); font-size: var(--fs-xs); }
-  .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(18,183,106,.18); }
+  .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37,99,235,.18); }
   .field-input-inline { padding: var(--sp-sm) var(--sp-ms); width: 180px; background: var(--bg-input); border: 1px solid var(--border-input); border-radius: var(--r-md); font-family: var(--font); font-size: var(--fs-sm); color: var(--text-primary); outline: none; }
-  .field-input-inline:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(18,183,106,.18); }
+  .field-input-inline:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37,99,235,.18); }
 
   .input-pw-wrap { position: relative; }
   .input-pw-wrap /* Not spacing: room for the icon buttons that sit INSIDE the field (three of them on
@@ -2924,7 +3062,7 @@ const STYLES = `
 
   .setup-card { margin-bottom: var(--sp-xl); padding: var(--sp-lg); background: var(--accent-light); border: 1px solid var(--accent); border-radius: var(--r-md); }
   .setup-card-head { display: flex; align-items: flex-start; gap: var(--sp-md); }
-  .setup-card-mark { width: 30px; height: 30px; border-radius: var(--r-sm); background: var(--accent-solid); color: var(--on-accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .setup-card-mark { width: 30px; height: 30px; border-radius: var(--r-sm); background: var(--brand-tile); color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .setup-card-title { font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); margin-bottom: var(--sp-3xs); }
   .setup-card-sub { font-size: var(--fs-xs); color: var(--text-secondary); line-height: 1.5; }
   .setup-steps { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-sm); }

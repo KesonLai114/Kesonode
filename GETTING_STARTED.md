@@ -18,14 +18,11 @@ adding a second device.
 
 ## Install
 
-- **Chrome / Brave / Helium / other Chromium browsers**: install from the
-  [Chrome Web Store](https://chromewebstore.google.com/detail/konode/mmlfiiimnpnjcjhhbldenpcmnibedkfa).
-- **Firefox / Waterfox**: install from
-  [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/konode/).
-
-You can also build and load Kesonode yourself; see **Build from source** in the
-[README](README.md). Those builds need your own Google OAuth client for Drive sync,
-while GitHub and WebDAV work as they do in the store builds.
+Kesonode is distributed as a local package, not through any extension store. Pick a
+version folder under [`插件版本/`](插件版本/) and follow its
+[中文安装说明](插件版本/安装说明.md). You can also build and load Kesonode yourself;
+see **Build from source** in the [README](README.md). Source builds need your own Google
+OAuth client for Drive sync, while GitHub and WebDAV need no extra setup.
 
 Kesonode opens its setup wizard in a new tab as soon as it's installed, so there's nothing to
 go looking for. Afterwards, click the Kesonode icon for the popup, or open the options page to
@@ -58,7 +55,8 @@ if you enable encryption, the **same passphrase**) to sync together.
 2. Sign in to your Google account and approve access.
 3. That's it. Kesonode uses the `drive.file` scope, so it can only see and touch the
    files it creates, never the rest of your Drive. It writes a small set of JSON files
-   to a `Konode` folder.
+   to a sync folder — `Konode` by default, `Kesonode` in **Fully separate** mode
+   (see [Which folder?](README.md#which-folder-three-compatibility-modes)).
 
 > Works on any Chromium browser (Chrome, Brave, Helium, ungoogled-chromium) and on
 > Firefox. The sign-in uses a browser-agnostic flow, not Chrome-only Google
@@ -93,7 +91,8 @@ if you enable encryption, the **same passphrase**) to sync together.
    requests every 30 minutes, so with three or more devices raise **Sync interval** to 120
    seconds under Settings → Device; the card says so too.
 4. Plain `http://` is rejected for security (except `http://localhost`). Kesonode creates a
-   `konode/` folder for its files.
+   sync folder for its files: `konode/` by default, `kesonode/` in **Fully separate**
+   mode (see [Which folder?](README.md#which-folder-three-compatibility-modes)).
 
 ## Choosing what to sync
 
@@ -132,9 +131,14 @@ Optional, and a conscious choice. It's **off by default**.
 
 ## How syncing works
 
-- Each device writes one file per data type to your backend
-  (`konode_<type>_<device_id>.json`). Every sync pulls in each other device's file,
-  merges it, and pushes the result back.
+- Each device writes one file per data type to your backend. Every sync pulls in each
+  other device's file, merges it, and pushes the result back. Both the folder name and
+  the file prefix come from the compatibility mode under Settings → Advanced:
+  `konode/` + `konode_<type>_<device_id>.json` in **Upstream** (the default, so existing
+  data stays compatible), `konode/` + `kesonode_*` in **Own file names**, and
+  `kesonode/` + `kesonode_*` in **Fully separate**. Every device in one sync group must
+  pick the same mode, and switching does not move files that are already there —
+  see [Which folder?](README.md#which-folder-three-compatibility-modes).
 - **Edit a bookmark and this device uploads in about a second.** Other devices pick it up
   on their next scheduled pull, every 60 seconds by default (adjustable from 30 to 600
   under Settings → Device; 30s is the browser's minimum for a background check). History,
@@ -148,5 +152,5 @@ Optional, and a conscious choice. It's **off by default**.
   the rest an arriving page is stamped with the moment it reached you. Visit counts can't
   be restored on either. Treat history as a synced list, not a faithful timeline.
 
-Stuck on something? See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) or
-[open an issue](https://github.com/konabe-studio/konode/issues).
+Stuck on something? See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) and the
+[中文安装说明](插件版本/安装说明.md).

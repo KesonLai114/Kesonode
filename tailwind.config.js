@@ -17,9 +17,9 @@ export default {
           strong: "#ffffff2e",
         },
         accent: {
-          DEFAULT: "#6ee7b7",
-          dim: "#6ee7b730",
-          muted: "#6ee7b760",
+          DEFAULT: "#60a5fa",
+          dim: "#60a5fa30",
+          muted: "#60a5fa60",
         },
         warn: "#fbbf24",
         danger: "#f87171",
@@ -64,7 +64,7 @@ export default {
         "spin-slow": "spin 3s linear infinite",
         "fade-in": "fadeIn 0.3s ease forwards",
         "slide-up": "slideUp 0.3s ease forwards",
-        "konode-pulse": "konode-pulse 2s ease-out infinite",
+        "kesonode-pulse": "kesonode-pulse 2s ease-out infinite",
       },
       keyframes: {
         fadeIn: {
@@ -75,14 +75,14 @@ export default {
           "0%": { opacity: "0", transform: "translateY(6px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
-        "konode-pulse": {
+        "kesonode-pulse": {
           "0%": { transform: "scale(1)", opacity: "0.45" },
           "70%,100%": { transform: "scale(3.2)", opacity: "0" },
         },
       },
       boxShadow: {
-        glow: "0 0 20px rgba(110, 231, 183, 0.15)",
-        "glow-sm": "0 0 8px rgba(110, 231, 183, 0.1)",
+        glow: "0 0 20px rgba(59, 130, 246, 0.15)",
+        "glow-sm": "0 0 8px rgba(59, 130, 246, 0.1)",
       },
     },
   },

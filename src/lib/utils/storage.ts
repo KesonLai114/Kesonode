@@ -17,9 +17,11 @@ import type {
   SyncSettings,
   SyncState,
   Tombstone,
+  SettingsBackup,
 } from "@/lib/types";
 import { browser } from "@/lib/utils/ext";
 import { BACKEND_LABEL } from "@/lib/constants";
+import { setCompatMode } from "@/lib/compat/protocol";
 import { inferStore, storeUrlFor } from "@/lib/utils/extensions-match";
 import { canonicalUrlKey } from "@/lib/utils/url";
 import { sanitizeExclusions } from "@/lib/utils/bookmark-exclusions";
@@ -260,7 +262,111 @@ export async function saveSettings(partial: Partial<SyncSettings>): Promise<Sync
   const current = await getSettings();
   const next = { ...current, ...partial };
   await set(KEYS.SETTINGS, next);
+  // A mode change has to take effect in THIS worker, not after the next service-worker
+  // wake: the naming helpers the backends use read the active mode at call time.
+  setCompatMode(next.compat_mode);
   return next;
+}
+
+// ─── Settings backup ───────────────────────────────────────────────────────
+
+/**
+ * Carry configuration across an extension-ID change.
+ *
+ * chrome.storage.local is isolated per extension ID. An unpacked build with no pinned
+ * manifest `key` derives its ID from the folder it was loaded from, so moving to a new
+ * version folder gives Chrome a brand-new (empty) storage area. These two functions are
+ * the bridge: export from the old ID, import into the new one. They are also the recovery
+ * path for a new browser profile or a reinstall.
+ *
+ * ONLY configuration travels. Tombstones, the bookmark cache, conflict packets, upload
+ * checksums and the sync lock describe what THIS install has already merged; replaying
+ * them onto a fresh install would make a device that has seen nothing claim it had seen
+ * everything. The synced data itself lives in the user's backend and is not in this file.
+ */
+const SETTINGS_BACKUP_FORMAT = "kesonode-settings";
+const SETTINGS_BACKUP_VERSION = 1;
+const SETTINGS_BACKUP_KEYS = [KEYS.GDRIVE_SESSION, KEYS.GDRIVE_FOLDER] as const;
+
+/** Optional fields are absent from DEFAULT_SETTINGS on purpose, so name them explicitly. */
+const BACKUP_SETTINGS_FIELDS: (keyof SyncSettings)[] = [
+  ...(Object.keys(DEFAULT_SETTINGS) as (keyof SyncSettings)[]),
+  "encryption_passphrase",
+  "compat_mode",
+];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export async function exportSettingsBackup(extensionVersion: string): Promise<SettingsBackup> {
+  const raw = await browser.storage.local.get([...SETTINGS_BACKUP_KEYS]);
+  // getSettings() merges the defaults and mints the device id if this install somehow
+  // never had one, so the file is always a complete, restorable configuration.
+  const keys: SettingsBackup["keys"] = { settings: await getSettings() };
+  // Stored verbatim: a future session shape must not need a new backup format.
+  if (raw[KEYS.GDRIVE_SESSION] !== undefined) keys.gdriveSession = raw[KEYS.GDRIVE_SESSION];
+  if (raw[KEYS.GDRIVE_FOLDER] !== undefined) keys.gdriveFolder = raw[KEYS.GDRIVE_FOLDER];
+  return {
+    format: SETTINGS_BACKUP_FORMAT,
+    version: SETTINGS_BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    extensionVersion,
+    keys,
+  };
+}
+
+function readBackup(input: unknown): SettingsBackup {
+  if (
+    !isRecord(input) ||
+    input.format !== SETTINGS_BACKUP_FORMAT ||
+    input.version !== SETTINGS_BACKUP_VERSION ||
+    !isRecord(input.keys)
+  ) {
+    throw new Error("This is not a Kesonode settings backup.");
+  }
+  const settings = input.keys.settings;
+  // device_id names the konode_<type>_<device_id>.json files in the backend. Losing it
+  // would make the restored device publish as a stranger and re-merge everything.
+  if (!isRecord(settings) || typeof settings.device_id !== "string" || !settings.device_id) {
+    throw new Error("The settings backup has no device ID.");
+  }
+  return input as unknown as SettingsBackup;
+}
+
+export async function importSettingsBackup(input: unknown): Promise<SyncSettings> {
+  const backup = readBackup(input);
+  const raw = backup.keys.settings as unknown as Record<string, unknown>;
+
+  // Whitelist, so a hand-edited or foreign file cannot plant arbitrary fields into
+  // konode_settings. Missing fields keep this install's defaults, which is what lets a
+  // backup written by an OLDER version restore on a newer one.
+  const partial: Record<string, unknown> = {};
+  for (const field of BACKUP_SETTINGS_FIELDS) {
+    if (field in raw) partial[field] = raw[field];
+  }
+  // Two fields the sync engine iterates without checking. A wrong shape here would break
+  // every sync, so fall back to the defaults rather than trusting the file.
+  if (!Array.isArray(partial.enabled_types)) partial.enabled_types = DEFAULT_SETTINGS.enabled_types;
+  if (!Array.isArray(partial.backends)) partial.backends = DEFAULT_SETTINGS.backends;
+  partial.excluded_bookmarks = sanitizeExclusions(partial.excluded_bookmarks);
+  // An imported configuration is by definition already set up. Without this the wizard
+  // would open on top of restored accounts and ask for them a second time.
+  partial.onboarding_completed = true;
+
+  const updated = await saveSettings(partial as Partial<SyncSettings>);
+
+  // The Drive refresh token is device-local too, and is what makes "sign in again"
+  // unnecessary after the restore. Clear anything left behind by the previous config
+  // when the backup has no session, so a stale account cannot linger.
+  const writes: Record<string, unknown> = {};
+  if (isRecord(backup.keys.gdriveSession)) writes[KEYS.GDRIVE_SESSION] = backup.keys.gdriveSession;
+  if (backup.keys.gdriveFolder !== undefined) writes[KEYS.GDRIVE_FOLDER] = backup.keys.gdriveFolder;
+  if (Object.keys(writes).length) await browser.storage.local.set(writes);
+  if (!(KEYS.GDRIVE_SESSION in writes)) await browser.storage.local.remove(KEYS.GDRIVE_SESSION);
+  if (!(KEYS.GDRIVE_FOLDER in writes)) await browser.storage.local.remove(KEYS.GDRIVE_FOLDER);
+
+  return updated;
 }
 
 // ─── State ─────────────────────────────────────────────────────────────────

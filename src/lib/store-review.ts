@@ -1,17 +1,14 @@
-// Where this install can be rated, for the "Rate in the store" row in Settings.
+// Where this install can be rated, for the "Rate in the store" row in Settings and the
+// one-time card in the popup.
 //
-// Keyed on the extension's own id, because that is what says which store an install came
-// from: each store assigns its own (Firefox uses the gecko id the manifest pins). An Edge
-// user who installed from the Chrome Web Store carries the Web Store's id, so that is
-// where their rating goes, and where it counts. An id not listed here (the local unpacked
-// build, a Chromium package someone built and loaded themselves) has no store to rate it
-// in, so it gets no row. A self-built Firefox package keeps the gecko id, and AMO is still
-// the right place for it.
+// Kesonode is distributed as a local, self-built package (插件版本/), not through the
+// upstream project's Chrome Web Store / Firefox Add-ons listings. There is therefore no
+// store page of our own to rate: pointing either entry at the upstream listings would
+// send a rating for a different extension, under a different maintainer's name.
 //
-// Edge Add-ons assigns a new id when the listing is created; add it here once it exists
-// (internal/PUBLISHING-EDGE.md, "After certification").
-
-import { STORE_NAME } from "@/lib/utils/extensions-match";
+// The API stays so the caller does not need to know why there is no answer. When Kesonode
+// gets a listing of its own, add it here keyed on the id that store assigns; until then
+// both the Settings row and the popup card stay hidden.
 
 export interface ReviewPage {
   /** The store's own name. A brand, so it is shown as is in every language. */
@@ -19,18 +16,6 @@ export interface ReviewPage {
   url: string;
 }
 
-const PAGES: Record<string, ReviewPage> = {
-  mmlfiiimnpnjcjhhbldenpcmnibedkfa: {
-    store: STORE_NAME.chrome,
-    url: "https://chromewebstore.google.com/detail/konode/mmlfiiimnpnjcjhhbldenpcmnibedkfa/reviews",
-  },
-  // AMO's rating widget is on the listing itself, not on its reviews page.
-  "konabe@proton.me": {
-    store: STORE_NAME.firefox,
-    url: "https://addons.mozilla.org/firefox/addon/konode/",
-  },
-};
-
-export function reviewPageFor(extensionId: string): ReviewPage | null {
-  return PAGES[extensionId] ?? null;
+export function reviewPageFor(_extensionId: string): ReviewPage | null {
+  return null;
 }

@@ -1,4 +1,23 @@
 {
+  "opt_compat_section": {
+    "message": "Совместимость с исходной версией",
+    "description": "Settings section heading for the compatibility mode switch."
+  },
+  "opt_compat_mode_label": {
+    "message": "Куда это устройство публикует данные"
+  },
+  "opt_compat_mode_desc": {
+    "message": "Все устройства одной группы синхронизации должны выбрать один режим. Переключение не переносит существующие файлы: новая папка начинается пустой, и это устройство заново загружает свои данные."
+  },
+  "opt_compat_mode_upstream": {
+    "message": "Как у оригинала (по умолчанию) — папка konode + файлы konode_*"
+  },
+  "opt_compat_mode_isolated": {
+    "message": "Свои имена файлов — папка konode + файлы kesonode_*"
+  },
+  "opt_compat_mode_standalone": {
+    "message": "Полностью отдельно — папка Kesonode + файлы kesonode_*"
+  },
   "locale_bcp47": {
     "message": "ru"
   },
@@ -678,7 +697,16 @@
     "message": "(необязательно)"
   },
   "opt_drive_folder_placeholder": {
-    "message": "Оставьте пустым, чтобы автоматически создать папку «Konode»"
+    "message": "Оставьте пустым, чтобы папка синхронизации создалась автоматически"
+  },
+  "opt_compat_folder_label": {
+    "message": "Имя папки синхронизации"
+  },
+  "opt_compat_folder_desc": {
+    "message": "Имя справа зависит от режима. `konode` (`Konode` в Google Drive) — фиксированное имя исходной версии; `kesonode` (`Kesonode` в Drive) создаёт отдельную группу синхронизации."
+  },
+  "opt_source_bundled": {
+    "message": "Входит в этот пакет"
   },
   "opt_region_label": {
     "message": "Регион"
@@ -1582,6 +1610,18 @@
   },
   "opt_import_error": {
     "message": "Ошибка"
+  },
+  "opt_cfg_export_label": {
+    "message": "Экспорт настроек"
+  },
+  "opt_cfg_export_desc": {
+    "message": "Сохраняет учётные данные хранилищ, пароль шифрования и ID устройства в JSON-файл. Файл содержит учётные данные в открытом виде — храните его в надёжном месте."
+  },
+  "opt_cfg_import_label": {
+    "message": "Импорт настроек"
+  },
+  "opt_cfg_import_desc": {
+    "message": "Восстанавливает конфигурацию после обновления без повторной настройки. Заменяет текущие настройки."
   },
   "opt_feedback_section": {
     "message": "Обратная связь"

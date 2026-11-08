@@ -3,6 +3,7 @@ import { withRetry, HttpError, rateLimitMessage } from "@/lib/utils/retry";
 import { logger } from "@/lib/utils/logger";
 import { isSecureBackendUrl } from "@/lib/utils/url";
 import { utf8ToBase64 } from "@/lib/utils/base64";
+import { folderPath, isPeerFileName, packetFileName, peerDeviceIdFromName } from "@/lib/compat/protocol";
 
 const INSECURE_URL_MSG =
   "WebDAV over plain http:// is not allowed. Your username and password would be sent unencrypted on every request. Use an https:// URL (http is permitted only for localhost).";
@@ -47,7 +48,7 @@ export class WebDAVBackend implements IBackend {
   }
 
   private get baseUrl(): string {
-    return this.w.url.replace(/\/$/, "") + "/" + (this.w.path ?? "konode").replace(/^\//, "");
+    return this.w.url.replace(/\/$/, "") + "/" + (this.w.path ?? folderPath()).replace(/^\//, "");
   }
 
   /**
@@ -181,7 +182,7 @@ export class WebDAVBackend implements IBackend {
 
   async upload(packet: SyncPacket): Promise<void> {
     await withRetry(async () => {
-      const name = `konode_${packet.data_type}_${packet.device_id}.json`;
+      const name = packetFileName(packet.data_type, packet.device_id);
       const res = await fetch(`${this.baseUrl}/${name}`, {
         method: "PUT",
         headers: this.headers(),
@@ -216,10 +217,7 @@ export class WebDAVBackend implements IBackend {
       const xml = await res.text();
       // Extract hrefs from PROPFIND response. Match any namespace prefix
       // (d:href, D:href, lp1:href, or bare href) — servers differ.
-      const own = excludeDeviceId ? `konode_${data_type}_${excludeDeviceId}.json` : null;
-      // Compare the DECODED basename exactly — hrefs can be percent-encoded and an
-      // `endsWith(own)` substring check could both miss our own file and wrongly
-      // exclude a peer whose name ends with the same suffix.
+      // Compare the DECODED basename exactly — hrefs can be percent-encoded.
       const basename = (h: string): string => {
         try { return decodeURIComponent(h).split("/").pop() ?? ""; }
         catch { return h.split("/").pop() ?? ""; }
@@ -228,7 +226,10 @@ export class WebDAVBackend implements IBackend {
         .map(m => m[1])
         .filter(h => {
           const name = basename(h);
-          return name.startsWith(`konode_${data_type}_`) && name.endsWith(".json") && name !== own;
+          if (!isPeerFileName(name, data_type)) return false;
+          // Exclude by DEVICE ID, not by exact file name: an isolated-mode device may
+          // still find its own old upstream file in the folder.
+          return !(excludeDeviceId && peerDeviceIdFromName(name, data_type) === excludeDeviceId);
         });
 
       const packets: SyncPacket[] = [];

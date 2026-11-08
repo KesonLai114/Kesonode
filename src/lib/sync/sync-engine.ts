@@ -1,5 +1,5 @@
 import type { SyncSettings, SyncState, DataType, SyncPacket, SyncSession, SyncExtension, ConflictItem, BackendConfig,
-  DeviceInfo, DeviceBrowser, ConflictDiff,
+  DeviceInfo, DeviceBrowser, ConflictDiff, ListedFile,
 } from "@/lib/types";
 import { createBackend } from "@/lib/backends/abstract-backend";
 import { normalizeRepoSlug } from "@/lib/backends/github-backend";
@@ -45,6 +45,18 @@ import { logger } from "@/lib/utils/logger";
 import { noteCleanSync } from "@/lib/rate-prompt";
 import { PERMISSION_LOST_PREFIX } from "@/lib/constants";
 import { encrypt, decrypt, sha256, verifyPassphrase } from "@/lib/crypto/encryption";
+import {
+  CURRENT_PACKET_VERSION,
+  assertSupportedPacketVersion,
+  deviceFilePattern,
+  folderPath,
+  getCompatMode,
+  listPrefixes,
+  packetFileName,
+  peerDeviceIdFromName,
+  readPrefixes,
+  setCompatMode,
+} from "@/lib/compat/protocol";
 import { ConflictResolver, notifyConflict, orderPeersByTime } from "./conflict-resolver";
 
 // How long the persisted sync lock stays valid before it's treated as stale, so a
@@ -338,6 +350,9 @@ export class SyncEngine {
     private onStateChange: (state: SyncState) => void
   ) {
     this.resolver = new ConflictResolver(settings.conflict_strategy);
+    // Settings are the source of truth for the namespace this device writes. An old
+    // settings blob has no compat_mode, which resolves to "upstream".
+    setCompatMode(settings.compat_mode);
   }
 
   async updateSettings(settings: SyncSettings): Promise<void> {
@@ -351,6 +366,7 @@ export class SyncEngine {
       this.settings.encryption_passphrase !== settings.encryption_passphrase;
     this.settings = settings;
     this.resolver.updateStrategy(settings.conflict_strategy);
+    setCompatMode(settings.compat_mode);
     if (encChanged) await clearUploadChecksums();
   }
 
@@ -701,7 +717,7 @@ export class SyncEngine {
     this.ownFilesMissing = new Set();
     let names: string[];
     try {
-      names = await backend.listFiles("konode_");
+      names = (await Promise.all(listPrefixes().map((p) => backend.listFiles(p)))).flat();
     } catch (err) {
       // Still not fatal, but no longer silent. Saying nothing left this safety net switched
       // off while the Activity log showed a clean sync, so a device whose own file had been
@@ -729,7 +745,7 @@ export class SyncEngine {
     }
     const present = new Set(names);
     for (const dataType of types) {
-      if (present.has(`konode_${dataType}_${this.settings.device_id}.json`)) continue;
+      if (present.has(packetFileName(dataType, this.settings.device_id))) continue;
       // Nothing recorded means we have never uploaded this type, so there is nothing that
       // has gone missing — leave the normal first-upload path to handle it.
       if ((await getLastUploadChecksum(dataType)) === null) continue;
@@ -848,33 +864,50 @@ export class SyncEngine {
       // them across its files (#30). The packet read below still names the device, but its
       // timestamp is only the date of whichever file was cheapest to read, and an extension
       // list unchanged for days froze the row of a device that uploads bookmarks every minute.
-      const listed = b.listFilesWithTimes
-        ? await b.listFilesWithTimes("konode_")
-        : (await b.listFiles("konode_")).map((name) => ({ name, modified: null }));
-      const types = new Map<string, Set<DataType>>();
+      // One listing per readable namespace: isolated mode still sees upstream peers.
+      const listed: ListedFile[] = [];
+      for (const prefix of listPrefixes()) {
+        const part = b.listFilesWithTimes
+          ? await b.listFilesWithTimes(prefix)
+          : (await b.listFiles(prefix)).map((name) => ({ name, modified: null }));
+        listed.push(...part);
+      }
+      const deviceFiles = new Map<string, Map<DataType, string>>();
       const newestUpload = new Map<string, number>();
+      const pattern = deviceFilePattern();
       for (const { name, modified } of listed) {
-        // konode_snap_* files live alongside these and are not per-device, so match the
-        // four data types by name rather than accepting anything with an id in it.
-        const m = /^konode_(bookmarks|history|sessions|extensions)_(.+)\.json$/.exec(name);
+        // Snapshot files live alongside these and are not per-device, so match the four
+        // data types by name rather than accepting anything with an id in it.
+        const m = pattern.exec(name);
         if (!m) continue;
-        const set = types.get(m[2]) ?? new Set<DataType>();
-        set.add(m[1] as DataType);
-        types.set(m[2], set);
-        if (modified !== null) newestUpload.set(m[2], Math.max(newestUpload.get(m[2]) ?? 0, modified));
+        const deviceId = m[2];
+        let perType = deviceFiles.get(deviceId);
+        if (!perType) { perType = new Map(); deviceFiles.set(deviceId, perType); }
+        // Remember the ACTUAL file name: in isolated mode a peer may live under either
+        // prefix, and rebuilding the name would look in the wrong namespace.
+        perType.set(m[1] as DataType, name);
+        if (modified !== null) newestUpload.set(deviceId, Math.max(newestUpload.get(deviceId) ?? 0, modified));
       }
 
       // Smallest first: an extension list is a few KB, a session a few more, a bookmark
       // tree tens, history can be megabytes.
       const CHEAPEST: DataType[] = ["extensions", "sessions", "bookmarks", "history"];
       const out: DeviceInfo[] = [];
-      for (const [device_id, set] of types) {
-        const pick = CHEAPEST.find((t) => set.has(t));
+      for (const [device_id, files] of deviceFiles) {
+        const isSelf = device_id === this.settings.device_id;
         let label: string | null = null;
         let lastSeen: string | null = null;
         let browserInfo: DeviceBrowser | null = null;
-        if (pick) {
-          const name = `konode_${pick}_${device_id}.json`;
+        // The smallest file is often the OLDEST: an extension list that never changes was
+        // written by whichever build first set the device up, before packets carried a
+        // name. Try the next smallest before calling the device unnamed. A history packet
+        // can be megabytes, so it is read only when it is the device's only file (#30).
+        const candidates = CHEAPEST.filter((t) => files.has(t));
+        const small = candidates.filter((t) => t !== "history");
+        for (const type of small.length ? small : candidates) {
+          const name = files.get(type);
+          if (!name) continue;
+          let p: Partial<SyncPacket>;
           try {
             const raw = await b.getFile(name);
             if (raw === null) {
@@ -882,26 +915,32 @@ export class SyncEngine {
               // problem, not an old peer. Without saying so, an unreadable file and a
               // pre-name build look identical: both just show up as unnamed.
               logger.warn("listDevices", `${name} is in the folder listing but came back empty, so that device has no name here`);
-            } else {
-              const p = JSON.parse(raw) as Partial<SyncPacket>;
-              label = p.device_label ?? null;
-              lastSeen = p.timestamp ?? null;
-              browserInfo = readDeviceBrowser(p.device_browser);
-              if (!label) {
-                logger.info("listDevices", `${name} carries no device name yet; it will once that device syncs on a build that sends one`);
-              }
+              break;
             }
+            p = JSON.parse(raw) as Partial<SyncPacket>;
           } catch (err) {
             logger.warn("listDevices", `Couldn't read ${name} (${err instanceof Error ? err.message : err}), so that device has no name here`);
+            break;
           }
+          if (!lastSeen) lastSeen = p.timestamp ?? null;
+          browserInfo ??= readDeviceBrowser(p.device_browser);
+          if (p.device_label) { label = p.device_label; break; }
         }
+        if (!label && !isSelf) {
+          logger.info("listDevices", `${device_id.slice(0, 8)} has no device name in any of its files; it will once that device syncs on a build that sends one`);
+        }
+        // This device's name lives here, in settings, and is always the freshest thing we
+        // have: the list reads a packet off the backend, which can be days old or written
+        // by a build that never sent a name. What the user typed in Settings → Device is
+        // the answer for this machine, whatever its files happen to say.
+        if (isSelf) label = this.settings.device_label || null;
         const uploadedAt = newestUpload.get(device_id);
         if (uploadedAt !== undefined) lastSeen = new Date(uploadedAt).toISOString();
         out.push({
           device_id, label, lastSeen,
           browser: browserInfo,
-          types: [...set].sort(),
-          isSelf: device_id === this.settings.device_id,
+          types: [...files.keys()].sort(),
+          isSelf,
         });
       }
       // This device first, then the rest newest-seen first; nameless ones sink to the end.
@@ -932,8 +971,11 @@ export class SyncEngine {
     const removed = await this.withBackend(async (b) => {
       let n = 0;
       for (const t of ["bookmarks", "history", "sessions", "extensions"] as DataType[]) {
-        try { await b.deleteFile(`konode_${t}_${deviceId}.json`); n++; }
-        catch { /* not every device syncs every type; a missing file is the normal case */ }
+        // Both namespaces when isolated, so forgetting a device leaves no stale peer file.
+        for (const prefix of readPrefixes()) {
+          try { await b.deleteFile(`${prefix}${t}_${deviceId}.json`); n++; }
+          catch { /* not every device syncs every type; a missing file is the normal case */ }
+        }
       }
       return n;
     });
@@ -1024,7 +1066,7 @@ export class SyncEngine {
 
     let names: string[];
     try {
-      names = await backend.listFiles(`konode_${dataType}_`);
+      names = (await Promise.all(listPrefixes(dataType).map((p) => backend.listFiles(p)))).flat();
     } catch (err) {
       // Not knowing what the folder holds is not evidence that anything left it, and an
       // emptied popup is the one outcome worth avoiding here. Say so and change nothing.
@@ -1036,7 +1078,7 @@ export class SyncEngine {
     }
     const present = new Set(
       names
-        .map((n) => new RegExp(`^konode_${dataType}_(.+)\\.json$`).exec(n)?.[1])
+        .map((n) => peerDeviceIdFromName(n, dataType))
         .filter((id): id is string => !!id)
     );
     const gone = unexplained.filter((id) => !present.has(id));
@@ -1395,11 +1437,11 @@ export class SyncEngine {
         return `gdrive:${cfg.gdrive?.folderId ?? "default"}`;
       case "github": {
         const g = cfg.github;
-        return `github:${normalizeRepoSlug(g?.repo)}@${g?.branch ?? "main"}/${g?.path ?? "konode"}`;
+        return `github:${normalizeRepoSlug(g?.repo)}@${g?.branch ?? "main"}/${g?.path ?? folderPath()}`;
       }
       case "webdav": {
         const w = cfg.webdav;
-        return `webdav:${w?.username ?? ""}@${(w?.url ?? "").replace(/\/$/, "")}/${w?.path ?? "konode"}`;
+        return `webdav:${w?.username ?? ""}@${(w?.url ?? "").replace(/\/$/, "")}/${w?.path ?? folderPath()}`;
       }
       default: {
         const _e: never = cfg.type;
@@ -1410,13 +1452,26 @@ export class SyncEngine {
 
   /**
    * The "what this device last uploaded" record for a data type. The plaintext
-   * checksum alone isn't enough: the encryption FORM and the DESTINATION both change
-   * what actually sits on the backend WITHOUT changing the payload, so both are folded
-   * in here. An old tag written by an earlier build matches neither, so an existing
-   * install re-uploads once and then stabilizes — no need to re-save settings.
+   * checksum alone isn't enough: the encryption FORM, the DESTINATION and the DEVICE
+   * NAME all change what actually sits on the backend WITHOUT changing the payload, so
+   * all three are folded in here. An old tag written by an earlier build matches
+   * neither, so an existing install re-uploads once and then stabilizes — no need to
+   * re-save settings.
    */
   private uploadTag(payloadChecksum: string, useE2ee: boolean): string {
-    return `${PACKET_ENVELOPE}|${this.destinationTag()}|${useE2ee ? "enc" : "plain"}:${payloadChecksum}`;
+    // Folding the mode in makes a switch re-upload once into the new namespace instead of
+    // "unchanged since last upload" leaving the new prefix empty for days.
+    const mode = getCompatMode();
+    const suffix = mode === "upstream" ? "" : `|compat:${mode}`;
+    // The name rides on the envelope, so renaming the device in Settings leaves the
+    // payload untouched and used to leave every file on the backend with the OLD name
+    // (or none at all, for a file written by a build that predates names) until some
+    // bookmark happened to change. Settings → Activity then read that stale file and
+    // called a machine the user had just named "Unnamed device". Folding the name in
+    // costs exactly one re-upload per type per rename, which is what telling the other
+    // devices takes. The length prefix keeps two names from ever building the same tag.
+    const label = this.settings.device_label ?? "";
+    return `${PACKET_ENVELOPE}|${this.destinationTag()}|${useE2ee ? "enc" : "plain"}|name:${label.length}:${label}:${payloadChecksum}${suffix}`;
   }
 
   /**
@@ -1462,7 +1517,7 @@ export class SyncEngine {
     const useE2ee = this.e2eeActive;
     const browserInfo = await (this.browserIdentity ??= detectBrowser());
     return {
-      version: "1.0",
+      version: CURRENT_PACKET_VERSION,
       device_id: this.settings.device_id,
       // Carried on every packet, not just the session one, so a device is nameable to its
       // peers even with Sessions turned off. Purely for display; nothing keys off it.
@@ -1518,6 +1573,9 @@ export class SyncEngine {
    * two devices disagree at all.
    */
   private async openPacket(packet: SyncPacket): Promise<unknown> {
+    // Version first: a packet written under rules we don't know must not be interpreted
+    // under the v1.0 ones, checksum or no checksum. Legacy packets with no version pass.
+    assertSupportedPacketVersion(packet);
     const localE2ee = this.e2eeActive;
     // Refuse to import a plaintext peer while E2EE is active here. The auto-merge
     // path already skips plaintext peers before calling applyRemote (they're stale/

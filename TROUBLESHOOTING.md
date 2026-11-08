@@ -1,8 +1,8 @@
 # Troubleshooting
 
-Common issues and how to fix them. If none of these help,
-[open an issue](https://github.com/konabe-studio/konode/issues) with your browser, the
-backend you use, and what you saw.
+Common issues and how to fix them. This fork is distributed locally and has no issue
+tracker of its own; when asking for help elsewhere, include your browser, the backend
+you use, the compatibility mode under Settings → Advanced, and what you saw.
 
 ## Sync
 
@@ -137,8 +137,15 @@ Plain `http://` is rejected for security (credentials would travel in the clear)
 `https://`. `http://localhost` is allowed for local testing.
 
 **Connected but I don't see my files.**
-Check that the account can create a `konode/` folder at that path. Some providers gate
-WebDAV behind a paid tier or a per-app password; check your provider's WebDAV docs.
+Check that the account can create the sync folder at that path — `konode/` in the two
+compatibility modes, `kesonode/` in **Fully separate** mode. Some providers gate WebDAV
+behind a paid tier or a per-app password; check your provider's WebDAV docs.
+
+**I switched compatibility mode and the data looks gone.**
+Switching does not move existing files: the new folder starts empty and this device
+re-uploads its own data on the next sync. Switch **every** device in the group to the same
+mode, or switch back. See
+[Which folder?](README.md#which-folder-three-compatibility-modes).
 
 ## Firefox
 

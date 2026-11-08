@@ -2,6 +2,7 @@ import type { IBackend, BackendConfig, DataType, SyncPacket } from "@/lib/types"
 import { withRetry, HttpError, defaultShouldRetry, rateLimitMessage } from "@/lib/utils/retry";
 import { logger } from "@/lib/utils/logger";
 import { utf8ToBase64 } from "@/lib/utils/base64";
+import { folderPath, isPeerFileName, packetFileName, peerDeviceIdFromName } from "@/lib/compat/protocol";
 
 const GITHUB_API = "https://api.github.com";
 
@@ -37,7 +38,7 @@ export class GitHubBackend implements IBackend {
   }
 
   private get branch(): string { return this.gh.branch ?? "main"; }
-  private get path(): string { return this.gh.path ?? "konode"; }
+  private get path(): string { return this.gh.path ?? folderPath(); }
   /** `owner/repo`, tolerant of a pasted URL / `.git` suffix / trailing slash. */
   private get repoSlug(): string { return normalizeRepoSlug(this.gh.repo); }
 
@@ -63,7 +64,7 @@ export class GitHubBackend implements IBackend {
     await this.ensureRepoInitialized();
 
     const branch = this.gh.branch ?? "main";
-    const filename = `${this.path}/konode_${packet.data_type}_${packet.device_id}.json`;
+    const filename = `${this.path}/${packetFileName(packet.data_type, packet.device_id)}`;
     // Same UTF-8-then-base64 as before, via the shared helper — the old
     // btoa(unescape(encodeURIComponent(…))) idiom is byte-identical but leans on
     // deprecated `unescape` and was duplicated per call site.
@@ -192,9 +193,9 @@ export class GitHubBackend implements IBackend {
       if (res.status === 404) return [];
       if (!res.ok) throw new HttpError(res.status, `GitHub list failed: ${res.status}`);
       const files: Array<{ name: string }> = await res.json();
-      const own = excludeDeviceId ? `konode_${data_type}_${excludeDeviceId}.json` : null;
-      const matches = files.filter(
-        f => f.name.includes(`konode_${data_type}_`) && f.name.endsWith(".json") && f.name !== own
+      const matches = files.filter(f =>
+        isPeerFileName(f.name, data_type) &&
+        !(excludeDeviceId && peerDeviceIdFromName(f.name, data_type) === excludeDeviceId)
       );
       // Fetch each via the authenticated Contents API (Accept: raw); the public
       // download_url is unauthenticated and 404s/HTMLs on private repos.

@@ -28,3 +28,8 @@ store-listing/
 # Upstream Konode snapshot, kept locally for comparison and future compatibility work.
 # The zip next to it is already covered by *.zip above.
 konode-main/
+
+# Local build leftovers (they embed absolute machine paths) and personal sponsor
+# images: neither belongs in a repository that may later be made public.
+vitest.config.ts.timestamp-*.mjs
+docs/sponsors/

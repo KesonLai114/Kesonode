@@ -1,6 +1,6 @@
 {
   "name": "kesonode",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "license": "MPL-2.0",
   "private": true,
   "type": "module",
@@ -19,6 +19,7 @@
     "lint:firefox": "web-ext lint --source-dir dist-firefox",
     "package:firefox": "npm run build:firefox && node scripts/package-firefox.mjs --variant=store",
     "package:source": "npm run build:source && node scripts/package-chrome.mjs --variant=source && npm run build:firefox:source && node scripts/package-firefox.mjs --variant=source",
+    "package:source:pinned": "npm run build:source && node scripts/package-chrome.mjs --variant=source --keep-key && npm run build:firefox:source && node scripts/package-firefox.mjs --variant=source",
     "dev": "vite build --watch",
     "icons": "node scripts/make-icons.mjs",
     "type-check": "tsc --noEmit",

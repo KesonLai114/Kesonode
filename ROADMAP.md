@@ -2,6 +2,12 @@
 
 High-level direction. Shipped history is in `CHANGELOG.md`.
 
+> **Kesonode fork note.** This is the upstream project's historical planning document,
+> kept verbatim for traceability; "Konode" here means the upstream project, and the issue
+> links point to upstream's tracker, not to this fork. Kesonode's own direction — three
+> compatibility modes and local packages — is described in the
+> [README](README.md#which-folder-three-compatibility-modes).
+
 ## Vision
 A privacy-first browser sync that puts the user's data on storage **they own**
 (Google Drive / GitHub / WebDAV), with **no Konode server** and **no telemetry**.

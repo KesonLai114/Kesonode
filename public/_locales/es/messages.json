@@ -1,4 +1,23 @@
 {
+  "opt_compat_section": {
+    "message": "Compatibilidad con la versión original",
+    "description": "Settings section heading for the compatibility mode switch."
+  },
+  "opt_compat_mode_label": {
+    "message": "Dónde publica sus datos este dispositivo"
+  },
+  "opt_compat_mode_desc": {
+    "message": "Todos los dispositivos de un grupo de sincronización deben elegir el mismo modo. Cambiar de modo no mueve los archivos existentes: la carpeta nueva empieza vacía y este dispositivo vuelve a subir sus datos."
+  },
+  "opt_compat_mode_upstream": {
+    "message": "Versión original (predeterminado) — carpeta konode + archivos konode_*"
+  },
+  "opt_compat_mode_isolated": {
+    "message": "Nombres propios — carpeta konode + archivos kesonode_*"
+  },
+  "opt_compat_mode_standalone": {
+    "message": "Totalmente independiente — carpeta Kesonode + archivos kesonode_*"
+  },
   "locale_bcp47": {
     "message": "es"
   },
@@ -669,7 +688,16 @@
     "message": "(opcional)"
   },
   "opt_drive_folder_placeholder": {
-    "message": "Déjalo en blanco para que se cree automáticamente una carpeta 'Konode'"
+    "message": "Déjalo en blanco para crear la carpeta de sincronización automáticamente"
+  },
+  "opt_compat_folder_label": {
+    "message": "Nombre de la carpeta de sincronización"
+  },
+  "opt_compat_folder_desc": {
+    "message": "El nombre de la derecha sigue el modo. `konode` (`Konode` en Google Drive) es el nombre fijo de la versión original; `kesonode` (`Kesonode` en Drive) inicia un grupo de sincronización aparte."
+  },
+  "opt_source_bundled": {
+    "message": "Incluido en este paquete"
   },
   "opt_region_label": {
     "message": "Región"
@@ -1308,6 +1336,18 @@
   },
   "opt_import_error": {
     "message": "Error"
+  },
+  "opt_cfg_export_label": {
+    "message": "Exportar ajustes"
+  },
+  "opt_cfg_export_desc": {
+    "message": "Guarda las cuentas del backend, la frase de cifrado y el ID de dispositivo en un archivo JSON. El archivo contiene credenciales en texto plano: guárdalo en un lugar privado."
+  },
+  "opt_cfg_import_label": {
+    "message": "Importar ajustes"
+  },
+  "opt_cfg_import_desc": {
+    "message": "Restaura la configuración tras una actualización sin tener que volver a configurarlo todo. Sustituye los ajustes actuales."
   },
   "opt_feedback_section": {
     "message": "Comentarios"

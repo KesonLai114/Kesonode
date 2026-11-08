@@ -3,11 +3,14 @@ import { withRetry, HttpError, rateLimitMessage } from "@/lib/utils/retry";
 import { logger } from "@/lib/utils/logger";
 import { getAccessToken, getStoredGDriveUser } from "./gdrive-oauth";
 import { clearUploadChecksums, getLastDriveFolder, setLastDriveFolder } from "@/lib/utils/storage";
+import { driveFolderName, packetFileName, peerDeviceIdFromName, readPrefixes } from "@/lib/compat/protocol";
 
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
-const KONODE_FOLDER = "Konode";
+// The upstream name stays frozen in UPSTREAM_PROTOCOL; `standalone` resolves Kesonode's
+// own name through driveFolderName(). Resolved at CALL time, not at module load: the mode
+// is a live setting, and a const here would keep writing into the old folder silently.
 
 /** The subset of a Drive file we need in order to choose between duplicates. */
 export interface DriveFileRef {
@@ -19,7 +22,7 @@ export interface DriveFileRef {
  * Pick ONE match deterministically when Drive returns several.
  *
  * Drive has no atomic create-if-absent, so two devices connecting for the first time at
- * the same moment both see nothing and both create a "Konode" folder; a retried upload
+ * the same moment both see nothing and both create the sync folder; a retried upload
  * whose create response was lost can likewise leave two files with the same name (Drive
  * permits duplicate names within a folder).
  *
@@ -77,9 +80,9 @@ export class GDriveBackend implements IBackend {
 
   async disconnect(): Promise<void> { this.folderId = null; }
 
-  /** Every non-trashed "Konode" folder this app can see. */
+  /** Every non-trashed sync folder this app can see. */
   private async findFolders(h: HeadersInit): Promise<DriveFileRef[]> {
-    const q = encodeURIComponent(`name='${KONODE_FOLDER}' and mimeType='${FOLDER_MIME}' and trashed=false`);
+    const q = encodeURIComponent(`name='${driveFolderName()}' and mimeType='${FOLDER_MIME}' and trashed=false`);
     // connect() runs this on every sync, and it was the one Drive call outside withRetry, so
     // a single transient 500 failed the whole cycle and put an error in the Activity log.
     return withRetry(async () => {
@@ -120,7 +123,7 @@ export class GDriveBackend implements IBackend {
     if (previous) {
       logger.warn(
         "GDrive",
-        "The Konode folder changed, re-uploading this device's files into the new one."
+        "The sync folder changed, re-uploading this device's files into the new one."
       );
       await clearUploadChecksums();
     }
@@ -135,7 +138,7 @@ export class GDriveBackend implements IBackend {
     if (found.length > 1) {
       logger.warn(
         "GDrive.ensureFolder",
-        `${found.length} Konode folders exist in this Drive; using the oldest. You can delete the extras.`
+        `${found.length} sync folders exist in this Drive; using the oldest. You can delete the extras.`
       );
     }
     const existing = pickCanonical(found);
@@ -143,7 +146,7 @@ export class GDriveBackend implements IBackend {
 
     const create = await fetch(`${DRIVE_API}/files`, {
       method: "POST", headers: h,
-      body: JSON.stringify({ name: KONODE_FOLDER, mimeType: FOLDER_MIME }),
+      body: JSON.stringify({ name: driveFolderName(), mimeType: FOLDER_MIME }),
     });
     if (!create.ok) throw new HttpError(create.status, `Drive folder create failed: ${create.status}`);
     const created = await create.json();
@@ -158,7 +161,7 @@ export class GDriveBackend implements IBackend {
     if (winner && winner.id !== created.id) {
       logger.warn(
         "GDrive.ensureFolder",
-        "Another device created the Konode folder at the same time; using the older one. The empty duplicate can be deleted in Drive."
+        "Another device created the sync folder at the same time; using the older one. The empty duplicate can be deleted in Drive."
       );
       return winner.id;
     }
@@ -170,7 +173,7 @@ export class GDriveBackend implements IBackend {
       const folderId = this.folderId ?? (await this.ensureFolder());
       const h = await this.authHeaders();
       const token = await this.getToken(false);
-      const filename = `konode_${packet.data_type}_${packet.device_id}.json`;
+      const filename = packetFileName(packet.data_type, packet.device_id);
       const content = JSON.stringify(packet, null, 2);
       // Was an inline copy of findFileId; routed through it so the duplicate handling
       // lives in exactly one place.
@@ -209,7 +212,14 @@ export class GDriveBackend implements IBackend {
     return withRetry(async () => {
       const folderId = this.folderId ?? (await this.ensureFolder());
       const h = await this.authHeaders();
-      const q = encodeURIComponent(`name contains 'konode_${data_type}_' and '${folderId}' in parents and trashed=false`);
+      // One readable prefix gets a narrow server-side query. `isolated` reads two, so it
+      // keeps the wide one and lets the startsWith filter do the rest. `standalone` reads
+      // only kesonode_*, and must not offer konode_* files from its folder to the merge.
+      const prefixes = readPrefixes();
+      const nameQuery = prefixes.length === 1
+        ? `name contains '${prefixes[0]}${data_type}_'`
+        : `name contains '${data_type}_'`;
+      const q = encodeURIComponent(`${nameQuery} and '${folderId}' in parents and trashed=false`);
       const listRes = await fetch(`${DRIVE_API}/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc`, { headers: h, cache: "no-store" });
       if (!listRes.ok) throw new HttpError(listRes.status, `Drive list failed: ${listRes.status}`);
       const { files } = await listRes.json();
@@ -228,12 +238,10 @@ export class GDriveBackend implements IBackend {
       // and, folded in last, was the one that won. The device-keyed caches now refuse an
       // older entry on their own, but a stale bookmark tree has no business being merged in
       // the first place, and neither has the download it costs.
-      const prefix = `konode_${data_type}_`;
       const seen = new Set<string>();
       const peers: Array<{ id: string; name: string }> = [];
       for (const f of files as Array<{ id: string; name: string }>) {
-        if (!f.name?.startsWith(prefix) || !f.name.endsWith(".json")) continue;
-        const deviceId = f.name.slice(prefix.length, -".json".length);
+        const deviceId = f.name ? peerDeviceIdFromName(f.name, data_type) : null;
         if (!deviceId || deviceId === excludeDeviceId || seen.has(deviceId)) continue;
         seen.add(deviceId);
         peers.push(f);
@@ -269,7 +277,7 @@ export class GDriveBackend implements IBackend {
       // A retried upload whose create response was lost can leave two files with the same
       // name. Always updating the same one keeps a single file authoritative, instead of
       // writing alternately into both and leaving peers to read whichever they pick.
-      logger.warn("GDrive", `${files.length} copies of ${name} in the Konode folder; updating the oldest.`);
+      logger.warn("GDrive", `${files.length} copies of ${name} in the sync folder; updating the oldest.`);
     }
     return pickCanonical(files)?.id ?? null;
   }

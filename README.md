@@ -4,9 +4,11 @@
 
 > **Fork notice.** Kesonode is an independent fork of
 > [Konode](https://github.com/konabe-studio/konode) by Kōnabe Studio, released under
-> [MPL-2.0](LICENSE). The store badges, issue links and support links below still point to
-> the upstream project. Sync file names, folder names, storage keys, data formats and
-> extension IDs are deliberately unchanged so existing data stays compatible.
+> [MPL-2.0](LICENSE). That link is the licence attribution to the upstream project, not
+> this fork's home. Sync file names, the default folder name, storage keys, data formats
+> and extension IDs are deliberately unchanged so existing data stays compatible;
+> see [Which folder?](#which-folder-three-compatibility-modes). Kesonode has no store
+> listings of its own.
 
 <p align="center">
   <strong>Sync your browser to storage you own: no middleman, no account, no tracking.</strong>
@@ -17,12 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://chromewebstore.google.com/detail/konode/mmlfiiimnpnjcjhhbldenpcmnibedkfa"><img src="https://img.shields.io/chrome-web-store/v/mmlfiiimnpnjcjhhbldenpcmnibedkfa?label=Chrome%20Web%20Store" alt="Chrome Web Store"></a>
-  <a href="https://addons.mozilla.org/firefox/addon/konode/"><img src="https://img.shields.io/amo/v/konode?label=Firefox%20Add-ons" alt="Firefox Add-ons"></a>
-  <a href="https://microsoftedge.microsoft.com/addons/detail/acmngpjfommajbkfbfmdfemlheiamfoe"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fmicrosoftedge.microsoft.com%2Faddons%2Fgetproductdetailsbycrxid%2Facmngpjfommajbkfbfmdfemlheiamfoe&amp;query=%24.version&amp;prefix=v&amp;label=Edge%20Add-ons&amp;color=blue" alt="Microsoft Edge Add-ons"></a>
-  <a href="https://github.com/konabe-studio/konode/actions/workflows/ci.yml"><img src="https://github.com/konabe-studio/konode/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-brightgreen" alt="License: MPL-2.0"></a>
-  <a href="https://github.com/konabe-studio/konode/stargazers"><img src="https://img.shields.io/github/stars/konabe-studio/konode?label=stars" alt="GitHub stars"></a>
 </p>
 
 <p align="center">
@@ -173,17 +170,11 @@ untranslated string falls back to English, which is safe.
 
 ## Install
 
-- **Chrome / Brave / Helium / other Chromium browsers**: install from the
-  **[Chrome Web Store](https://chromewebstore.google.com/detail/konode/mmlfiiimnpnjcjhhbldenpcmnibedkfa)**.
-- **Microsoft Edge**: install from
-  **[Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/acmngpjfommajbkfbfmdfemlheiamfoe)**.
-  It carries the same package as the Chrome Web Store. If you already installed Kesonode in
-  Edge from the Chrome Web Store, keep that install: it updates the same way, and a second
-  install would join your sync group as a new device.
-- **Firefox / Waterfox**: install from
-  **[Firefox Add-ons](https://addons.mozilla.org/firefox/addon/konode/)**. On Firefox for
-  Android, Kesonode syncs open tabs and the extension list (Firefox for Android gives
-  extensions no bookmarks or history), on GitHub or WebDAV storage.
+Kesonode is distributed as a local package, not through any extension store. Pick a
+version folder under [`插件版本/`](插件版本/) and follow its
+[中文安装说明](插件版本/安装说明.md): the Chromium build loads from `dist/`, the Firefox
+build from `dist-firefox/manifest.json`. If you already have Kesonode installed from an
+earlier package, keep that install — a second install joins the sync group as a new device.
 
 New to Kesonode? The **[Getting Started guide](GETTING_STARTED.md)** walks through setup
 and connecting each backend.
@@ -217,20 +208,35 @@ npm ci && npm run build && npm run checksum
 ```
 
 Two honest caveats. The release notes don't carry the fingerprint yet, so today this shows
-you that the build reproduces, not that a particular download came from this tag. (GitHub
-does publish its own SHA-256 digest next to each release asset, which covers the download
-itself.) And the store builds can't match your hash: the zips for the Chrome Web Store,
-Microsoft Edge Add-ons (the same file) and Firefox Add-ons are built with Kesonode's own
-Google OAuth client compiled in, while the release zips and your own builds are not. It also assumes a comparable toolchain; the pinned
-lockfile keeps dependencies identical.
+you that the build reproduces, not that a particular download came from this tag. It also
+assumes a comparable toolchain; the pinned lockfile keeps dependencies identical. A build
+with a Google OAuth client compiled in cannot match one without it.
 
 ## How it works
 
-For each device and data type, Kesonode writes one JSON file (a `SyncPacket`) to a
-`Konode` folder on your backend. Every sync pulls in each peer device's file, merges it
+For each device and data type, Kesonode writes one JSON file (a `SyncPacket`) to a sync
+folder on your backend. Every sync pulls in each peer device's file, merges it
 non-destructively, and pushes the result back. Bookmarks use tombstones so deletions
 travel between devices without resurrecting old entries, and a safety cap stops a
 corrupt deletion log from wiping your tree.
+
+### Which folder? Three compatibility modes
+
+Settings → Advanced → Compatibility decides where this device publishes. **Every device
+in one sync group must pick the same mode** — the folder is where devices find each other.
+
+| Mode | Folder (WebDAV/GitHub · Google Drive) | Files |
+|------|---------------------------------------|-------|
+| **Upstream** (default) | `konode` · `Konode` | writes and reads `konode_*` |
+| **Own file names** | `konode` · `Konode` | writes `kesonode_*`, reads both prefixes |
+| **Fully separate** | `kesonode` · `Kesonode` | writes and reads `kesonode_*` only |
+
+The upstream folder name is frozen wire data, not product copy: that is why the default
+mode still creates a folder called `konode`. Switching modes does **not** move existing
+files — the new folder starts empty and this device re-uploads its own data. In "Fully
+separate" mode an upstream Konode device cannot see this device's data. The `konode_*`
+file prefix, SyncPacket format, E2EE parameters, storage keys and extension IDs are
+unchanged in every mode.
 
 When E2EE is on, the payload is encrypted on the device and the checksum is still
 computed over the plaintext, so identical content matches across devices without
@@ -272,29 +278,22 @@ use a dedicated manager like [Bitwarden](https://bitwarden.com),
   GitHub + WebDAV · WebDAV provider presets, Nutstore (坚果云) included · multi-device
   merge · per-item conflict resolution · opt-in E2EE · Drive OAuth refresh (PKCE) ·
   cross-browser extension matching · bookmarks kept out of sync · tab groups in sessions ·
-  **Chrome Web Store listing** · **Firefox Add-ons listing**, Firefox for Android included ·
-  **Microsoft Edge Add-ons listing** ·
-  **translated interface** (English, Hungarian, German, Spanish, Italian, Russian, Chinese
-  (Simplified and Traditional)).
-- **Next**: a held-back deletion that lists the bookmarks it holds
-  ([#23](https://github.com/konabe-studio/konode/issues/23)) · a device list that says when
-  each device was last active ([#10](https://github.com/konabe-studio/konode/issues/10)) ·
-  a conflict card that shows what differs ([#35](https://github.com/konabe-studio/konode/issues/35)) ·
-  the reading list ([#77](https://github.com/konabe-studio/konode/issues/77)) · more backends, cheapest sign-in first (Dropbox token and S3-compatible, then Dropbox OAuth
-  and OneDrive) · faster history sync · more languages (Japanese, Estonian, Arabic).
+  three compatibility modes · **translated interface** (English, Hungarian, German,
+  Spanish, Italian, Russian, Chinese (Simplified and Traditional)).
+- **Next**: a held-back deletion that lists the bookmarks it holds (#23) · a device list
+  that says when each device was last active (#10) · a conflict card that shows what
+  differs (#35) · the reading list (#77) · more backends, cheapest sign-in first (Dropbox
+  token and S3-compatible, then Dropbox OAuth and OneDrive) · faster history sync · more
+  languages (Japanese, Estonian, Arabic).
 - **Later**: right-to-left languages · incremental diff for very large bookmark trees ·
   diffs between restore points.
 
 ## Support & feedback
 
-Something not working? Check **[Troubleshooting](TROUBLESHOOTING.md)** first. Still
-stuck, or have an idea? **Open an issue**. It's the best way to reach us:
-[github.com/konabe-studio/konode/issues](https://github.com/konabe-studio/konode/issues).
-
-If Kesonode is useful to you and you'd like to support its development, you can
-[buy me a coffee](https://buymeacoffee.com/konabe.studio) for a one-off tip, or give a
-recurring amount on [Liberapay](https://liberapay.com/konabe). Entirely optional. Kesonode
-is free and open source.
+Something not working? Check **[Troubleshooting](TROUBLESHOOTING.md)** first. Kesonode is
+built and distributed locally: the release folders under [`插件版本/`](插件版本/) are the
+authoritative packages. This fork has no store listing, issue tracker or support address
+of its own; the section below describes the upstream project and is kept for attribution.
 
 ## License
 

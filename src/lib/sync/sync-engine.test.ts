@@ -1627,18 +1627,18 @@ describe("SyncEngine.syncType — an envelope change forces one re-upload", () =
   // permanently, because nothing about the bookmark tree had changed — and the device list
   // read "Unnamed device" for machines that were perfectly well named. Same class as the
   // destination bug above, and fixed the same way: fold it into the tag.
+  function settings(): SyncSettings {
+    return {
+      ...DEFAULT_SETTINGS,
+      device_id: "me",
+      device_label: "Brave WINX",
+      conflict_strategy: "lww",
+      active_backend: "github",
+      backends: [{ type: "github", label: "GitHub", enabled: true, github: { token: "t", repo: "owner/repo" } }],
+    };
+  }
   function engine(): SyncEngine {
-    return new SyncEngine(
-      {
-        ...DEFAULT_SETTINGS,
-        device_id: "me",
-        device_label: "Brave WINX",
-        conflict_strategy: "lww",
-        active_backend: "github",
-        backends: [{ type: "github", label: "GitHub", enabled: true, github: { token: "t", repo: "owner/repo" } }],
-      },
-      () => {}
-    );
+    return new SyncEngine(settings(), () => {});
   }
 
   it("uploads again when the recorded tag came from an older envelope", async () => {
@@ -1665,6 +1665,26 @@ describe("SyncEngine.syncType — an envelope change forces one re-upload", () =
     await priv(engine()).syncType("bookmarks", backend, DEFAULT_STATE);
 
     expect(backend.uploads[0].device_label).toBe("Brave WINX");
+  });
+
+  it("re-uploads once after the device is renamed, and then settles", async () => {
+    // The name is on the envelope, not in the payload: an unchanged bookmark tree used
+    // to keep the old name (or none) on the backend indefinitely after a rename.
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    const backend = new FakeBackend();
+    const e = engine();
+    await priv(e).syncType("bookmarks", backend, DEFAULT_STATE);
+    expect(backend.uploads).toHaveLength(1);
+    await priv(e).syncType("bookmarks", backend, DEFAULT_STATE);
+    expect(backend.uploads).toHaveLength(1); // nothing changed: still skipped
+
+    await e.updateSettings({ ...settings(), device_label: "Studio Mac" });
+    await priv(e).syncType("bookmarks", backend, DEFAULT_STATE);
+    expect(backend.uploads).toHaveLength(2);
+    expect(backend.uploads[1].device_label).toBe("Studio Mac");
+
+    await priv(e).syncType("bookmarks", backend, DEFAULT_STATE);
+    expect(backend.uploads).toHaveLength(2); // one re-upload per rename, not per sync
   });
 });
 

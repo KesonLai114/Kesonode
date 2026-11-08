@@ -3,12 +3,19 @@
 // Run after `npm run build`. Produces web-ext-artifacts/kesonode-chrome-<version>.zip
 // with manifest.json at the archive root (what the Web Store expects).
 //
-// The manifest `key` is STRIPPED from the store package. It's kept in
-// public/manifest.json (and thus dist/) on purpose — it pins the extension ID for
-// local unpacked dev and the dev OAuth redirect — but the Chrome Web Store rejects
-// a first upload whose manifest contains `key` ("key field not allowed in
-// manifest"). So we zip from a temp staging copy with `key` removed; dist/ itself
-// is left untouched for `chrome://extensions` dev loading.
+// The manifest `key` pins the extension ID of an unpacked install. It's kept in
+// public/manifest.json (and thus dist/) for `chrome://extensions` dev loading, but the
+// Chrome Web Store rejects a first upload whose manifest contains `key` ("key field not
+// allowed in manifest"), so STORE packages always strip it.
+//
+// Unpacked installs loaded from a version folder need it. Without `key`, Chrome derives the
+// ID from the folder path, so every new version is a NEW extension with an empty
+// chrome.storage.local and the user has to set the backend up all over again. Packages
+// built with `--keep-key` (npm run package:source:pinned) leave it in place and the ID
+// stays the same wherever the folder lives. 1.5.2 deliberately shipped WITHOUT the key:
+// that release added settings export/import and had to be loaded over the old folder so
+// the old settings were still readable when they were exported. From 1.5.3 on, use the
+// pinned package.
 //
 // After the store assigns the published extension ID (Package tab), add
 // https://<published-id>.chromiumapp.org/gdrive to the Google OAuth client's
@@ -41,6 +48,8 @@ if (!existsSync(resolve(distDir, "manifest.json"))) {
 
 const variant = variantFromArgv();
 assertVariant(distDir, variant);
+// A store upload must never carry a key, even if the flag was passed by mistake.
+const keepKey = variant !== "store" && process.argv.includes("--keep-key");
 
 const artifactsDir = resolve(repoRoot, "web-ext-artifacts", artifactDir("chrome", variant));
 
@@ -67,10 +76,12 @@ try {
 
   const manifestPath = join(staging, "manifest.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  if ("key" in manifest) {
+  if (!keepKey && "key" in manifest) {
     delete manifest.key;
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
-    console.log("Stripped `key` from the store manifest (kept in dist/ for dev).");
+    console.log(`Stripped \`key\` (${variant === "store" ? "store upload" : "migration source"}; kept in dist/ for dev).`);
+  } else if ("key" in manifest) {
+    console.log("Kept `key` — unpacked installs of this package share a stable extension ID.");
   }
 
   pruneUnshippedLocales(join(staging, "_locales"), manifest.default_locale);
@@ -105,5 +116,7 @@ console.log(
 console.log(
   variant === "store"
     ? "  ↑ this is the one that goes to the Chrome Web Store."
-    : "  ↑ this is the one that goes on the GitHub release. Not to a store."
+    : keepKey
+    ? "  ↑ stable extension ID: unpacked upgrades keep their settings."
+    : "  ↑ no pinned ID (1.5.2 migration release): load this over the previous folder."
 );

@@ -21,9 +21,12 @@ import { encrypt, decrypt } from "@/lib/crypto/encryption";
 import { browser } from "@/lib/utils/ext";
 import { KEYS } from "@/lib/utils/storage";
 import { logger } from "@/lib/utils/logger";
+import { UPSTREAM_PROTOCOL, snapshotFileName, snapshotTimestamp } from "@/lib/compat/protocol";
 
-const PREFIX = "konode_snap_bookmarks_";
-const INDEX_NAME = "konode_snap_index.json";
+// Restore points are shared upstream data, so their names stay in the upstream namespace
+// in every compat mode. The names come from the frozen contract, not from local copy.
+const PREFIX = UPSTREAM_PROTOCOL.snapshotFilePrefix;
+const INDEX_NAME = UPSTREAM_PROTOCOL.snapshotIndexName;
 const MAX_SNAPSHOTS = 10;
 
 interface SnapshotFile {
@@ -39,11 +42,10 @@ interface IndexFile {
   payload: string; // JSON SnapshotMeta[], optionally encrypted
 }
 
-const nameFor = (ts: number): string => `${PREFIX}${ts}.json`;
+const nameFor = snapshotFileName;
 
 function tsFromName(name: string): number | null {
-  const m = name.match(/^konode_snap_bookmarks_(\d+)\.json$/);
-  return m ? Number(m[1]) : null;
+  return snapshotTimestamp(name);
 }
 
 function countUrls(tree: SyncBookmark[]): number {

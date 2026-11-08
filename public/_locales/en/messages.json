@@ -1,4 +1,23 @@
 {
+  "opt_compat_section": {
+    "message": "Upstream compatibility",
+    "description": "Settings section heading for the compatibility mode switch."
+  },
+  "opt_compat_mode_label": {
+    "message": "Where this device publishes its data"
+  },
+  "opt_compat_mode_desc": {
+    "message": "Every device in one sync group must pick the same mode. Switching does not move existing files: the new folder starts empty and this device re-uploads its own data."
+  },
+  "opt_compat_mode_upstream": {
+    "message": "Upstream (default) — konode folder + konode_* files"
+  },
+  "opt_compat_mode_isolated": {
+    "message": "Own file names — konode folder + kesonode_* files"
+  },
+  "opt_compat_mode_standalone": {
+    "message": "Fully separate — Kesonode folder + kesonode_* files"
+  },
   "locale_bcp47": {
     "message": "en",
     "description": "NOT a sentence: the BCP 47 tag for THIS catalogue, written into <html lang> so the browser and screen readers know what language the page is in. Replace it with your own tag and nothing else, lowercase language and uppercase region: de, es, pt-BR, zh-CN. Do not translate the word."
@@ -774,8 +793,17 @@
     "description": "Appended to a field label the user can leave empty. Keep the parentheses."
   },
   "opt_drive_folder_placeholder": {
-    "message": "Leave blank to auto-create a 'Konode' folder",
-    "description": "'Konode' is the folder name the extension creates. It is data, not copy, so leave the word itself untranslated."
+    "message": "Leave blank to auto-create the sync folder",
+    "description": "The folder's fixed name is protocol data, explained under Advanced → Compatibility. Do not put the upstream product name in this placeholder."
+  },
+  "opt_compat_folder_label": {
+    "message": "Sync folder name"
+  },
+  "opt_compat_folder_desc": {
+    "message": "The name on the right follows the mode. `konode` (`Konode` on Google Drive) is the frozen upstream name; `kesonode` (`Kesonode` on Drive) starts a separate sync group."
+  },
+  "opt_source_bundled": {
+    "message": "Ships with this package"
   },
   "opt_region_label": {
     "message": "Region"
@@ -1741,6 +1769,18 @@
   },
   "opt_import_error": {
     "message": "Error"
+  },
+  "opt_cfg_export_label": {
+    "message": "Export settings"
+  },
+  "opt_cfg_export_desc": {
+    "message": "Save your backend accounts, encryption passphrase and device ID as a JSON file. It contains credentials in plain text — keep it somewhere private."
+  },
+  "opt_cfg_import_label": {
+    "message": "Import settings"
+  },
+  "opt_cfg_import_desc": {
+    "message": "Restore your configuration after an upgrade instead of setting everything up again. Replaces the current settings."
   },
   "opt_feedback_section": {
     "message": "Feedback"

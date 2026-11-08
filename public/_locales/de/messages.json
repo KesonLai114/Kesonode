@@ -1,4 +1,23 @@
 {
+  "opt_compat_section": {
+    "message": "Kompatibilität mit der Originalversion",
+    "description": "Settings section heading for the compatibility mode switch."
+  },
+  "opt_compat_mode_label": {
+    "message": "Wo dieses Gerät seine Daten veröffentlicht"
+  },
+  "opt_compat_mode_desc": {
+    "message": "Alle Geräte einer Sync-Gruppe müssen denselben Modus wählen. Ein Wechsel verschiebt keine vorhandenen Dateien: Der neue Ordner ist leer, und dieses Gerät lädt seine Daten erneut hoch."
+  },
+  "opt_compat_mode_upstream": {
+    "message": "Original (Standard) — Ordner konode + Dateien konode_*"
+  },
+  "opt_compat_mode_isolated": {
+    "message": "Eigene Dateinamen — Ordner konode + Dateien kesonode_*"
+  },
+  "opt_compat_mode_standalone": {
+    "message": "Vollständig getrennt — Ordner Kesonode + Dateien kesonode_*"
+  },
   "locale_bcp47": {
     "message": "de"
   },
@@ -678,7 +697,16 @@
     "message": "(optional)"
   },
   "opt_drive_folder_placeholder": {
-    "message": "Leer lassen, dann wird automatisch ein Ordner „Konode“ erstellt"
+    "message": "Leer lassen, um den Sync-Ordner automatisch zu erstellen"
+  },
+  "opt_compat_folder_label": {
+    "message": "Name des Sync-Ordners"
+  },
+  "opt_compat_folder_desc": {
+    "message": "Der Name rechts folgt dem Modus. `konode` (`Konode` in Google Drive) ist der eingefrorene Name der Originalversion; `kesonode` (`Kesonode` in Drive) beginnt eine eigene Sync-Gruppe."
+  },
+  "opt_source_bundled": {
+    "message": "Im Paket enthalten"
   },
   "opt_region_label": {
     "message": "Region"
@@ -1582,6 +1610,18 @@
   },
   "opt_import_error": {
     "message": "Fehler"
+  },
+  "opt_cfg_export_label": {
+    "message": "Einstellungen exportieren"
+  },
+  "opt_cfg_export_desc": {
+    "message": "Speichert Backend-Zugangsdaten, Verschlüsselungspassphrase und Geräte-ID als JSON-Datei. Die Datei enthält Zugangsdaten im Klartext — sicher aufbewahren."
+  },
+  "opt_cfg_import_label": {
+    "message": "Einstellungen importieren"
+  },
+  "opt_cfg_import_desc": {
+    "message": "Stellt die Konfiguration nach einem Upgrade wieder her, ohne alles neu einzurichten. Ersetzt die aktuellen Einstellungen."
   },
   "opt_feedback_section": {
     "message": "Feedback"

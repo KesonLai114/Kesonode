@@ -91,7 +91,7 @@ export class ErrorBoundary extends Component<Props, State> {
             fontSize: 14,
             fontWeight: 600,
             color: "#fff",
-            background: "#12b76a",
+            background: "#2563eb",
             border: "none",
             borderRadius: 10,
             cursor: "pointer",
@@ -100,11 +100,7 @@ export class ErrorBoundary extends Component<Props, State> {
           Reload
         </button>
         <p style={{ margin: "16px 0 0", fontSize: 12, color: "#5a6472" }}>
-          Please report it at{" "}
-          <a href="https://github.com/konabe-studio/konode/issues" target="_blank" rel="noreferrer">
-            github.com/konabe-studio/konode/issues
-          </a>
-          , with the text above and which browser you use.
+          Keep the text above and the name of your browser when you report this.
         </p>
       </div>
     );

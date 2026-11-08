@@ -1,4 +1,23 @@
 {
+  "opt_compat_section": {
+    "message": "Kompatibilitás az eredeti változattal",
+    "description": "Settings section heading for the compatibility mode switch."
+  },
+  "opt_compat_mode_label": {
+    "message": "Hová teszi ki az adatait ez az eszköz"
+  },
+  "opt_compat_mode_desc": {
+    "message": "Egy szinkroncsoport minden eszközének ugyanazt a módot kell választania. A váltás nem mozgatja a meglévő fájlokat: az új mappa üresen indul, és ez az eszköz újra feltölti a saját adatait."
+  },
+  "opt_compat_mode_upstream": {
+    "message": "Eredeti (alapértelmezett) — konode mappa + konode_* fájlok"
+  },
+  "opt_compat_mode_isolated": {
+    "message": "Saját fájlnevek — konode mappa + kesonode_* fájlok"
+  },
+  "opt_compat_mode_standalone": {
+    "message": "Teljesen külön — Kesonode mappa + kesonode_* fájlok"
+  },
   "locale_bcp47": {
     "message": "hu"
   },
@@ -678,7 +697,16 @@
     "message": "(nem kötelező)"
   },
   "opt_drive_folder_placeholder": {
-    "message": "Hagyd üresen, és a Kesonode létrehoz egy „Konode” mappát"
+    "message": "Hagyd üresen, és a Kesonode automatikusan létrehozza a szinkronizációs mappát"
+  },
+  "opt_compat_folder_label": {
+    "message": "A szinkronizációs mappa neve"
+  },
+  "opt_compat_folder_desc": {
+    "message": "A jobb oldali név a módtól függ. A `konode` (`Konode` a Google Drive-on) az eredeti változat rögzített neve; a `kesonode` (`Kesonode` a Drive-on) külön szinkroncsoportot indít."
+  },
+  "opt_source_bundled": {
+    "message": "A csomag része"
   },
   "opt_region_label": {
     "message": "Régió"
@@ -1582,6 +1610,18 @@
   },
   "opt_import_error": {
     "message": "Hiba"
+  },
+  "opt_cfg_export_label": {
+    "message": "Beállítások exportálása"
+  },
+  "opt_cfg_export_desc": {
+    "message": "A háttértár-fiókokat, a titkosítási jelszót és az eszközazonosítót JSON-fájlba menti. A fájl a hitelesítő adatokat titkosítatlanul tartalmazza — tartsa biztonságos helyen."
+  },
+  "opt_cfg_import_label": {
+    "message": "Beállítások importálása"
+  },
+  "opt_cfg_import_desc": {
+    "message": "Frissítés vagy böngészőváltás után visszaállítja a beállításokat, nem kell mindent újra beállítani. Felülírja a jelenlegi beállításokat."
   },
   "opt_feedback_section": {
     "message": "Visszajelzés"

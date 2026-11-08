@@ -15,8 +15,8 @@ In plain terms: **your data stays yours.** Kesonode is the pipe, not the destina
 ## Who this policy covers
 
 This policy applies to the **Kesonode** browser extension ("Kesonode", "we", "us"),
-published by **Kōnabe Studio**. It explains what data the
-extension touches, where that data goes, and what we do (and don't do) with it.
+distributed as a local package from this source tree. It explains what data the extension
+touches, where that data goes, and what we do (and don't do) with it.
 
 ## What data Kesonode accesses
 
@@ -156,9 +156,11 @@ Because Kesonode stores nothing on its own infrastructure, **you control retenti
   To finish the job, remove Kesonode's Drive access under
   [Google account permissions](https://myaccount.google.com/permissions), delete the
   GitHub token you created, or revoke the WebDAV app password.
-- **On your backend:** you can delete the files Kesonode created (in the `Konode` /
-  `konode` folder of your Drive, repository, or WebDAV server) at any time, directly
-  through that provider.
+- **On your backend:** you can delete the files Kesonode created in its sync folder at
+  any time, directly through that provider. The folder is called `Konode` / `konode` in
+  the two compatibility modes and `Kesonode` / `kesonode` in **Fully separate** mode;
+  see [Which folder?](README.md#which-folder-three-compatibility-modes). Both folders
+  may exist if you switched modes, so check for both when deleting everything.
 
 ## Children's privacy
 
@@ -175,19 +177,14 @@ the details below.
 
 ## Changes to this policy
 
-If we update this policy, we will revise the "Last updated" date above and post the
-new version at its published location. Material changes will be reflected in both store
-listings.
+If we update this policy, we will revise the "Last updated" date above and ship the new
+version with the source tree and the release folders under `插件版本/`.
 
 ## Contact
 
-The best way to reach us, including if something isn't working, is to **open an
-issue** on the Kesonode repository:
-**https://github.com/konabe-studio/konode/issues**
+Kesonode is distributed locally and has no issue tracker, support address or store
+listing of its own. Nothing in this extension sends data to a maintainer: credentials
+stay on your device and sync data goes only to the backend you configured.
 
-For privacy-specific questions you can also email **konabe@proton.me**.
-
-_This policy is published at
-**https://github.com/konabe-studio/konode/blob/main/PRIVACY.md** and applies to every
-build of Kesonode: the Chrome Web Store listing, the Firefox Add-ons listing, and builds
-you make yourself from source. It is also linked from the Google OAuth consent screen._
+_This policy ships with the source tree and applies to every build of Kesonode, including
+the packages under `插件版本/` and builds you make yourself from source._

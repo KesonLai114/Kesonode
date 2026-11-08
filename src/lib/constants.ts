@@ -22,7 +22,7 @@ export const AMO_SEARCH_BASE = "https://addons.mozilla.org/firefox/search/?q=";
 
 /** Toolbar badge color per sync status. The service worker can't read the UI's
  *  CSS custom properties, so the palette is mirrored here as plain values.
- *  `success` is the Kesonode signal green (kept in sync with the UI accent). */
+ *  `success` is the Kesonode signal blue (kept in sync with the UI accent). */
 /** Toolbar badge TEXT per sync status. A pending conflict needs the user to choose, so
  *  it has to be visible without opening the popup — it used to render as empty text, i.e.
  *  no badge at all, while `BADGE_COLORS.conflict` sat here unused. An empty string means
@@ -38,7 +38,7 @@ export const BADGE_TEXT: Record<SyncStatus, string> = {
 export const BADGE_COLORS: Record<SyncStatus, string> = {
   idle: "#71717a",
   syncing: "#fbbf24",
-  success: "#34d399",
+  success: "#2563eb",
   error: "#f87171",
   conflict: "#fb923c",
 };
@@ -63,3 +63,18 @@ export const BACKEND_LABEL: Record<BackendType, string> = {
  * Storage and reopen this tab", the same instruction twice in two different voices.
  */
 export const PERMISSION_LOST_PREFIX = "Kesonode no longer has permission to reach ";
+
+/**
+ * Kesonode's own public addresses, shown in Settings → Advanced → Feedback and About.
+ *
+ * Empty strings mean "no link", NOT "link to the upstream project". This fork is
+ * distributed as a local package (插件版本/) and does not publish through the upstream
+ * store listings, so the old GitHub issues, mailto and store URLs must never come back:
+ * they belong to a different extension and a different maintainer. Fill these in when
+ * the fork has a repository / contact address of its own and the rows reappear.
+ */
+export const FORK_LINKS = {
+  repository: "",
+  issues: "",
+  email: "",
+} as const;

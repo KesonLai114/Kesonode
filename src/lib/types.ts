@@ -398,6 +398,39 @@ export interface SyncSettings {
   // working config in Options). Gates the "Finish setting up Kesonode" card so it never
   // reappears while the user browses provider cards after they're already set up.
   onboarding_completed?: boolean;
+  /**
+   * Where this device publishes its data. Optional on purpose: a settings blob written by
+   * an older build has none, which means "upstream" and changes nothing.
+   *  - "upstream": upstream `konode` folder + `konode_*` files (fully compatible).
+   *  - "isolated": upstream folder + `kesonode_*` files, reading both prefixes.
+   *  - "standalone": `kesonode` folder + `kesonode_*` files, reading only its own.
+   * Every device in a sync group must pick the same mode. See src/lib/compat/protocol.ts.
+   */
+  compat_mode?: "upstream" | "isolated" | "standalone";
+}
+
+/**
+ * A portable copy of THIS INSTALLATION's configuration, for carrying it across an
+ * upgrade that changes the extension ID (a new unpacked folder, a new browser profile).
+ *
+ * Only configuration travels. Tombstones, bookmark caches, conflict packets and the sync
+ * lock are per-install working state: replaying them onto a fresh install would make a
+ * device that has never merged anything claim it already had. The sync data itself lives
+ * in the user's backend and is not part of this file.
+ *
+ * `keys.*` keep the exact values found in chrome.storage.local. They are not parsed here
+ * so a future session shape needs no change to the backup format. See utils/storage.ts.
+ */
+export interface SettingsBackup {
+  format: "kesonode-settings";
+  version: 1;
+  exportedAt: string;
+  extensionVersion: string;
+  keys: {
+    settings: SyncSettings;
+    gdriveSession?: unknown;
+    gdriveFolder?: unknown;
+  };
 }
 
 // ─── Sync State ────────────────────────────────────────────────────────────
@@ -570,6 +603,10 @@ export type ExtensionMessage =
   | { type: "GET_STATE" }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; payload: Partial<SyncSettings> }
+  // Carry configuration across an extension-ID change. EXPORT answers SETTINGS_BACKUP;
+  // IMPORT takes a parsed (untrusted) JSON value and validates it in utils/storage.ts.
+  | { type: "EXPORT_SETTINGS" }
+  | { type: "IMPORT_SETTINGS"; payload: unknown }
   | { type: "RESOLVE_CONFLICT"; payload: { id: string; resolution: "local" | "remote" } }
   // What differs on one pending conflict (#35). Read-only: opens the parked packet, applies nothing.
   | { type: "GET_CONFLICT_DIFF"; payload: { id: string } }
@@ -625,6 +662,7 @@ export interface DeviceInfo {
 export type ExtensionResponse =
   | { type: "STATE"; payload: SyncState }
   | { type: "SETTINGS"; payload: SyncSettings }
+  | { type: "SETTINGS_BACKUP"; payload: SettingsBackup }
   | { type: "OK" }
   | { type: "ERROR"; payload: string }
   | { type: "TEST_RESULT"; payload: { ok: boolean; message: string } }

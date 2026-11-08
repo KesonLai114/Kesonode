@@ -1,4 +1,23 @@
 {
+  "opt_compat_section": {
+    "message": "上游兼容性",
+    "description": "Settings section heading for the compatibility mode switch."
+  },
+  "opt_compat_mode_label": {
+    "message": "本设备的数据发布位置"
+  },
+  "opt_compat_mode_desc": {
+    "message": "同一同步组内的所有设备必须选择同一模式。切换不会搬移已有文件：新文件夹一开始是空的，本设备会重新上传自己的数据。"
+  },
+  "opt_compat_mode_upstream": {
+    "message": "兼容上游（默认）— konode 文件夹 + konode_* 文件"
+  },
+  "opt_compat_mode_isolated": {
+    "message": "独立文件名 — konode 文件夹 + kesonode_* 文件"
+  },
+  "opt_compat_mode_standalone": {
+    "message": "完全独立 — Kesonode 文件夹 + kesonode_* 文件"
+  },
   "locale_bcp47": {
     "message": "zh-CN"
   },
@@ -669,7 +688,16 @@
     "message": "(可选)"
   },
   "opt_drive_folder_placeholder": {
-    "message": "留空以自动创建一个 “Konode” 文件夹"
+    "message": "留空以自动创建同步文件夹"
+  },
+  "opt_compat_folder_label": {
+    "message": "同步文件夹名称"
+  },
+  "opt_compat_folder_desc": {
+    "message": "右侧名称随所选模式变化。`konode`（Google Drive 为 `Konode`）是冻结的上游兼容名称；`kesonode`（Drive 为 `Kesonode`）会开启一个独立的同步组。"
+  },
+  "opt_source_bundled": {
+    "message": "随本安装包提供"
   },
   "opt_region_label": {
     "message": "地区"
@@ -1552,6 +1580,18 @@
   },
   "opt_import_error": {
     "message": "错误"
+  },
+  "opt_cfg_export_label": {
+    "message": "导出配置"
+  },
+  "opt_cfg_export_desc": {
+    "message": "把后端账号、加密口令、设备 ID 等设置保存为 JSON 文件。文件内含明文凭据，请妥善保管，不要分享。"
+  },
+  "opt_cfg_import_label": {
+    "message": "导入配置"
+  },
+  "opt_cfg_import_desc": {
+    "message": "升级或换浏览器后恢复配置，无需重新设置。导入会替换当前设置。"
   },
   "opt_feedback_section": {
     "message": "反馈"

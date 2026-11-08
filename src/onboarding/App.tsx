@@ -19,11 +19,18 @@ import {
   Clock, Puzzle, Globe, CheckCircle2, ArrowRight,
   Loader2, XCircle, Eye, EyeOff, Lock, Key,
 } from "lucide-react";
-// Kesonode brand mark — the glyph only; the container supplies the green tile.
+// Kesonode brand mark — the glyph only; the container supplies the blue tile.
+// Mirrors the sync arrows + node in public/icons/icon.svg.
 function BrandMark({ size = 14, color = "currentColor" }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="48 48 160 160" fill="none" aria-hidden="true">
-      <path d="M152 192C152 196.418 155.582 200 160 200H192C196.418 200 200 196.418 200 192V157.601C200 154.322 197.342 151.664 194.063 151.664H178.723C176.899 151.664 175.231 150.635 174.413 149.005C170.523 141.251 172.071 131.874 178.249 125.783L198.313 105.999C199.392 104.935 200 103.482 200 101.966V64C200 59.5817 196.418 56 192 56H157.119C153.998 56 151.163 57.8143 149.855 60.6475L107.816 151.732C106.917 153.679 104 153.039 104 150.894V111.329C104 106.91 100.418 103.329 96 103.329H64C59.5817 103.329 56 106.91 56 111.329V192C56 196.418 59.5817 200 64 200H100.67C102.801 200 104.845 199.149 106.346 197.637L141.743 161.993C145.516 158.193 152 160.866 152 166.221V192Z" fill={color} />
+      <g stroke={color} strokeWidth={22} strokeLinecap="round" fill="none">
+        <path d="M69.73 106.79 A62 62 0 0 1 186.27 106.79" />
+        <path d="M186.27 149.21 A62 62 0 0 1 69.73 149.21" />
+      </g>
+      <path d="M198.49 102.34 L193.11 125.59 L174.05 111.24 Z" fill={color} />
+      <path d="M57.51 153.66 L62.89 130.41 L81.95 144.76 Z" fill={color} />
+      <rect x="111" y="111" width="34" height="34" rx="10" fill={color} />
     </svg>
   );
 }
@@ -1124,10 +1131,10 @@ const S: Record<string, React.CSSProperties> = {
   },
   logoWrap: {
     width: 56, height: 56, borderRadius: 16,
-    background: "var(--accent)",
+    background: "var(--brand-tile)",
     display: "flex", alignItems: "center", justifyContent: "center",
     marginBottom: 22,
-    boxShadow: "0 6px 16px -4px rgba(18,183,106,.45)",
+    boxShadow: "0 6px 16px -4px rgba(37,99,235,.42)",
   },
   h1: { fontSize: 24, fontWeight: 600, letterSpacing: "-0.02em", color: "var(--text-primary)", margin: "0 0 8px" },
   subtitle: { fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.55, margin: "0 0 24px" },
@@ -1139,7 +1146,7 @@ const S: Record<string, React.CSSProperties> = {
     background: "var(--accent-solid)", color: "var(--on-accent)",
     fontSize: 14, fontWeight: 600, cursor: "pointer",
     fontFamily: "inherit", transition: "background .15s, box-shadow .15s",
-    boxShadow: "0 1px 2px rgba(18,183,106,.30)",
+    boxShadow: "0 1px 2px rgba(37,99,235,.30)",
   },
   btnSecondary: {
     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, flexShrink: 0,

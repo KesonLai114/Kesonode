@@ -3,13 +3,14 @@
 // the SW registers listeners at module load, so it can't be imported from a test.
 
 import { browser } from "@/lib/utils/ext";
+import { UPSTREAM_PROTOCOL } from "@/lib/compat/protocol";
 
 /** Periodic pull — how this device learns about its PEERS' changes. */
-export const SYNC_ALARM = "konode-sync";
+export const SYNC_ALARM = UPSTREAM_PROTOCOL.alarms.sync;
 
 /** One-shot backstop after a bookmark edit, in case the debounced fast path doesn't
  *  get to run (a setTimeout dies with the worker; an alarm survives). */
-export const BOOKMARK_ALARM = "konode-bookmark-sync";
+export const BOOKMARK_ALARM = UPSTREAM_PROTOCOL.alarms.bookmarkSync;
 
 /**
  * Make sure the periodic sync alarm exists — WITHOUT disturbing one that is already

@@ -2,7 +2,7 @@
 // Handles: alarm-based polling, bookmark listeners, message routing
 
 import type { ExtensionMessage, ExtensionResponse, SyncState } from "@/lib/types";
-import { getSettings, getState, setState, saveSettings, clearStaleSyncLock, setBulkDeleteApproval, KEYS } from "@/lib/utils/storage";
+import { getSettings, getState, setState, saveSettings, clearStaleSyncLock, setBulkDeleteApproval, KEYS, exportSettingsBackup, importSettingsBackup } from "@/lib/utils/storage";
 import { SyncEngine, explainSyncFailure } from "@/lib/sync/sync-engine";
 import { registerBookmarkListeners, recordExclusionRelease } from "@/lib/handlers/bookmarks-handler";
 import { createBackend } from "@/lib/backends/abstract-backend";
@@ -248,6 +248,28 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
         }
       }
 
+      return { type: "OK" };
+    }
+
+    case "EXPORT_SETTINGS": {
+      return {
+        type: "SETTINGS_BACKUP",
+        payload: await exportSettingsBackup(browser.runtime.getManifest().version),
+      };
+    }
+
+    case "IMPORT_SETTINGS": {
+      // An import changes every setting at once, so it needs the same wake-up as
+      // SAVE_SETTINGS: the worker holds a settings snapshot in syncEngine, and the
+      // restored interval has to reach the alarm before the next sync is due.
+      const updated = await importSettingsBackup(message.payload);
+      setLoggerDebug(updated.debug_mode);
+      await syncEngine?.updateSettings(updated);
+      if (updated.auto_sync) {
+        await ensureSyncAlarm(updated.sync_interval_seconds, true);
+      } else {
+        await browser.alarms.clear(SYNC_ALARM);
+      }
       return { type: "OK" };
     }
 

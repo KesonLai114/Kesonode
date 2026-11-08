@@ -5,8 +5,9 @@
 // when it finished clean (no problem, no conflict, no held-back deletion) with at least one
 // other device in the folder, because Kesonode with nothing to sync against has not done its
 // job yet. The popup adds the rest: never during setup, never beside an error, never on an
-// install no store knows (`reviewPageFor`). Either button ends it for good, and so does
-// rating from the Settings row, which is always there.
+// install no store knows (`reviewPageFor`, which answers null for a self-built package:
+// this fork has no store listing of its own). Either button ends it for good, and so does
+// rating from the Settings row when a listing exists.
 //
 // The counting stops at the threshold, so the worker writes this at most RATE_MIN_SYNCS
 // times in an install's life and only reads it after that.

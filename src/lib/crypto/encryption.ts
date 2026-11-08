@@ -11,14 +11,16 @@
  * Status: ACTIVE — wired into the sync engine, opt-in via settings.encryption_enabled.
  */
 
+import { UPSTREAM_PROTOCOL } from "@/lib/compat/protocol";
+
 // ─── Constants ────────────────────────────────────────────────────────────
 
-// OWASP 2023 minimum for PBKDF2-HMAC-SHA256. Raising this only affects newly
-// written blobs (each blob carries its own salt; old data stays decryptable
-// only if the count matches — E2EE was never active before, so there is none).
-const PBKDF2_ITERATIONS = 600_000;
-const SALT_LENGTH = 16; // bytes
-const IV_LENGTH = 12;   // bytes — optimal for AES-GCM
+// Frozen in the upstream wire contract: changing any of these makes blobs written by one
+// device unreadable by another. OWASP 2023 minimum for PBKDF2-HMAC-SHA256. Raising the
+// iteration count only affects newly written blobs (each carries its own salt).
+const PBKDF2_ITERATIONS = UPSTREAM_PROTOCOL.crypto.iterations;
+const SALT_LENGTH = UPSTREAM_PROTOCOL.crypto.saltBytes;
+const IV_LENGTH = UPSTREAM_PROTOCOL.crypto.ivBytes;
 const KEY_LENGTH = 256; // bits
 
 // ─── Key derivation ───────────────────────────────────────────────────────
@@ -142,7 +144,7 @@ export async function decrypt(
  * that simulate such peers). Format: base64(salt + iv + ciphertext).
  */
 export async function createKeyVerifier(passphrase: string): Promise<string> {
-  return encrypt("konode-verify-v1", passphrase);
+  return encrypt(UPSTREAM_PROTOCOL.legacyVerifier, passphrase);
 }
 
 export async function verifyPassphrase(
@@ -151,7 +153,7 @@ export async function verifyPassphrase(
 ): Promise<boolean> {
   try {
     const result = await decrypt(verifier, passphrase);
-    return result === "konode-verify-v1";
+    return result === UPSTREAM_PROTOCOL.legacyVerifier;
   } catch {
     return false;
   }

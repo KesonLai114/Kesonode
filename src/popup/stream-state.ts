@@ -4,7 +4,7 @@ import type { DataType, SyncState } from "@/lib/types";
  * What the popup's "Active streams" dot should say about one data type.
  *
  * This used to be derived inline, and whenever a sync was NOT running it collapsed to
- * "synced" + green for every enabled type — including before the very first sync had
+ * "synced" + blue for every enabled type — including before the very first sync had
  * ever happened, and immediately after one that failed. The dots claimed everything was
  * fine while the error banner right above them said otherwise.
  *

@@ -128,11 +128,49 @@ describe("listDevices", () => {
 
   it("still lists a device whose packets predate the name field", async () => {
     h.files.set("konode_extensions_peer1.json", packet("peer1", "extensions", undefined, "2026-08-01T10:00:00.000Z"));
+    vi.spyOn(console, "info").mockImplementation(() => {});
 
     const [d] = await new SyncEngine(settings(), () => {}).listDevices();
 
     expect(d.label).toBeNull();
     expect(d.device_id).toBe("peer1");
+  });
+
+  it("names THIS device from its own settings, not from a stale packet", async () => {
+    // The user typed a name in Settings → Device. The file on the backend was written by
+    // an older build, or before the rename went out; neither is a reason to call this
+    // machine "Unnamed device" on the very screen where the name was just set.
+    h.files.set("konode_extensions_me.json", packet("me", "extensions", undefined, "2026-08-01T10:00:00.000Z"));
+
+    const [d] = await new SyncEngine(settings(), () => {}).listDevices();
+
+    expect(d.isSelf).toBe(true);
+    expect(d.label).toBe("My Laptop");
+  });
+
+  it("looks in another file when a device's smallest one predates names", async () => {
+    // An extension list that never changes can be years old, while the bookmark file was
+    // re-uploaded this morning by a build that does carry the name.
+    h.files.set("konode_extensions_peer1.json", packet("peer1", "extensions", undefined, "2026-08-01T10:00:00.000Z"));
+    h.files.set("konode_bookmarks_peer1.json", packet("peer1", "bookmarks", "Studio Mac", "2026-09-01T10:00:00.000Z"));
+
+    const [d] = await new SyncEngine(settings(), () => {}).listDevices();
+
+    expect(d.label).toBe("Studio Mac");
+    expect(h.fetched).toEqual(["konode_extensions_peer1.json", "konode_bookmarks_peer1.json"]);
+  });
+
+  it("does not pull a history packet just to look for a name", async () => {
+    // A history file can be megabytes. Once a smaller file has answered "no name here",
+    // that is the answer unless history is the device's ONLY file (#30).
+    h.files.set("konode_extensions_peer1.json", packet("peer1", "extensions", undefined, "2026-08-01T10:00:00.000Z"));
+    h.files.set("konode_history_peer1.json", packet("peer1", "history", "Old Box", "2026-09-01T10:00:00.000Z"));
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const [d] = await new SyncEngine(settings(), () => {}).listDevices();
+
+    expect(d.label).toBeNull();
+    expect(h.fetched).toEqual(["konode_extensions_peer1.json"]);
   });
 
   it("takes the last upload from the listing, not from the file it read for the name (#30)", async () => {
