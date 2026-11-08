@@ -8,7 +8,7 @@ All notable changes to Konode. Format loosely follows
 > upstream releases, not to this fork's product name. Kesonode-only changes are recorded
 > in the section immediately below and never change the upstream wire contract.
 
-## Kesonode fork (not upstream)
+## [1.5.3] - 2026-11-09
 
 ### Added
 
