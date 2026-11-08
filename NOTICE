@@ -1,0 +1,17 @@
+Kesonode
+
+This product is derived from Konode.
+  Original work: Konode — https://github.com/konabe-studio/konode
+  Copyright (c) Kōnabe Studio. Licensed under the Mozilla Public License 2.0.
+
+Kesonode is an independent fork of Konode v1.5.1. It ports upstream code and
+fixes but does not carry the upstream project's store listings, sponsorship
+pages, website, issue tracker, or author branding.
+
+The wire contract is intentionally frozen so existing data stays readable:
+file prefixes (konode_*, kesonode_*), the default sync folder name (Konode),
+the SyncPacket format (v1.0), SHA-256 checksums, AES-256-GCM / PBKDF2
+parameters, extension IDs, and OAuth configuration all remain as upstream
+defined them.
+
+The full text of the Mozilla Public License, version 2.0, is in the LICENSE file.
