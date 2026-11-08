@@ -196,6 +196,8 @@ npm run package:source   # → web-ext-artifacts/source/ 下两个可分发 zip
   三种兼容模式 · 设置导入/导出 · 冲突差异展示 · 设备活跃状态 · 还原点与删除保护 · 多语言界面。
 - **后续**：阅读清单 · 更多后端（Dropbox、S3 兼容、OneDrive）· 更快的历史同步 · 更多语言 · RTL 排版 · 超大书签树的增量 diff。
 
+完整规划见 [ROADMAP.md](ROADMAP.md)。
+
 ## 反馈与排查
 
 先查 [TROUBLESHOOTING.md](TROUBLESHOOTING.md)。本分支目前没有独立的 issue tracker、
