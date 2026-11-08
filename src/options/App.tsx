@@ -1,0 +1,3014 @@
+import { useEffect, useState, useCallback, useRef, Fragment } from "react";
+import type { SyncSettings, SyncState, BackendType, DataType, BackendConfig, SyncExtension, SnapshotMeta, DeviceInfo, DeviceBrowser } from "@/lib/types";
+import { sendMessage, request } from "@/lib/utils/messaging";
+import { t, tParts, plural, isolate, catalogueLocale } from "@/lib/utils/i18n";
+import { DORMANT_DEVICE_DAYS, isDormant, relativeTime } from "@/lib/device-activity";
+import { ENGINE_LABEL } from "@/lib/utils/browser-identity";
+import { interactiveSignIn, isDriveAuthAvailable, clearGDriveSession } from "@/lib/backends/gdrive-oauth";
+import {
+  allDataTypeAvailability, dataTypeAvailability, dataTypeApiPresent, ensurePermission,
+  hasPermission, unsupportedReason, eventPresent, permissionsToEnable, tabGroupsAskable,
+  type Availability, type PermissionOutcome,
+} from "@/lib/utils/capabilities";
+
+/**
+ * Which edges of a scroller still have content past them.
+ *
+ * A fixed mask is wrong in both directions: with nothing to scroll it fades edges that
+ * aren't cut off, and sitting at the top of a long list it claims there is something
+ * above. The platform has purpose-built answers for this — `scroll-state()` container
+ * queries, and scroll-driven animations — but both are Chromium-only today, and Kesonode
+ * runs on Firefox and on Orion (WebKit). So this measures instead.
+ *
+ * The ResizeObserver is what covers the tab strip: its overflow appears and disappears
+ * with the window width, not with scrolling. `revision` re-measures when the CONTENT
+ * changes without the box changing, which is how the log grows.
+ */
+// Interactive Google sign-in isn't supported on every engine (e.g. iOS WebKit /
+// Orion); gate the Drive sign-in so users get a note instead of a dead end.
+const DRIVE_AVAILABLE = isDriveAuthAvailable();
+import {
+  Github, Info,
+  Puzzle, AlertTriangle, CheckCircle2, XCircle,
+  Loader2, ExternalLink, User, LogOut, Eye, EyeOff,
+  Pencil, Key, Copy, Check, ArrowRight,
+  Trash2, RotateCcw, Camera, Mail, Star,
+} from "lucide-react";
+import { BookmarkExclusionTree } from "@/lib/ui/bookmark-exclusion-tree";
+import { BookmarkList } from "@/lib/ui/bookmark-list";
+import { ConflictsSection } from "@/options/conflicts-section";
+// Shown in the About section. The manifest is the single source of truth for the
+// version — bump `package.json` and the build stamps it into the manifest.
+const APP_VERSION = browser.runtime.getManifest().version;
+// The store this install came from, for the rating row under Feedback. The row is always
+// there; following it also ends the popup's one-time card (lib/rate-prompt.ts), so nobody
+// is asked for a rating they already gave. Null on a build no store knows.
+const REVIEW_PAGE = reviewPageFor(browser.runtime.id);
+
+function useScrollEdges<T extends HTMLElement>(axis: "x" | "y", revision: unknown = 0) {
+  // A CALLBACK ref, not useRef, and that distinction was the whole bug. The audit list
+  // only exists on the Activity tab, so on first mount ref.current was null and the effect
+  // bailed. Switching to that tab attaches the node but changes nothing the effect depends
+  // on, so it never ran again: no measure, no observer, no fade, forever. Holding the node
+  // in state means mounting IS a dependency. The tab strip never showed this because it is
+  // always mounted.
+  const [el, setEl] = useState<T | null>(null);
+  const [edges, setEdges] = useState({ start: false, end: false });
+
+  useEffect(() => {
+    if (!el) return;
+    const measure = (): void => {
+      const [pos, box, content] = axis === "x"
+        ? [el.scrollLeft, el.clientWidth, el.scrollWidth]
+        : [el.scrollTop, el.clientHeight, el.scrollHeight];
+      // 1px of slack: fractional layout means scrollTop rarely lands on an exact 0 or on
+      // an exact scrollHeight - clientHeight, so a strict compare leaves a hairline fade
+      // stuck on at either end.
+      setEdges({ start: pos > 1, end: pos + box < content - 1 });
+    };
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      ro.disconnect();
+    };
+  }, [el, axis, revision]);
+
+  const className = `scroll-fade${edges.start ? " fade-start" : ""}${edges.end ? " fade-end" : ""}`;
+  return { ref: setEl, className };
+}
+
+
+// Kesonode brand mark — the glyph only; the container supplies the green tile.
+function BrandMark({ size = 14, color = "currentColor" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="48 48 160 160" fill="none" aria-hidden="true">
+      <path d="M152 192C152 196.418 155.582 200 160 200H192C196.418 200 200 196.418 200 192V157.601C200 154.322 197.342 151.664 194.063 151.664H178.723C176.899 151.664 175.231 150.635 174.413 149.005C170.523 141.251 172.071 131.874 178.249 125.783L198.313 105.999C199.392 104.935 200 103.482 200 101.966V64C200 59.5817 196.418 56 192 56H157.119C153.998 56 151.163 57.8143 149.855 60.6475L107.816 151.732C106.917 153.679 104 153.039 104 150.894V111.329C104 106.91 100.418 103.329 96 103.329H64C59.5817 103.329 56 106.91 56 111.329V192C56 196.418 59.5817 200 64 200H100.67C102.801 200 104.845 199.149 106.346 197.637L141.743 161.993C145.516 158.193 152 160.866 152 166.221V192Z" fill={color} />
+    </svg>
+  );
+}
+
+import { generateRecoveryKey, MIN_PASSPHRASE_LENGTH } from "@/lib/crypto/encryption";
+import { KEYS, normalizeRemoteExtensions, setRateAnswered, type AuditEntry } from "@/lib/utils/storage";
+import { auditLogText } from "@/lib/utils/audit-text";
+import { isSafeContentUrl } from "@/lib/utils/url";
+import { defaultOtherRootId } from "@/lib/utils/bookmark-roots";
+import { browser, currentStore } from "@/lib/utils/ext";
+import { missingLocally, installOrSearchUrl, storeUrlFor, inferStore, STORE_NAME, type LocalExtLike } from "@/lib/utils/extensions-match";
+import { BACKEND_LABEL, PERMISSION_LOST_PREFIX, STATE_UPDATE } from "@/lib/constants";
+import {
+  providerCards, providerById, providerFromConfig, providerLabel, nextcloudUrl, nextcloudBaseFromUrl, pcloudRegionOf,
+  webdavUrlForCard,
+  type ProviderId,
+} from "@/lib/storage-providers";
+import { ProviderLogo } from "@/lib/provider-logos";
+import { reviewPageFor } from "@/lib/store-review";
+
+// ─── Secret field ───────────────────────────────────────────────────────────
+// Masks a *saved* secret (token / password / passphrase): once a value exists, the
+// raw string is no longer bound into the DOM — the field shows a •••• summary until
+// the user clicks Replace to enter a new one. The reveal toggle is per-field, so
+// unmasking one secret no longer unmasks the others.
+//
+// `sensitive` = the E2EE passphrase: unlike a rotatable API token / password, the
+// passphrase can't be cheaply changed (rotating means re-encrypting + re-keying every
+// device), so its summary is fully content-free — no last-4 tail and a fixed dot count
+// (no length leak). Screenshots / shoulder-surfing then reveal nothing.
+function SecretField({
+  value,
+  onChange,
+  placeholder,
+  sensitive = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  sensitive?: boolean;
+}) {
+  const hasSaved = value.length > 0;
+  const [editing, setEditing] = useState(!hasSaved);
+  const [revealed, setRevealed] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [copied, setCopied] = useState(false);
+  // The parent can set the value out-of-band (e.g. "Generate a strong key" fills the
+  // passphrase without going through our input). Our keystrokes keep draft === value,
+  // so a divergence while editing means an external set — collapse to the saved
+  // summary so the field isn't misleadingly empty (`draft` would still be "").
+  useEffect(() => {
+    if (editing && value && value !== draft) {
+      setEditing(false);
+      setDraft("");
+      setRevealed(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard unavailable — no-op */ }
+  };
+
+  if (hasSaved && !editing) {
+    const masked = sensitive
+      ? "•".repeat(12)
+      : "•".repeat(Math.min(Math.max(value.length - 4, 8), 24)) + value.slice(-4);
+    return (
+      <div className="input-pw-wrap input-pw-wrap-2">
+        {/* Reveal shows the true value on demand (user-initiated) — the default
+            summary stays content-free for the passphrase, so a screenshot leaks
+            nothing, but the value is still peekable without having to overwrite it. */}
+        <input className="field-input mono" type="text" value={revealed ? value : masked} readOnly tabIndex={-1} />
+        <div className="btn-eye-group">
+          <button
+            className="btn-eye"
+            type="button"
+            title={revealed ? t("common_hide") : t("common_show")}
+            onClick={() => setRevealed((v) => !v)}
+          >
+            {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+          <button
+            className="btn-eye"
+            type="button"
+            title={copied ? t("opt_secret_copied") : t("opt_secret_copy")}
+            style={copied ? { color: "var(--accent)" } : undefined}
+            onClick={copy}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+          <button
+            className="btn-eye"
+            type="button"
+            title={t("opt_secret_replace")}
+            onClick={() => { setDraft(""); setRevealed(false); setEditing(true); }}
+          >
+            <Pencil size={14} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="input-pw-wrap">
+      <input
+        className="field-input mono"
+        type={revealed ? "text" : "password"}
+        value={hasSaved ? draft : value}
+        onChange={(e) => { setDraft(e.target.value); onChange(e.target.value); }}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      <button
+        className="btn-eye"
+        type="button"
+        title={revealed ? t("common_hide") : t("common_show")}
+        onClick={() => setRevealed((v) => !v)}
+      >
+        {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
+      </button>
+    </div>
+  );
+}
+
+/** The bookmark folder an import creates, and the name the message reports.
+ *
+ *  Deliberately NOT a translated string: it is a folder name, so it travels to every other
+ *  device through the sync. Translating it would give each language a different folder and
+ *  break the one thing the sync exists for. Hoisted to a constant so the folder we create
+ *  and the folder we claim to have created cannot drift apart. */
+const IMPORT_FOLDER_NAME = "Kesonode Import";
+
+// ─── Nav ──────────────────────────────────────────────────────────────────
+
+type NavSection = "backend" | "data" | "device" | "activity" | "advanced";
+
+/** Tabs with settings to save. Statistics and Activity have none, so no bar there. */
+const SAVEABLE_TABS = new Set<NavSection>(["backend", "data", "device", "advanced"]);
+
+// Text only. The tab icons were noise: six glyphs competing with six words that
+// already said the same thing, in the one strip that has to stay legible when the
+// window is narrow.
+const NAV: { id: NavSection; labelKey: string }[] = [
+  { id: "backend",  labelKey: "opt_nav_backend" },
+  { id: "data",     labelKey: "opt_nav_data" },
+  { id: "device",   labelKey: "opt_nav_device" },
+  { id: "activity", labelKey: "opt_nav_activity" },
+  { id: "advanced", labelKey: "opt_nav_advanced" },
+];
+
+/** An information box. The icon belongs to the pattern, the same way notice-warn owns
+ *  its warning triangle — kept in one place so it can't go missing from one instance. */
+function InfoHint({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="config-hint">
+      <Info size={14} />
+      <div>{children}</div>
+    </div>
+  );
+}
+
+// Human-readable byte size for the transfer stat (cumulative up + down).
+const formatBytes = (n: number): string => {
+  if (!n || n < 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
+  return `${(n / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+};
+
+// When an Activity entry was written, to the second, in the reader's own locale.
+const auditTime = (iso: string): string =>
+  new Date(iso).toLocaleString([], {
+    month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+
+// "Brave (Chromium)" on a device row, or the engine alone where the browser gave no name.
+// The name came from another program, so it is isolated from the sentence around it.
+const browserText = (b: DeviceBrowser): string =>
+  b.name ? t("opt_device_browser", [isolate(b.name), ENGINE_LABEL[b.engine]]) : ENGINE_LABEL[b.engine];
+
+// Backend label stamped on a newly created BackendConfig. The user-facing card
+// copy and icons live in the shared storage-providers module.
+
+// Label and description are `datatype_<type>` and `datatype_<type>_desc`, shared with the
+// setup wizard so the two screens cannot describe the same toggle differently again.
+const DATA_TYPES: DataType[] = ["bookmarks", "sessions", "history", "extensions"];
+
+// ─── App ──────────────────────────────────────────────────────────────────
+
+export default function OptionsApp() {
+  const [settings, setSettings]   = useState<SyncSettings | null>(null);
+  // The popup deep-links here with #activity; otherwise start on Storage.
+  const [activeNav, setActiveNav] = useState<NavSection>(() => {
+    const hash = window.location.hash.replace("#", "");
+    return NAV.some((n) => n.id === hash) ? (hash as NavSection) : "backend";
+  });
+  // And written back, so a reload lands on the tab you were reading. Only the popup's deep
+  // link ever set the hash, so every other visit had none, and F5 on Activity went back to
+  // Storage: exactly the refresh somebody makes while waiting for a sync to show up there.
+  // replaceState rather than assigning the hash, so switching tabs does not fill up Back.
+  useEffect(() => {
+    if (window.location.hash !== `#${activeNav}`) history.replaceState(null, "", `#${activeNav}`);
+  }, [activeNav]);
+  const [saving, setSaving]       = useState(false);
+  const [saveOk, setSaveOk]       = useState(false);
+  const [testStatus, setTestStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  // Save-time problems get their OWN surface. They used to be written into
+  // `testStatus`, which is rendered only in the Storage tab's Test-connection row —
+  // while the passphrase field that triggers most of them lives in Advanced. So on
+  // three of the four tabs Save just did nothing, with no explanation anywhere.
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [testing, setTesting]     = useState(false);
+
+  // What this browser can actually sync, and why a toggle refused to move. Both live
+  // next to the row they belong to — see toggleDataType and the Data Types tab.
+  const [availability, setAvailability] = useState<Partial<Record<DataType, Availability>>>({});
+  const [typeError, setTypeError] = useState<{ type: DataType; message: string } | null>(null);
+  // Whether the bookmark picker is open (#54). Null until the user touches the switch: it
+  // then follows the stored list, so a device with exclusions opens with them on show.
+  const [excludeOpen, setExcludeOpen] = useState<boolean | null>(null);
+  // Tab group names and colours (#11): whether this browser can be asked for `tabGroups` at
+  // all, and whether it is held. Membership needs neither, so this row only adds the names.
+  const [groupNames, setGroupNames] = useState<{ askable: boolean; granted: boolean }>({ askable: false, granted: false });
+  const [groupNamesError, setGroupNamesError] = useState(false);
+
+  /**
+   * Read on mount, and again whenever a permission changes.
+   *
+   * Read once, this went stale the moment anything granted or revoked a permission from
+   * OUTSIDE the page, which on Firefox is a couple of clicks away: about:addons lists every
+   * optional toggle. Reported from a device that granted them all back, watched the sync
+   * recover, and still had three rows insisting the permission was gone. Switching tabs did
+   * not help, because the tabs are this same component; only F5 did.
+   *
+   * `permissions.onAdded` / `onRemoved` fire for a change made anywhere, including the
+   * browser's own screen and Kesonode's own request. Gated on the events existing, so a
+   * browser without them behaves exactly as it did before rather than throwing at mount.
+   */
+  useEffect(() => {
+    const refresh = () => {
+      void allDataTypeAvailability().then((next) => {
+        setAvailability(next);
+        // The red row a refused toggle left behind is the same staleness one level down:
+        // it outlives the refusal it was about. Cleared only for a type that is now ready,
+        // so an "this browser doesn't implement it" message is left where it belongs.
+        setTypeError((prev) => (prev && next[prev.type]?.state === "ready" ? null : prev));
+      });
+      void Promise.all([tabGroupsAskable(), hasPermission({ permissions: ["tabGroups"] })])
+        .then(([askable, granted]) => setGroupNames({ askable, granted: askable && granted }));
+    };
+    refresh();
+    if (!eventPresent("permissions", "onAdded")) return;
+    // `@types/chrome` declares these events without `removeListener`, which they do have.
+    // Same shape of gap as the one apiPresent exists for: the type is a promise about the
+    // API surface, not a description of it.
+    type PermissionEvent = { addListener(cb: () => void): void; removeListener(cb: () => void): void };
+    const added = browser.permissions.onAdded as unknown as PermissionEvent;
+    const removed = browser.permissions.onRemoved as unknown as PermissionEvent;
+    added.addListener(refresh);
+    removed.addListener(refresh);
+    return () => {
+      added.removeListener(refresh);
+      removed.removeListener(refresh);
+    };
+  }, []);
+
+  // Google Drive
+  const [loadError, setLoadError]             = useState<string | null>(null);
+  const [gdriveUser, setGdriveUser]           = useState<{ email: string; displayName: string } | null>(null);
+  const [gdriveConnecting, setGdriveConnecting] = useState(false);
+  const [gdriveError, setGdriveError]         = useState<string | null>(null);
+
+  // GitHub user info (fetched after token entry)
+  const [githubUser, setGithubUser] = useState<{ login: string; name: string } | null>(null);
+  const [githubChecking, setGithubChecking] = useState(false);
+
+  // Import/Export
+  const [genKey, setGenKey] = useState<string | null>(null);
+  // Passphrase confirm (double-entry): a mistyped E2EE passphrase makes data
+  // unrecoverable, so a *new* manually-typed passphrase must be re-entered before
+  // Save. `initialPass` is what loaded from settings (an untouched passphrase needs
+  // no re-confirm); a generated key is exact by construction, so it skips confirm.
+  const [initialPass, setInitialPass] = useState("");
+  const [passConfirm, setPassConfirm] = useState("");
+  // Require an explicit confirmation before disabling E2EE (a downgrade).
+  const [confirmDisableEnc, setConfirmDisableEnc] = useState(false);
+  const [exportStatus, setExportStatus] = useState<"idle" | "ok" | "error">("idle");
+  const [importStatus, setImportStatus] = useState<"idle" | "ok" | "error">("idle");
+  const [importCount, setImportCount] = useState(0);
+
+  // Extensions diff
+  const [remoteExtensions, setRemoteExtensions] = useState<SyncExtension[] | null>(null);
+  const [localExts, setLocalExts] = useState<LocalExtLike[]>([]);
+
+  // Selected storage-provider card — seeded from the saved config (below), then
+  // user-driven. null = nothing chosen yet.
+  const [selectedProvider, setSelectedProvider] = useState<ProviderId | null>(null);
+
+  // The provider that is actually PERSISTED, i.e. the one the sync engine uses.
+  // Kept apart from `selectedProvider` because clicking a card only *stages* a
+  // switch — until Save the old provider is still the live one, so the "active"
+  // badge has to follow this, not the selection. Refreshed on load and on save.
+  const [savedProvider, setSavedProvider] = useState<ProviderId | null>(null);
+
+  /**
+   * The settings as last loaded or saved, so "you have edits" can be told from "you don't".
+   *
+   * Two fields are excluded because the extension writes them itself and the user never
+   * edits them here: `onboarding_completed` is latched (and separately persisted) the first
+   * time a working config appears, and `device_id` is minted on first read. Counting either
+   * as an edit would leave the page permanently claiming unsaved work.
+   */
+  const [savedFingerprint, setSavedFingerprint] = useState<string | null>(null);
+
+  // Per-card WebDAV credentials (and the custom URL), remembered for the session.
+  // Every preset card shares the single `webdav` backend slot, so switching cards
+  // must swap that slot's contents — parking the outgoing card's values here
+  // instead of destroying them, so clicking away and back doesn't empty the form.
+  const credStash = useRef<Partial<Record<ProviderId, { username: string; password: string; url: string }>>>({});
+
+  // Activity tab: the audit log (newest first, capped at 200 by the logger).
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [auditOnlyErrors, setAuditOnlyErrors] = useState(false);
+
+  // Scroll hints. The tab strip's overflow tracks the WINDOW (ResizeObserver), and the
+  // active tab going semibold nudges its width, hence activeNav as the revision. The log's
+  // height tracks its rows, so filtering it or clearing it has to re-measure.
+  const tabbarFade = useScrollEdges<HTMLElement>("x", activeNav);
+  const auditFade = useScrollEdges<HTMLDivElement>("y", audit.length + (auditOnlyErrors ? 1e6 : 0));
+
+  // Activity tab: bookmark restore points (loaded when the tab opens).
+  const [snapshots, setSnapshots] = useState<SnapshotMeta[]>([]);
+  const [snapBusy, setSnapBusy] = useState(false);
+  const [snapMsg, setSnapMsg] = useState<string | null>(null);
+  // Its OWN slot. The clear-log failure used to be written into snapMsg, which renders in
+  // the Restore points card ninety lines above the button that produced it: the one place
+  // nobody who just clicked Clear log is looking.
+  const [auditMsg, setAuditMsg] = useState<string | null>(null);
+  const [logCopied, setLogCopied] = useState(false);
+  // "loading" | "ok" | an error message — so an empty list can be told apart from a
+  // list we never managed to read. See the Activity effect below.
+  const [snapLoad, setSnapLoad] = useState<"loading" | "ok" | string>("loading");
+  const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  // Activity tab: the blocked-deletion card. Two-step, like Restore and Delete above —
+  // applying it removes bookmarks, so it does not hang off a single click.
+  const [confirmApply, setConfirmApply] = useState(false);
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyMsg, setApplyMsg] = useState<string | null>(null);
+
+  // Activity tab data (fetched once on mount; see the effect below).
+  const [syncState, setSyncState] = useState<SyncState | null>(null);
+  const [devices, setDevices] = useState<DeviceInfo[] | null>(null);
+  const [devicesError, setDevicesError] = useState<string | null>(null);
+  const [forgetting, setForgetting] = useState<string | null>(null);
+  const [confirmForget, setConfirmForget] = useState<string | null>(null);
+  // Survives the forgotten device disappearing from the list, so it can't hang off its row.
+  const [forgetResult, setForgetResult] = useState<{ label: string; removed: number } | null>(null);
+
+  const settingsFingerprint = (s: SyncSettings | null): string => {
+    if (!s) return "";
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { onboarding_completed, device_id, ...userEditable } = s;
+    return JSON.stringify(userEditable);
+  };
+
+  const load = useCallback(async () => {
+    // Through `request`, because the alternative is what the render below used to do with
+    // a rejected round trip: `settings` stayed null and Settings showed a spinner that
+    // never stopped, with nothing said. This page has been reported as "does not load"
+    // twice already (#3, #5); it should not have a third way to do it silently.
+    const sent = await request({ type: "GET_SETTINGS" });
+    if (!sent.ok) { setLoadError(sent.error); return; }
+    setLoadError(null);
+    const res = sent.res;
+    if (res.type === "SETTINGS") {
+      setSettings(res.payload);
+      setSavedFingerprint(settingsFingerprint(res.payload));
+      setInitialPass(res.payload.encryption_passphrase ?? "");
+      const dav = res.payload.backends.find((b) => b.type === "webdav")?.webdav;
+      setSavedProvider(providerFromConfig(res.payload.active_backend, dav?.url, dav?.username));
+    }
+  }, []);
+
+  // Read on mount and again after every sync, which is what writes it.
+  const loadRemoteExtensions = useCallback(() => {
+    void browser.storage.local.get(KEYS.REMOTE_EXTENSIONS).then((r) => {
+      // Use the normalizer: the value is a device-keyed map now, not the legacy
+      // single object — reading `.extensions` off the map returned nothing, so the
+      // options "missing on this device" list stayed empty (the popup was correct).
+      setRemoteExtensions(normalizeRemoteExtensions(r[KEYS.REMOTE_EXTENSIONS]));
+    }).catch(() => { /* the peer cache is a display nicety; a read failure must not blank Settings */ });
+  }, []);
+
+  useEffect(() => {
+    load();
+    void browser.storage.local.get(KEYS.GDRIVE_SESSION).then((r) => {
+      // A stored session means we have a refresh token — show the account
+      // regardless of access-token age (it renews silently).
+      const s = r[KEYS.GDRIVE_SESSION];
+      if (s) setGdriveUser({ email: s.email ?? "", displayName: s.displayName ?? "" });
+    }).catch(() => { /* no session to show is the normal case, not an error */ });
+    loadRemoteExtensions();
+  }, [load, loadRemoteExtensions]);
+
+  // Keyed on the availability the permission listener already refreshes rather than on the
+  // mount, because the permission can come and go while Settings is open: read once, this
+  // list outlived the answer it was about.
+  const extApiState = availability.extensions?.state;
+
+  /**
+   * This browser's own extension list, for the "missing on this device" comparison.
+   *
+   * Re-read whenever `management` arrives or leaves, because an empty `localExts` is not a
+   * neutral "don't know" here: every peer extension then reads as missing on this device.
+   * Revoked mid-session, the card went from a true 4 to all 13 and offered Install buttons
+   * for extensions installed on this very machine (2026-09-10). Cleared on the way out for
+   * the same reason, so the stale answer cannot outlive the permission either.
+   *
+   * `management` is optional, and a `.catch()` is not enough on its own. Chrome does not
+   * hide the namespace: `chrome.management` is always there, carrying only
+   * `getSelf`/`uninstallSelf` until the permission is granted. So `getAll` is not a
+   * function, and the call throws SYNCHRONOUSLY, before any promise exists for `.catch()`
+   * to catch. Thrown from inside an effect, that unmounts the tree, and the whole Settings
+   * page renders blank. That is the default state of a fresh install: 1.2.0 made
+   * `management` optional, and the wizard only asks for it if you switch extension sync
+   * on. Reported twice (#5, and again with the exact "g.management.getAll is not a
+   * function" stack). `state === "ready"` already means the API is there; the presence
+   * check stays as the guard against acting on an availability read a revocation has just
+   * overtaken.
+   */
+  useEffect(() => {
+    if (extApiState !== "ready" || !dataTypeApiPresent("extensions")) {
+      setLocalExts([]);
+      return;
+    }
+    void browser.management.getAll()
+      .then((exts) => setLocalExts(exts.map((e) => ({ id: e.id, name: e.name, homepageUrl: e.homepageUrl }))))
+      .catch(() => {});
+  }, [extApiState]);
+
+  // Load Statistics data once on mount: sync state (last sync, counts, bytes), a live
+  // local bookmark count, open-tab count (only if the tabs permission is granted), and
+  // peer reach (distinct peer devices + how many peer sessions are available).
+  useEffect(() => {
+    void (async () => {
+      const st = await request({ type: "GET_STATE" });
+      if (st.ok && st.res.type === "STATE") setSyncState(st.res.payload);
+
+      try {
+        const r = await browser.storage.local.get(KEYS.AUDIT_LOG);
+        setAudit((r[KEYS.AUDIT_LOG] as AuditEntry[]) ?? []);
+      } catch { /* ignore */ }
+
+
+    })();
+  }, []);
+
+  // Seed the selected provider card once settings arrive: derive it from the saved
+  // backend + WebDAV URL. Runs once (guarded on the null sentinel) so it never fights
+  // the user's own selection.
+  useEffect(() => {
+    if (selectedProvider !== null || !settings) return;
+    const dav = settings.backends.find((b) => b.type === "webdav")?.webdav;
+    setSelectedProvider(providerFromConfig(settings.active_backend, dav?.url, dav?.username));
+  }, [settings, selectedProvider]);
+
+  // Devices come from the backend too, so they wait for the tab as well. Reused by the
+  // forget action to refresh the list in place.
+  const loadDevices = useCallback(async () => {
+    setDevicesError(null);
+    const r = await request({ type: "LIST_DEVICES" });
+    if (!r.ok) { setDevicesError(r.error); setDevices([]); return; }
+    // "No devices" must never stand in for "the list failed to load", the same rule the
+    // restore points learned the hard way. request() already folds an ERROR reply into
+    // ok:false, so the only surprise left is a reply of the wrong shape.
+    if (r.res.type === "DEVICES") setDevices(r.res.payload);
+    else { setDevicesError(t("opt_devices_bad_reply")); setDevices([]); }
+  }, []);
+
+  useEffect(() => {
+    if (activeNav !== "activity") return;
+    void loadDevices();
+  }, [activeNav, loadDevices]);
+
+  // The outcome has to be SAID. The row simply vanished, and then a device that is still
+  // running reappeared a minute later on its own — which reads either as "the forget didn't
+  // work" or as "something put it back". Both are wrong, and neither is the user's fault:
+  // an action that deletes files from your storage owes you an account of itself.
+  const forgetDevice = async (id: string, label: string) => {
+    setForgetting(id);
+    setConfirmForget(null);
+    setForgetResult(null);
+    const r = await request({ type: "FORGET_DEVICE", payload: { device_id: id } });
+    if (r.ok && r.res.type === "DEVICE_FORGOTTEN") {
+      setForgetResult({ label, removed: r.res.payload.removed });
+    } else if (!r.ok) {
+      setDevicesError(r.error);
+    }
+    await loadDevices();
+    setForgetting(null);
+  };
+
+  // Load restore points when the Activity tab opens (LIST_SNAPSHOTS hits the backend,
+  // so don't fetch it until the user actually looks). `quiet` is a refresh of a list that
+  // is already on screen, which keeps it there instead of blinking to "loading" each cycle.
+  const loadSnapshots = useCallback(async (quiet = false) => {
+    if (!quiet) setSnapLoad("loading");
+    // "No restore points yet" must never stand in for "the list failed to load" — on a
+    // recovery screen that is the worst possible lie. The ERROR response used to be
+    // dropped and the rejection was unhandled, so both read as "you have no backups".
+    const r = await request({ type: "LIST_SNAPSHOTS" });
+    if (!r.ok) { setSnapLoad(r.error); return; }
+    if (r.res.type === "SNAPSHOTS") setSnapshots(r.res.payload);
+    setSnapLoad("ok");
+  }, []);
+
+  useEffect(() => {
+    if (activeNav !== "activity") return;
+    void loadSnapshots();
+  }, [activeNav, loadSnapshots]);
+
+  /**
+   * Settings follows the sync while it is open, the way the popup does.
+   *
+   * Everything on Activity was read once: the stats and the Blocked deletion card on mount,
+   * the device list and the restore points when the tab opened. So with Settings open, a
+   * deletion blocked on the next cycle rang the popup's banner and left this page saying
+   * "No restore points yet", under a device list still quoting the peer's upload from before
+   * it. Only F5 caught up, and F5 also threw you back to Storage (see the hash above).
+   *
+   * The state comes with every STATE_UPDATE the worker already broadcasts, and the log is
+   * followed in storage as each line is written, so both cost nothing. Devices and restore
+   * points live on the backend, a listing plus a read per device, so they are re-read when a
+   * sync FINISHES, which is what changes them, and only while Activity is on screen: a
+   * Settings tab left open in the background would otherwise spend requests every minute,
+   * and a free Nutstore account counts every one.
+   */
+  useEffect(() => {
+    const handler = (msg: { type: string; payload: SyncState }) => {
+      if (msg.type === STATE_UPDATE) setSyncState(msg.payload);
+    };
+    browser.runtime.onMessage.addListener(handler);
+    return () => browser.runtime.onMessage.removeListener(handler);
+  }, []);
+
+  useEffect(() => {
+    if (!eventPresent("storage", "onChanged")) return;
+    const handler = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area !== "local" || !changes[KEYS.AUDIT_LOG]) return;
+      setAudit((changes[KEYS.AUDIT_LOG].newValue as AuditEntry[] | undefined) ?? []);
+    };
+    browser.storage.onChanged.addListener(handler);
+    return () => browser.storage.onChanged.removeListener(handler);
+  }, []);
+
+  const lastStatus = useRef<SyncState["status"] | null>(null);
+  // A sync that finished while Activity was open but hidden, owed a re-read on the way back.
+  // Skipping the read while hidden is what keeps a background tab from spending requests; not
+  // making it up afterwards is what left the device list quoting a peer's old upload time,
+  // with the page in plain view, until the next sync or a reload. Seen with Settings behind
+  // another browser's window during the 1.4.0 pass.
+  const missedWhileHidden = useRef(false);
+  useEffect(() => {
+    const status = syncState?.status ?? null;
+    const finished = lastStatus.current === "syncing" && status !== "syncing";
+    lastStatus.current = status;
+    if (!finished) return;
+    loadRemoteExtensions();
+    if (activeNav !== "activity") return;
+    if (document.visibilityState !== "visible") { missedWhileHidden.current = true; return; }
+    void loadDevices();
+    void loadSnapshots(true);
+  }, [syncState?.status, activeNav, loadDevices, loadSnapshots, loadRemoteExtensions]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible" || !missedWhileHidden.current) return;
+      if (activeNav !== "activity") return; // opening Activity reads both anyway
+      missedWhileHidden.current = false;
+      void loadDevices();
+      void loadSnapshots(true);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [activeNav, loadDevices, loadSnapshots]);
+
+  // Latch onboarding_completed the first time a working config is seen (backend
+  // configured + a data type on), so the setup card doesn't reappear when the user
+  // later clicks around the provider cards. Persist it so it survives reloads.
+  useEffect(() => {
+    if (!settings || settings.onboarding_completed) return;
+    const ab = settings.active_backend;
+    const w = settings.backends.find((b) => b.type === "webdav")?.webdav;
+    const g = settings.backends.find((b) => b.type === "github")?.github;
+    const configured =
+      ab === "gdrive" ? !!gdriveUser
+      : ab === "webdav" ? !!(w?.url && w?.username && w?.password)
+      : ab === "github" ? !!(g?.token && g?.repo)
+      : false;
+    if (configured && settings.enabled_types.length > 0) {
+      update({ onboarding_completed: true });
+      void sendMessage({ type: "SAVE_SETTINGS", payload: { onboarding_completed: true } });
+    }
+  }, [settings, gdriveUser]);
+
+  /** A false positive here is harmless (Save stays clickable); a false negative would not
+   *  be, which is why nothing is ever disabled on the strength of it. */
+  const dirty = savedFingerprint !== null && settings !== null
+    && settingsFingerprint(settings) !== savedFingerprint;
+
+  const update = (partial: Partial<SyncSettings>) =>
+    setSettings((p) => p ? { ...p, ...partial } : p);
+
+  const updateBackend = (type: BackendType, partial: Partial<BackendConfig>) => {
+    if (!settings) return;
+    const backends = [...settings.backends];
+    const idx = backends.findIndex((b) => b.type === type);
+    if (idx >= 0) backends[idx] = { ...backends[idx], ...partial };
+    else backends.push({ type, label: BACKEND_LABEL[type], enabled: true, ...partial });
+    update({ backends });
+  };
+
+  const getBackend = (type: BackendType) => settings?.backends.find((b) => b.type === type);
+
+  // Pick a storage-provider card → set the active backend, and for WebDAV presets
+  // fill in the server URL (fixed endpoint, default region, or clear it so the user
+  // types a host/URL). Nothing about the sync format changes.
+  const pickProvider = (id: ProviderId) => {
+    if (selectedProvider === id) return; // already on this card — nothing to swap
+    const prev = selectedProvider;
+    setSelectedProvider(id);
+
+    // Park the outgoing card's WebDAV values before anything below overwrites the
+    // shared slot, so switching back restores them instead of showing empty fields.
+    const w = getBackend("webdav")?.webdav;
+    if (prev && providerById(prev).backend === "webdav") {
+      credStash.current[prev] = {
+        username: w?.username ?? "",
+        password: w?.password ?? "",
+        url: w?.url ?? "",
+      };
+    }
+
+    const p = providerById(id);
+    if (p.backend !== "webdav") {
+      // The config row, not just the name. Picking a WebDAV card creates it as a side
+      // effect of filling in the fields below; Drive has no fields to fill, so nothing
+      // created one and `active_backend: "gdrive"` pointed at a row that did not exist.
+      // The card then showed ACTIVE and signed in while every sync answered "no backend
+      // configured". `updateBackend` leaves an existing row alone.
+      updateBackend(p.backend, {});
+      update({ active_backend: p.backend });
+      return;
+    }
+
+    // Restore this card's own values (empty on a first visit) — never the other
+    // card's account, which is a different login.
+    const kept = credStash.current[id] ?? { username: "", password: "", url: "" };
+    const url = webdavUrlForCard(id, kept.url);
+    updateBackend("webdav", { webdav: { ...w, url, username: kept.username, password: kept.password } as any });
+    update({ active_backend: "webdav" });
+  };
+
+  // "Syncing to <url>." with the URL as its own monospace element. `tParts` splits the
+  // translated sentence at its placeholder, so a language that puts the address first or
+  // last still reads correctly — two half-sentence keys would have assumed otherwise.
+  const syncingTo = (url: string) => {
+    const [before, after] = tParts("provider_syncing_to");
+    return <>{before}<code>{url}</code>{after}</>;
+  };
+
+  // Same shape as syncingTo(): one placeholder rendered as <code>, so the scope name stays
+  // a literal and the sentence around it stays the translator's to arrange.
+  const scopeHint = () => {
+    const [before, after] = tParts("opt_gdrive_scope_hint");
+    return <>{before}<code>drive.file</code>{after}</>;
+  };
+
+  // The word carrying the warning is emphasised, so it is its own key dropped into the
+  // sentence through tParts — same reason as syncingTo(): word order stays translatable.
+  const boldUnencrypted = (key: string) => {
+    const [before, after] = tParts(key);
+    return <>{before}<b>{t("opt_unencrypted")}</b>{after}</>;
+  };
+
+  // Two links inside one clause, so the pair is the placeholder and opt_or joins them.
+  // Splitting the sentence instead would have hard-coded English word order around them.
+  const passwordManagers = () => {
+    const [before, after] = tParts("opt_no_password_use");
+    return (
+      <>
+        {before}
+        <a href="https://bitwarden.com" target="_blank" rel="noreferrer">Bitwarden</a>
+        {` ${t("opt_or")} `}
+        <a href="https://proton.me/pass" target="_blank" rel="noreferrer">Proton Pass</a>
+        {after}
+      </>
+    );
+  };
+
+  // Shared WebDAV username + password fields (used by every WebDAV preset card).
+  const webdavCreds = () => {
+    const w = getBackend("webdav")?.webdav;
+    return (
+      <div className="field-row-2">
+        <div className="field-group" style={{ flex: 1 }}>
+          <label className="field-label">{t("opt_webdav_user_label")}</label>
+          <input
+            className="field-input mono"
+            value={w?.username ?? ""}
+            onChange={(e) => updateBackend("webdav", { webdav: { ...w, username: e.target.value } as any })}
+            placeholder={t("opt_webdav_user_placeholder")}
+            autoComplete="off"
+          />
+        </div>
+        <div className="field-group" style={{ flex: 1 }}>
+          <label className="field-label">{t("opt_webdav_pass_label")}</label>
+          <SecretField
+            value={w?.password ?? ""}
+            placeholder="••••••••"
+            sensitive
+            onChange={(v) => updateBackend("webdav", { webdav: { ...w, password: v } as any })}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  // The whole log, word for word, whatever the errors-only switch shows: a bug report needs
+  // the context around a failure as much as the failure. See auditLogText.
+  const copyAudit = async () => {
+    setAuditMsg(null);
+    try {
+      const text = auditLogText(audit, { version: browser.runtime.getManifest().version, browser: navigator.userAgent });
+      await navigator.clipboard.writeText(text);
+      setLogCopied(true);
+      setTimeout(() => setLogCopied(false), 1500);
+    } catch {
+      setAuditMsg(t("opt_log_copy_failed"));
+    }
+  };
+
+  const clearAudit = async () => {
+    setAuditMsg(null);
+    const sent = await request({ type: "CLEAR_AUDIT_LOG" });
+    // Only claim the log is empty if it actually was cleared. Emptying the list on a
+    // failed round trip tells the user their history is gone when it is still there.
+    if (sent.ok) setAudit([]);
+    else setAuditMsg(sent.error);
+  };
+
+  const createSnapshot = async () => {
+    setSnapBusy(true); setSnapMsg(null);
+    try {
+      const sent = await request({ type: "CREATE_SNAPSHOT" });
+      if (!sent.ok) setSnapMsg(sent.error);
+      else if (sent.res.type === "SNAPSHOTS") { setSnapshots(sent.res.payload); setSnapMsg(t("opt_snap_saved")); }
+    } finally {
+      setSnapBusy(false);
+    }
+  };
+
+  const restoreSnapshot = async (name: string) => {
+    setSnapBusy(true); setSnapMsg(null); setConfirmRestore(null);
+    try {
+      const sent = await request({ type: "RESTORE_SNAPSHOT", payload: { name } });
+      if (!sent.ok) setSnapMsg(sent.error);
+      else if (sent.res.type === "SNAPSHOT_RESTORED") setSnapMsg(plural("opt_snap_restored", sent.res.payload.restored));
+    } finally {
+      setSnapBusy(false);
+    }
+  };
+
+  // "Yes, apply the deletion the guard blocked." The service worker arms a one-shot
+  // approval and syncs bookmarks straight away, so the result is visible here rather
+  // than a minute later. Re-reads state afterwards: a successful apply clears the
+  // recovery notice, which is what makes this card go away.
+  const applyBlockedDeletion = async () => {
+    setApplyBusy(true); setApplyMsg(null); setConfirmApply(false);
+    // Through `request`, and inside a finally, because this button removes bookmarks and
+    // sits on the recovery screen. A rejected round trip (a cold worker, a handler that
+    // threw before answering) used to leave the spinner turning with nothing said, on the
+    // one screen where a user is already worried about their data.
+    try {
+      const sent = await request({
+        type: "APPROVE_BULK_DELETE",
+        payload: { blocked: syncState?.recovery_notice?.blocked ?? 0 },
+      });
+      if (!sent.ok) setApplyMsg(sent.error);
+      // Re-read either way: the sync may have applied the deletion and cleared the notice
+      // even where the answer did not reach us.
+      const after = await request({ type: "GET_STATE" });
+      if (after.ok && after.res.type === "STATE") setSyncState(after.res.payload);
+      try {
+        const r = await browser.storage.local.get(KEYS.AUDIT_LOG);
+        setAudit((r[KEYS.AUDIT_LOG] as AuditEntry[]) ?? []);
+      } catch { /* the log is a nicety here, not the point of the action */ }
+    } finally {
+      setApplyBusy(false);
+    }
+  };
+
+  const deleteSnapshot = async (name: string) => {
+    setSnapBusy(true); setSnapMsg(null); setConfirmDelete(null);
+    try {
+      const sent = await request({ type: "DELETE_SNAPSHOT", payload: { name } });
+      if (!sent.ok) setSnapMsg(sent.error);
+      else if (sent.res.type === "SNAPSHOTS") { setSnapshots(sent.res.payload); setSnapMsg(t("opt_snap_deleted")); }
+    } finally {
+      setSnapBusy(false);
+    }
+  };
+
+  // http:// warning shown under any WebDAV card whose URL would send the password in the clear.
+  const webdavHttpWarn = () => {
+    const u = getBackend("webdav")?.webdav?.url ?? "";
+    if (!/^http:\/\//i.test(u) || /^http:\/\/(localhost|127\.)/i.test(u)) return null;
+    // Two sentences, each split around its own scheme, rather than one string with two
+    // inline elements: tParts carries a single placeholder, and the schemes are literals
+    // that never translate, so they stay <code> and word order stays the translator's.
+    const [warnBefore, warnAfter] = tParts("opt_webdav_http_warn");
+    const [useBefore, useAfter] = tParts("opt_webdav_http_use");
+    return (
+      <div className="error-row">
+        <AlertTriangle size={12} /> {warnBefore}<code>http://</code>{warnAfter} {useBefore}<code>https://</code>{useAfter}
+      </div>
+    );
+  };
+
+  // #2 double-entry: require a confirm only for a *new*, manually-typed passphrase —
+  // not an untouched saved one, and not a generated key (exact by construction).
+  const currentPass = settings?.encryption_passphrase ?? "";
+  const needsPassConfirm =
+    !!settings?.encryption_enabled && currentPass.length > 0 && currentPass !== initialPass && currentPass !== genKey;
+  const passMismatch = needsPassConfirm && passConfirm !== currentPass;
+  // Strength floor for a NEW manually-typed passphrase only (a generated key is
+  // long by construction; an already-saved shorter one must keep working).
+  const passTooShort = needsPassConfirm && currentPass.length < MIN_PASSPHRASE_LENGTH;
+
+  // WebDAV hits an arbitrary user host that isn't in host_permissions, so we
+  // request it at runtime (optional_host_permissions). Must run inside a user
+  // gesture, so call it first — before any await — in the click handlers below.
+  const requestWebdavHostPermission = async (): Promise<PermissionOutcome | "bad-url"> => {
+    const url = getBackend("webdav")?.webdav?.url;
+    if (!url) return "bad-url";
+    try {
+      const origin = new URL(url).origin + "/*";
+      return await ensurePermission({ origins: [origin] });
+    } catch {
+      return "bad-url";
+    }
+  };
+
+  /** What to say when the WebDAV host permission didn't come through.
+   *
+   *  "Permission was not granted" was the only answer this had, and on Firefox for
+   *  Android it was actively misleading: there is no prompt to decline there, so the
+   *  user is told they refused something they were never asked. */
+  const webdavPermissionError = (outcome: PermissionOutcome | "bad-url"): string =>
+    outcome === "cannot-prompt"
+      ? t("opt_err_perms_no_prompt")
+      : outcome === "bad-url"
+        ? t("opt_err_perms_bad_url")
+        : t("opt_err_perms_denied");
+
+  const save = async () => {
+    if (!settings) return;
+    setSaveError(null);
+    if (passTooShort) {
+      setSaveError(t("opt_err_pass_too_short", String(MIN_PASSPHRASE_LENGTH)));
+      return;
+    }
+    if (passMismatch) {
+      setSaveError(t("opt_err_pass_mismatch"));
+      return;
+    }
+    if (settings.active_backend === "webdav") {
+      const outcome = await requestWebdavHostPermission();
+      if (outcome !== "granted") {
+        setSaveError(webdavPermissionError(outcome));
+        return;
+      }
+    }
+    setSaving(true);
+    const r = await request({ type: "SAVE_SETTINGS", payload: settings });
+    if (!r.ok) {
+      // Don't claim "Saved" for a write we never confirmed.
+      setSaveError(r.error);
+      setSaving(false);
+      return;
+    }
+    // The staged provider is now the live one — move the "active" badge onto it.
+    const dav = settings.backends.find((b) => b.type === "webdav")?.webdav;
+    setSavedProvider(providerFromConfig(settings.active_backend, dav?.url, dav?.username));
+    setSavedFingerprint(settingsFingerprint(settings));
+    setSaving(false); setSaveOk(true);
+    setTimeout(() => setSaveOk(false), 2500);
+  };
+
+  /** The Save button plus its own error surface. Every tab that can save renders THIS,
+   *  so a validation failure can no longer be visible on one tab and invisible on three.
+   *
+   *  Buttons on one line, messages on the next, and that split is the point. This used to
+   *  be one `space-between` row holding a VARIABLE number of children, so the arrival of a
+   *  status message rearranged everything around it, and on a narrow screen flex-wrap turned
+   *  it into a ragged three-line staircase: Save, then the message, then Test Connection.
+   *  Separating them fixes the layout at every width. The two buttons stay adjacent and in
+   *  order, and a message appears underneath without moving anything.
+   *
+   *  `extraAction` is the Storage tab's Test-connection button; `extraMessage` is its
+   *  result. Two slots rather than one group, so this function decides the composition. */
+  const saveRow = (opts: { disabled?: boolean } = {}) => (
+    <div className="action-row">
+      <div className="action-buttons">
+        <button className={`btn-save ${saveOk ? "saved" : ""} ${dirty ? "pending" : ""}`} onClick={save} disabled={saving || opts.disabled}>
+          {saving ? t("opt_saving") : saveOk ? t("opt_saved") : t("opt_save_changes")}
+        </button>
+      </div>
+      {(saveError || dirty) && (
+        <div className="action-messages">
+          {saveError && (
+            <span className="error-row" role="alert">
+              <AlertTriangle size={12} /> {saveError}
+            </span>
+          )}
+          {/* Filling a field in changes nothing until it is saved, and there was no sign of
+              that anywhere. Deliberately never DISABLES Save when it thinks nothing changed:
+              the check compares a serialised copy, so a false "nothing to save" would be a
+              button that refuses to work, which is far worse than one extra click.
+
+              It says "on any tab" on purpose. There is ONE settings object behind all four
+              tabs and Save sends the whole thing, so switching tabs neither saves nor
+              discards. Without saying so, someone can leave a half-finished edit on one tab,
+              assume it was dropped, and then have it go out with an unrelated save later. */}
+          {dirty && !saveError && (
+            <span className="unsaved-note">
+              <AlertTriangle size={12} /> Unsaved changes on this or another tab. Saving applies all of them.
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  const testBackend = async () => {
+    if (!settings?.active_backend) return;
+    if (settings.active_backend === "webdav") {
+      const outcome = await requestWebdavHostPermission();
+      if (outcome !== "granted") {
+        setTestStatus({ ok: false, message: webdavPermissionError(outcome) });
+        return;
+      }
+    }
+    setTesting(true); setTestStatus(null);
+    try {
+      const sent = await request({ type: "TEST_BACKEND", payload: { backend: settings.active_backend } });
+      if (!sent.ok) setTestStatus({ ok: false, message: sent.error });
+      else if (sent.res.type === "TEST_RESULT") setTestStatus(sent.res.payload);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  // history/tabs/management are optional permissions now — request them on enable
+  // so the install-time prompt stays minimal (and the CWS review stays clean).
+  //
+  // Turning one ON used to be all-or-nothing and completely silent about it: if the
+  // permission request came back false the function simply returned, the switch sprang
+  // back, and nothing anywhere said why. On Firefox for Android — where the request can
+  // never succeed — that is a toggle that just refuses to move, which is exactly what a
+  // user reported about History. Now the reason is on screen either way.
+  const toggleDataType = async (type: DataType) => {
+    if (!settings) return;
+    const enabling = !settings.enabled_types.includes(type);
+    if (enabling) {
+      setTypeError(null);
+      // Open tabs asks for tabGroups in the same prompt where the browser knows it (#11).
+      const perms = permissionsToEnable(type, groupNames.askable);
+      const perm = perms[0];
+      if (perm) {
+        const outcome = await ensurePermission({ permissions: perms });
+        if (outcome !== "granted") {
+          setTypeError({
+            type,
+            message: outcome === "cannot-prompt"
+              ? `This browser can't show permission prompts, so Kesonode couldn't ask for the "${perm}" permission. Grant it on Kesonode's permissions screen in your browser's extension settings, then try again.`
+              : `Kesonode needs the "${perm}" permission to sync this. It stays off until that's allowed.`,
+          });
+          return;
+        }
+      }
+      // Permission in hand and STILL no API — the browser doesn't implement it. Re-check
+      // rather than trust the value we loaded on mount: granting the permission is what
+      // makes an optional-permission API appear, so this is the first honest answer.
+      const state = await dataTypeAvailability(type);
+      setAvailability((prev) => ({ ...prev, [type]: state }));
+      if (state.state === "unsupported") {
+        setTypeError({ type, message: unsupportedReason(type) });
+        return;
+      }
+    }
+    const next = enabling
+      ? [...settings.enabled_types, type]
+      : settings.enabled_types.filter((t) => t !== type);
+    update({ enabled_types: next });
+  };
+
+  // Names and colours for tab groups, on top of the membership Open tabs always carries.
+  // request() first, before anything is awaited, for the reason ensurePermission gives.
+  const toggleGroupNames = async () => {
+    setGroupNamesError(false);
+    if (!groupNames.granted) {
+      const outcome = await ensurePermission({ permissions: ["tabGroups"] });
+      if (outcome === "granted") setGroupNames((p) => ({ ...p, granted: true }));
+      else setGroupNamesError(true);
+      return;
+    }
+    try {
+      await browser.permissions.remove({ permissions: ["tabGroups"] });
+    } catch {
+      // The re-read below says what is really held, which is all the switch should show.
+    }
+    const still = await hasPermission({ permissions: ["tabGroups"] });
+    setGroupNames((p) => ({ ...p, granted: still }));
+  };
+
+  // ─── Google Drive OAuth ────────────────────────────────────────────────
+
+  const connectGDrive = async () => {
+    setGdriveConnecting(true); setGdriveError(null);
+    try {
+      // One interactive consent (PKCE auth-code) → stores a refresh token, so
+      // background sync renews silently afterwards. See lib/backends/gdrive-oauth.
+      const s = await interactiveSignIn();
+      setGdriveUser({ email: s.email, displayName: s.displayName });
+      // Signing in is the clearest statement that this is the backend you want, so it
+      // makes sure the row exists too rather than trusting that picking the card did.
+      updateBackend("gdrive", {});
+      update({ active_backend: "gdrive" });
+    } catch (err) {
+      setGdriveError(err instanceof Error ? err.message : t("opt_gdrive_connect_failed"));
+    } finally {
+      setGdriveConnecting(false);
+    }
+  };
+
+  const disconnectGDrive = () => {
+    // Through the same helper sign-in uses, rather than reaching for the storage key. It
+    // is one line either way, but the key belongs to gdrive-oauth and a second place that
+    // knows its name is a second place to update when the session shape changes.
+    void clearGDriveSession().catch(() => {});
+    setGdriveUser(null);
+    if (settings?.active_backend === "gdrive") update({ active_backend: null });
+  };
+
+  // ─── Export ───────────────────────────────────────────────────────────
+
+  const exportData = async () => {
+    setExportStatus("idle");
+    try {
+      // Collect all syncable data. history/management are optional permissions —
+      // only query them when granted, so a user who never enabled those types still
+      // gets a working bookmarks export instead of the whole thing throwing.
+      // Permission AND API, because they can disagree: a browser can hold the permission
+      // and never have implemented what sits behind it. Checking only the permission is
+      // how one missing API turned the whole export — bookmarks included — into a
+      // silent failure.
+      const [hasHistory, hasMgmt] = await Promise.all([
+        dataTypeApiPresent("history") ? hasPermission({ permissions: ["history"] }) : Promise.resolve(false),
+        dataTypeApiPresent("extensions") ? hasPermission({ permissions: ["management"] }) : Promise.resolve(false),
+      ]);
+      const [bookmarkTree, extensions, historyItems] = await Promise.all([
+        dataTypeApiPresent("bookmarks")
+          ? browser.bookmarks.getTree()
+          : Promise.resolve([] as chrome.bookmarks.BookmarkTreeNode[]),
+        hasMgmt
+          ? browser.management.getAll()
+          : Promise.resolve([] as chrome.management.ExtensionInfo[]),
+        hasHistory
+          ? browser.history.search({ text: "", startTime: Date.now() - 30 * 24 * 60 * 60 * 1000, maxResults: 5000 })
+          : Promise.resolve([] as chrome.history.HistoryItem[]),
+      ]);
+
+      const bundle = {
+        version: "1.0",
+        exportedAt: new Date().toISOString(),
+        device: settings?.device_label ?? "unknown",
+        data: {
+          bookmarks: bookmarkTree,
+          extensions: extensions
+            .filter(e => e.id !== browser.runtime.id && e.installType !== "other" && e.installType !== "admin")
+            .map(e => ({ id: e.id, name: e.name, version: e.version, enabled: e.enabled, store: currentStore(), storeUrl: storeUrlFor({ id: e.id, name: e.name, store: currentStore() }) })),
+          history: historyItems.map(h => ({ url: h.url, title: h.title, lastVisitTime: h.lastVisitTime, visitCount: h.visitCount })),
+        },
+      };
+
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kesonode-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setExportStatus("ok");
+      setTimeout(() => setExportStatus("idle"), 3000);
+    } catch {
+      setExportStatus("error");
+      setTimeout(() => setExportStatus("idle"), 2000);
+    }
+  };
+
+  const importData = async (file: File) => {
+    setImportStatus("idle");
+    try {
+      const text = await file.text();
+      const bundle = JSON.parse(text);
+
+      // Support both old format (bundle.bookmarks) and new (bundle.data.bookmarks)
+      const data = bundle.data ?? bundle;
+
+      if (!bundle.version) throw new Error("Invalid Kesonode backup file");
+
+      let imported = 0;
+
+      // Import bookmarks. The API check is not paranoia: a backup file can be opened on a
+      // browser that has no bookmarks API, and without this the import dies on a TypeError
+      // and reports a generic failure for a file that is perfectly fine.
+      if (data.bookmarks && dataTypeApiPresent("bookmarks")) {
+        const roots = (await browser.bookmarks.getTree())[0]?.children ?? [];
+        const otherId = defaultOtherRootId(roots); // browser-agnostic "Other bookmarks"
+
+        if (otherId) {
+          const importFolder = await browser.bookmarks.create({
+            parentId: otherId,
+            title: `${IMPORT_FOLDER_NAME} ${new Date().toLocaleDateString()}`,
+          });
+
+          const walk = async (nodes: chrome.bookmarks.BookmarkTreeNode[], parentId: string) => {
+            for (const node of nodes) {
+              if (node.url) {
+                // Only recreate plain web URLs — never javascript:/data:/file: from a
+                // backup file (parity with the sync import guard).
+                if (!isSafeContentUrl(node.url)) continue;
+                try { await browser.bookmarks.create({ parentId, title: node.title, url: node.url }); imported++; } catch { /* skip invalid */ }
+              } else if (node.children) {
+                const f = await browser.bookmarks.create({ parentId, title: node.title });
+                await walk(node.children, f.id);
+              }
+            }
+          };
+
+          // Handle both raw tree and wrapped tree
+          const bookmarkData = Array.isArray(data.bookmarks) ? data.bookmarks : [data.bookmarks];
+          for (const root of bookmarkData) {
+            if (root.children) await walk(root.children, importFolder.id);
+          }
+        }
+      }
+
+      // Import history. Same reasoning as the bookmarks guard above, plus one of its own:
+      // `history` is an optional permission, so on a browser that gates the namespace this
+      // is undefined until it is granted, and every single item would throw into its own
+      // catch and be silently dropped.
+      if (Array.isArray(data.history) && dataTypeApiPresent("history")) {
+        for (const item of data.history) {
+          if (item.url && isSafeContentUrl(item.url)) try { await browser.history.addUrl({ url: item.url }); } catch { /* skip */ }
+        }
+      }
+
+      setImportStatus("ok");
+      setImportCount(imported);
+      setTimeout(() => { setImportStatus("idle"); setImportCount(0); }, 4000);
+    } catch {
+      setImportStatus("error");
+      setTimeout(() => setImportStatus("idle"), 3000);
+    }
+  };
+
+  // ─── GitHub PAT verify ────────────────────────────────────────────────
+
+  const verifyGithubToken = async (token: string) => {
+    if (!token) { setGithubUser(null); return; }
+    setGithubChecking(true);
+    try {
+      const res = await fetch("https://api.github.com/user", {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setGithubUser({ login: d.login, name: d.name ?? d.login });
+      } else {
+        setGithubUser(null);
+      }
+    } catch { setGithubUser(null); }
+    setGithubChecking(false);
+  };
+
+  if (!settings) {
+    return (
+      <div className="settings-root">
+        <style>{STYLES}</style>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", width: "100%" }}>
+          {/* A spinner forever is what a failed load used to look like. `onb_err_read_settings`
+              is reused rather than a new key invented: the sentence is exactly right here, it is
+              already complete in every shipped language, and a new string would either ship
+              untranslated or need four translations no native speaker wrote. The diagnostic
+              under it stays English, following the rule for thrown errors: it is what people
+              paste into a bug report. */}
+          {loadError ? (
+            <button
+              className="btn-secondary"
+              onClick={() => { void load(); }}
+              /* The one secondary button that is two lines, so it opts out of the fixed
+                 height the rest of them now take from --control-h-sm. */
+              style={{ maxWidth: 420, display: "block", height: "auto", textAlign: "left", padding: "12px 16px" }}
+            >
+              <AlertTriangle size={12} /> {t("onb_err_read_settings")}
+              <span style={{ display: "block", marginTop: 6, opacity: 0.7, fontSize: 12 }}>{loadError}</span>
+            </button>
+          ) : (
+            <Loader2 size={20} className="spin" style={{ color: "var(--accent)" }} />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Three ways to arrive at "we cannot say what is missing here", and all three must clear
+  // the list rather than answer from an empty local one: no peer cache, no API, or the
+  // permission not granted. `extApiState` folds the last two together. The popup has done
+  // this since 1.3.1; Settings kept computing, and with `management` revoked it published
+  // the whole peer union as missing, directly under the row saying the type isn't syncing.
+  const missingExtensions = remoteExtensions && extApiState === "ready"
+    ? missingLocally(remoteExtensions, localExts, currentStore())
+    : [];
+
+  // First-run guidance. The onboarding wizard opens via a programmatic tabs.create
+  // on install, which silently no-ops on WebKit/Orion — so the user only ever reaches
+  // Options. This card makes Options self-sufficient: it shows until a backend is
+  // actually configured and at least one data type is on, with buttons that jump to
+  // the right tab (reliable everywhere, unlike opening a new tab).
+  const activeBackendConfigured = (() => {
+    const ab = settings.active_backend;
+    if (ab === "gdrive") return !!gdriveUser;
+    if (ab === "webdav") { const w = getBackend("webdav")?.webdav; return !!(w?.url && w?.username && w?.password); }
+    if (ab === "github") { const g = getBackend("github")?.github; return !!(g?.token && g?.repo); }
+    return false;
+  })();
+  const setupComplete = activeBackendConfigured && settings.enabled_types.length > 0;
+  // Once first-run setup is complete, mark it persistently so the "Finish setting up"
+  // card never returns while the user browses provider cards. `active_backend` flips
+  // as they click around (deselecting their real backend), so the card can't rely on
+  // the live config — this latched flag is the source of truth.
+  const showSetupCard = !settings.onboarding_completed && !setupComplete;
+
+  // Statistics-tab derived values.
+  const totalSyncRuns = syncState ? Object.values(syncState.sync_counts).reduce((a, b) => a + b, 0) : 0;
+  const lastSyncLabel = syncState?.last_sync
+    ? new Date(syncState.last_sync).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    : t("opt_stat_never");
+
+  return (
+    <div className="settings-root">
+      <style>{STYLES}</style>
+
+      {/* ── Top tab bar ── */}
+      <header className="topbar">
+        <div className="topbar-inner">
+          <div className="topbar-brand">
+            <div className="topbar-logo"><BrandMark size={14} /></div>
+            <span className="topbar-title">Kesonode</span>
+          </div>
+          <nav ref={tabbarFade.ref} className={`tabbar ${tabbarFade.className}`}>
+            {NAV.map(({ id, labelKey }) => (
+              <button
+                key={id}
+                className={`tab-item ${activeNav === id ? "active" : ""}`}
+                onClick={() => setActiveNav(id)}
+                aria-current={activeNav === id ? "page" : undefined}
+              >
+                <span>{t(labelKey)}</span>
+              </button>
+            ))}
+          </nav>
+        </div>
+      </header>
+
+      {/* ── Content ── */}
+      <main className="content">
+        <div className="content-inner">
+
+          {/* ── First-run setup (esp. Orion/WebKit, where the wizard tab never opens) ── */}
+          {showSetupCard && (
+            <div className="setup-card">
+              <div className="setup-card-head">
+                <div className="setup-card-mark"><BrandMark size={16} /></div>
+                <div>
+                  <div className="setup-card-title">{t("opt_setup_title")}</div>
+                  <div className="setup-card-sub">{t("opt_setup_sub")}</div>
+                </div>
+              </div>
+              <ol className="setup-steps">
+                <li className={activeBackendConfigured ? "done" : ""}>
+                  <span className="step-badge">{activeBackendConfigured ? <CheckCircle2 size={14} /> : "1"}</span>
+                  <span className="step-text">{t("opt_setup_step_storage")}</span>
+                  {!activeBackendConfigured && (
+                    <button className="step-action" onClick={() => setActiveNav("backend")}>
+                      {t("opt_nav_backend")} <ArrowRight size={12} />
+                    </button>
+                  )}
+                </li>
+                <li className={settings.enabled_types.length > 0 ? "done" : ""}>
+                  <span className="step-badge">{settings.enabled_types.length > 0 ? <CheckCircle2 size={14} /> : "2"}</span>
+                  <span className="step-text">{t("opt_setup_step_types")}</span>
+                  {settings.enabled_types.length === 0 && (
+                    <button className="step-action" onClick={() => setActiveNav("data")}>
+                      {t("opt_nav_data")} <ArrowRight size={12} />
+                    </button>
+                  )}
+                </li>
+              </ol>
+            </div>
+          )}
+
+          {/* ── BACKEND ── */}
+          {activeNav === "backend" && (
+            <div className="section-wrap">
+              <h1 className="page-title">{t("opt_backend_head")}</h1>
+              <p className="page-subtitle">{t("opt_backend_head_sub")}</p>
+
+              <div className="card-list">
+                {providerCards(t("locale_bcp47")).map((p) => {
+                  // Selection drives the card UI (expanded config, radio); only the
+                  // persisted provider earns the "active" badge.
+                  const isActive = selectedProvider === p.id;
+                  const isSaved = savedProvider === p.id;
+                  // No Google sign-in here at all (Firefox for Android has no identity API):
+                  // said on the card itself, as an unsupported data type is, not only once picked.
+                  const driveOff = p.id === "gdrive" && !DRIVE_AVAILABLE;
+
+                  return (
+                    <div
+                      key={p.id}
+                      className={`backend-card ${isActive ? "selected" : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={isActive}
+                      aria-label={t("opt_use_provider", providerLabel(p))}
+                      style={driveOff ? { opacity: 0.55 } : undefined}
+                      onClick={() => pickProvider(p.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          pickProvider(p.id);
+                        }
+                      }}
+                    >
+                      <div className="backend-card-header">
+                        <div className="backend-icon-wrap"><ProviderLogo id={p.id} size={16} /></div>
+                        <div className="backend-info">
+                          <div className="backend-name">
+                            {providerLabel(p)}
+                            {isSaved && <span className="badge-active">{t("opt_provider_active")}</span>}
+                          </div>
+                          <div className="backend-desc">{driveOff ? t("opt_drive_unavailable") : t(p.descKey)}</div>
+                        </div>
+                        <div className={`radio-circle ${isActive ? "checked" : ""}`} />
+                      </div>
+
+                      {/* ── Google Drive ── */}
+                      {isActive && p.id === "gdrive" && (
+                        <div className="backend-config" onClick={(e) => e.stopPropagation()}>
+                          {gdriveUser ? (
+                            <div className="account-row">
+                              <div className="account-avatar"><User size={14} /></div>
+                              <div className="account-info">
+                                <div className="account-name">{gdriveUser.displayName}</div>
+                                <div className="account-email">{gdriveUser.email}</div>
+                              </div>
+                              <button className="btn-disconnect" onClick={disconnectGDrive}>
+                                <LogOut size={12} /> {t("opt_drive_disconnect")}
+                              </button>
+                            </div>
+                          ) : !DRIVE_AVAILABLE ? (
+                            <div className="error-row">
+                              <XCircle size={12} /> {t("opt_drive_unavailable")}
+                            </div>
+                          ) : (
+                            <div>
+                              <button className="btn-connect-google" onClick={connectGDrive} disabled={gdriveConnecting}>
+                                {gdriveConnecting ? <Loader2 size={14} className="spin" /> : (
+                                  <svg width="16" height="16" viewBox="0 0 24 24">
+                                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                                  </svg>
+                                )}
+                                {gdriveConnecting ? t("onb_connecting") : t("onb_sign_in_google")}
+                              </button>
+                              {gdriveError && <div className="error-row"><XCircle size={12} /> {gdriveError}</div>}
+                              <InfoHint>{scopeHint()}</InfoHint>
+                            </div>
+                          )}
+                          {gdriveUser && (
+                            <div className="field-group">
+                              <label className="field-label">{t("opt_drive_folder_label")} <span className="optional">{t("opt_optional")}</span></label>
+                              <input
+                                className="field-input"
+                                value={getBackend("gdrive")?.gdrive?.folderId ?? ""}
+                                onChange={(e) => updateBackend("gdrive", { gdrive: { folderId: e.target.value } })}
+                                placeholder={t("opt_drive_folder_placeholder")}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ── Koofr / Fastmail / Nutstore: any preset with a fixed endpoint. Keyed on
+                          `fixedUrl` rather than on ids, because a list of ids is what left the
+                          Nutstore card with nothing to type into but Test Connection. ── */}
+                      {isActive && p.fixedUrl && (
+                        <div className="backend-config" onClick={(e) => e.stopPropagation()}>
+                          <InfoHint>
+                            {syncingTo(p.fixedUrl!)}{p.noteKey ? ` ${t(p.noteKey)}` : null}
+                          </InfoHint>
+                          {webdavCreds()}
+                          {webdavHttpWarn()}
+                        </div>
+                      )}
+
+                      {/* ── pCloud (EU/US region) ── */}
+                      {isActive && p.id === "pcloud" && (
+                        <div className="backend-config" onClick={(e) => e.stopPropagation()}>
+                          <div className="field-group">
+                            <label className="field-label">{t("opt_region_label")}</label>
+                            <div className="seg-group">
+                              {p.regions!.map((r) => {
+                                const on = pcloudRegionOf(getBackend("webdav")?.webdav?.url) === r.id;
+                                return (
+                                  <button
+                                    key={r.id}
+                                    type="button"
+                                    className={`seg-btn ${on ? "on" : ""}`}
+                                    onClick={() => updateBackend("webdav", { webdav: { ...getBackend("webdav")?.webdav, url: r.url } as any })}
+                                  >
+                                    {r.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <InfoHint>
+                            {syncingTo(getBackend("webdav")?.webdav?.url ?? "")}{" "}
+                            {p.noteKey
+                              ? t(p.noteKey, p.regions?.find((r) => pcloudRegionOf(getBackend("webdav")?.webdav?.url) === r.id)?.label ?? p.regions?.[0]?.label ?? "")
+                              : null}
+                          </InfoHint>
+                          {webdavCreds()}
+                          {webdavHttpWarn()}
+                        </div>
+                      )}
+
+                      {/* ── Nextcloud / ownCloud (per-user host) ── */}
+                      {isActive && p.id === "nextcloud" && (
+                        <div className="backend-config" onClick={(e) => e.stopPropagation()}>
+                          <div className="field-group">
+                            <label className="field-label">{t("opt_webdav_host_label")}</label>
+                            <input
+                              className="field-input mono"
+                              value={nextcloudBaseFromUrl(getBackend("webdav")?.webdav?.url)}
+                              onChange={(e) => {
+                                const w = getBackend("webdav")?.webdav;
+                                updateBackend("webdav", { webdav: { ...w, url: nextcloudUrl(e.target.value, w?.username ?? "") } as any });
+                              }}
+                              placeholder="cloud.example.com (or cloud.example.com/nextcloud)"
+                            />
+                          </div>
+                          <div className="field-group">
+                            <label className="field-label">{t("opt_webdav_user_label")}</label>
+                            <input
+                              className="field-input mono"
+                              value={getBackend("webdav")?.webdav?.username ?? ""}
+                              onChange={(e) => {
+                                const w = getBackend("webdav")?.webdav;
+                                updateBackend("webdav", { webdav: { ...w, username: e.target.value, url: nextcloudUrl(nextcloudBaseFromUrl(w?.url), e.target.value) } as any });
+                              }}
+                              placeholder={t("opt_webdav_user_placeholder")}
+                              autoComplete="off"
+                            />
+                          </div>
+                          <div className="field-group">
+                            <label className="field-label">{t("opt_webdav_pass_label")}</label>
+                            <SecretField
+                              value={getBackend("webdav")?.webdav?.password ?? ""}
+                              placeholder="••••••••"
+                              sensitive
+                              onChange={(v) => updateBackend("webdav", { webdav: { ...getBackend("webdav")?.webdav, password: v } as any })}
+                            />
+                          </div>
+                          <InfoHint>
+                            {getBackend("webdav")?.webdav?.url
+                              ? <>{syncingTo(getBackend("webdav")!.webdav!.url!)} {p.noteKey ? t(p.noteKey) : null}</>
+                              : p.noteKey ? t(p.noteKey) : null}
+                          </InfoHint>
+                          {webdavHttpWarn()}
+                        </div>
+                      )}
+
+                      {/* ── WebDAV (custom URL) ── */}
+                      {isActive && p.id === "webdav" && (
+                        <div className="backend-config" onClick={(e) => e.stopPropagation()}>
+                          <div className="field-group">
+                            <label className="field-label">{t("opt_webdav_url_label")}</label>
+                            <input
+                              className="field-input mono"
+                              value={getBackend("webdav")?.webdav?.url ?? ""}
+                              onChange={(e) => updateBackend("webdav", { webdav: { ...getBackend("webdav")?.webdav, url: e.target.value } as any })}
+                              placeholder="https://host/remote.php/dav/files/username/"
+                            />
+                          </div>
+                          {webdavCreds()}
+                          {webdavHttpWarn()}
+                        </div>
+                      )}
+
+                      {/* ── GitHub PAT ── */}
+                      {isActive && p.id === "github" && (
+                        <div className="backend-config" onClick={(e) => e.stopPropagation()}>
+                          <div className="field-group">
+                            <label className="field-label">{t("opt_github_token_label")}</label>
+                            <SecretField
+                              value={getBackend("github")?.github?.token ?? ""}
+                              placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                              sensitive
+                              onChange={async (v) => {
+                                updateBackend("github", { github: { ...getBackend("github")?.github, token: v } });
+                                if (v.length > 10) await verifyGithubToken(v);
+                              }}
+                            />
+                            {githubChecking && <div className="verify-row"><Loader2 size={12} className="spin" /> {t("onb_verifying")}</div>}
+                            {githubUser && !githubChecking && (
+                              <div className="verify-row ok"><CheckCircle2 size={12} /> @{githubUser.login} · <bdi>{githubUser.name}</bdi></div>
+                            )}
+                          </div>
+                          <div className="field-row-2">
+                            <div className="field-group" style={{ flex: 2 }}>
+                              <label className="field-label">{t("opt_github_repo_label")}</label>
+                              <input
+                                className="field-input mono"
+                                value={getBackend("github")?.github?.repo ?? ""}
+                                onChange={(e) => updateBackend("github", { github: { ...getBackend("github")?.github, repo: e.target.value } })}
+                                placeholder="username/repo-name"
+                              />
+                            </div>
+                            <div className="field-group" style={{ flex: 1 }}>
+                              <label className="field-label">{t("opt_github_branch_label")}</label>
+                              <input
+                                className="field-input mono"
+                                value={getBackend("github")?.github?.branch ?? "main"}
+                                onChange={(e) => updateBackend("github", { github: { ...getBackend("github")?.github, branch: e.target.value } })}
+                                placeholder="main"
+                              />
+                            </div>
+                          </div>
+                          <a
+                            href="https://github.com/settings/personal-access-tokens/new"
+                            target="_blank" rel="noreferrer"
+                            className="link-external"
+                          >
+                            <ExternalLink size={12} /> Create a fine-grained token (only this repo · Contents: Read &amp; Write)
+                          </a>
+                        </div>
+                      )}
+
+                      {/* Inside the card, under the fields it checks. It tests what is in
+                          the form rather than what is saved, and the form IS this card, so
+                          down here it sits with the inputs it validates instead of at the
+                          bottom of the page next to an unrelated Save. */}
+                      {isActive && (
+                        <div className="card-test">
+                          <button className="btn-secondary" onClick={testBackend} disabled={testing}>
+                            {testing && <Loader2 size={12} className="spin" />}
+                            Test Connection
+                          </button>
+                          {testStatus && (
+                            <span className={`test-result ${testStatus.ok ? "ok" : "fail"}`}>
+                              {testStatus.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                              {testStatus.message}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Under the provider list, not on Advanced. The question encryption answers
+                  is about the provider: can the place I just chose read this? That question
+                  only exists because a provider was chosen, so it belongs beside it, and the
+                  threat model differs per provider (your own Nextcloud versus Drive). It also
+                  matches the order onboarding already walks: pick the storage, then decide
+                  whether it can read your data. On Advanced it sat in a drawer with Feedback,
+                  Debug mode and About, which undersold one of the reasons to use Kesonode. */}
+              <div className="settings-section">
+                <div className="settings-card-head">{t("opt_encryption_section")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("common_e2ee")}</div>
+                      <div className="row-desc">{t("opt_e2ee_desc")}</div>
+                    </div>
+                  </div>
+                  <label className="toggle-wrap">
+                    <input type="checkbox" className="toggle-input"
+                      checked={settings.encryption_enabled}
+                      onChange={(e) => {
+                        const next = e.target.checked;
+                        // Turning E2EE OFF is a downgrade — the next sync re-uploads
+                        // this device's data unencrypted. Require an explicit confirm
+                        // (don't flip the toggle yet) so it can't be switched off by a
+                        // stray click. Turning it on needs no confirm.
+                        if (!next && (settings.encryption_passphrase ?? "").length > 0) {
+                          setConfirmDisableEnc(true);
+                        } else {
+                          update({ encryption_enabled: next });
+                        }
+                      }} />
+                    <span className="toggle-track"><span className="toggle-thumb" /></span>
+                  </label>
+                </div>
+                {confirmDisableEnc && (
+                  <div className="settings-row" style={{ paddingTop: 0 }}>
+                    <div className="settings-row-left">
+                      <div className="row-desc" style={{ color: "var(--danger)" }}>
+                        {boldUnencrypted("opt_e2ee_disable_confirm")}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                      <button className="btn-secondary" type="button" onClick={() => setConfirmDisableEnc(false)}>
+                        {t("opt_cancel")}
+                      </button>
+                      <button
+                        className="btn-secondary"
+                        type="button"
+                        style={{ color: "var(--danger)", borderColor: "var(--danger)" }}
+                        onClick={() => { update({ encryption_enabled: false }); setConfirmDisableEnc(false); }}
+                      >
+                        {t("opt_e2ee_turn_off")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {settings.encryption_enabled && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div>
+                        <div className="row-label">{t("opt_passphrase_label")}</div>
+                        <div className="row-desc">{t("opt_passphrase_desc")}</div>
+                      </div>
+                    </div>
+                    <div style={{ width: 220 }}>
+                      <SecretField
+                        value={settings.encryption_passphrase ?? ""}
+                        placeholder={t("opt_passphrase_placeholder")}
+                        sensitive
+                        onChange={(v) => update({ encryption_passphrase: v })}
+                      />
+                      {passTooShort && (
+                        <div className="row-desc" style={{ marginTop: 4, color: "var(--danger)" }}>
+                          {t("onb_pass_too_short", String(MIN_PASSPHRASE_LENGTH))}
+                        </div>
+                      )}
+                      {needsPassConfirm && (
+                        <div style={{ marginTop: 8 }}>
+                          <input
+                            className="field-input mono"
+                            type="password"
+                            value={passConfirm}
+                            placeholder={t("opt_passphrase_confirm_placeholder")}
+                            autoComplete="off"
+                            onChange={(e) => setPassConfirm(e.target.value)}
+                          />
+                          {passMismatch ? (
+                            <div className="row-desc" style={{ marginTop: 4, color: "var(--danger)" }}>
+                              {t("onb_pass_mismatch")}
+                            </div>
+                          ) : (
+                            <div className="row-desc" style={{ marginTop: 4, color: "var(--accent)", display: "flex", alignItems: "center", gap: 4 }}>
+                              <CheckCircle2 size={12} style={{ flexShrink: 0 }} /> {t("opt_passphrase_match")}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => { const k = generateRecoveryKey(); setGenKey(k); update({ encryption_passphrase: k }); }}
+                        style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+                        <Key size={12} /> {t("common_generate_key")}
+                      </button>
+                      {genKey && (
+                        <div className="row-desc" style={{ marginTop: 8, color: "var(--text-primary)" }}>
+                          {t("opt_genkey_saved_warning")}
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                            <code style={{ userSelect: "all", fontSize: 12, wordBreak: "break-all" }}>{genKey}</code>
+                            <button type="button" title={t("opt_secret_copy")} onClick={() => navigator.clipboard?.writeText(genKey)}
+                              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", flexShrink: 0 }}>
+                              <Copy size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {settings.encryption_enabled && !settings.encryption_passphrase && (
+                  <div className="settings-row" style={{ paddingTop: 0 }}>
+                    <div className="settings-row-left">
+                      <div className="row-desc" style={{ color: "var(--danger)" }}>
+                        {t("opt_e2ee_no_passphrase")}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {!settings.encryption_enabled && (
+                  <div className="settings-row" style={{ background: "var(--warn-bg)" }}>
+                    <div className="settings-row-left">
+                      <AlertTriangle size={14} className="row-icon" style={{ color: "var(--warn-border)" }} />
+                      <div className="row-desc" style={{ color: "var(--warn-text)" }}>
+                        {boldUnencrypted("opt_e2ee_off_warning")}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          )}
+
+          {/* ── DATA TYPES ── */}
+          {activeNav === "data" && (
+            <div className="section-wrap">
+              <h1 className="page-title">{t("opt_data_head")}</h1>
+              <p className="page-subtitle">{t("opt_data_head_sub")}</p>
+
+              <div className="settings-section">
+                <div className="settings-card-head">{t("opt_data_section")}</div>
+                {DATA_TYPES.map((type) => {
+                  // Not implemented by this browser: keep the row, drop the switch, and
+                  // put the reason where the description was. A dead toggle that springs
+                  // back is the one outcome this must never produce again.
+                  const off = availability[type]?.state === "unsupported";
+                  return (
+                    <div key={type} className={`settings-row${off ? " is-unavailable" : ""}`}>
+                      <div className="settings-row-left">
+                        <div>
+                          <div className="row-label">{t(`datatype_${type}`)}</div>
+                          <div className="row-desc">
+                            {off ? unsupportedReason(type) : t(`datatype_${type}_desc`)}
+                          </div>
+                          {/* Switched on, browser can do it, permission gone. Browsers let
+                              you revoke an optional permission from their own extension
+                              settings and tell the extension nothing, so this type would
+                              otherwise sit here looking enabled and sync nothing at all. */}
+                          {settings.enabled_types.includes(type)
+                            && availability[type]?.state === "needs-permission"
+                            && typeError?.type !== type && (
+                            <div className="error-row" role="alert">
+                              <AlertTriangle size={12} /> {t("opt_data_permission_lost")}
+                            </div>
+                          )}
+                          {typeError?.type === type && (
+                            <div className="error-row" role="alert">
+                              <AlertTriangle size={12} /> {typeError.message}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {!off && (
+                        <label className="toggle-wrap">
+                          <input type="checkbox" className="toggle-input"
+                            checked={settings.enabled_types.includes(type)}
+                            onChange={() => toggleDataType(type)} />
+                          <span className="toggle-track"><span className="toggle-thumb" /></span>
+                        </label>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Bookmarks this device keeps to itself (#54), for an extension that keeps a huge
+                  folder of its own. Off unless asked for: the tree only opens behind the
+                  switch, and switching it off again puts everything back into the sync. */}
+              {availability.bookmarks?.state !== "unsupported" && (() => {
+                const excluded = settings.excluded_bookmarks ?? [];
+                const shown = excludeOpen ?? excluded.length > 0;
+                return (
+                  <div className="settings-section">
+                    <div className="settings-card-head">{t("datatype_bookmarks")}</div>
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div>
+                          <div className="row-label">{t("bm_exclude_label")}</div>
+                          <div className="row-desc">{t("bm_exclude_desc")}</div>
+                        </div>
+                      </div>
+                      <label className="toggle-wrap">
+                        <input type="checkbox" className="toggle-input" checked={shown}
+                          aria-label={t("bm_exclude_label")}
+                          onChange={(e) => {
+                            setExcludeOpen(e.target.checked);
+                            if (!e.target.checked) update({ excluded_bookmarks: [] });
+                          }} />
+                        <span className="toggle-track"><span className="toggle-thumb" /></span>
+                      </label>
+                    </div>
+                    {shown && (
+                      <div style={{ padding: "0 var(--sp-xl) var(--sp-xl)" }}>
+                        <BookmarkExclusionTree value={excluded} onChange={(next) => update({ excluded_bookmarks: next })} />
+                        <InfoHint>{t("bm_exclude_hint")}</InfoHint>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Open tabs carry their groups wherever the browser has them; this row adds the
+                  names and colours. Shown only where tabGroups can be asked for at all, so a
+                  browser without it never sees a switch that can only fail. */}
+              {settings.enabled_types.includes("sessions") && groupNames.askable && (
+              <div className="settings-section">
+                <div className="settings-card-head">{t("datatype_sessions")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_tab_groups_label")}</div>
+                      <div className="row-desc">{t("opt_tab_groups_desc")}</div>
+                      {groupNamesError && (
+                        <div className="error-row" role="alert">
+                          <AlertTriangle size={12} /> {t("opt_tab_groups_denied")}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <label className="toggle-wrap">
+                    <input type="checkbox" className="toggle-input"
+                      checked={groupNames.granted}
+                      aria-label={t("opt_tab_groups_label")}
+                      onChange={() => void toggleGroupNames()} />
+                    <span className="toggle-track"><span className="toggle-thumb" /></span>
+                  </label>
+                </div>
+              </div>
+              )}
+
+              {/* Nothing to configure when the browser has no history API — the row above
+                  already explains why, and a live "days to sync" slider under it would
+                  only suggest the feature is one setting away. */}
+              {availability.history?.state !== "unsupported" && (
+              <div className="settings-section">
+                <div className="settings-card-head">{t("datatype_history")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_history_days_label")}</div>
+                      <div className="row-desc">{t("opt_history_days_desc")}</div>
+                    </div>
+                  </div>
+                  <div className="slider-wrap">
+                    <input type="range" min={7} max={365} step={1}
+                      value={settings.history_days_limit}
+                      onChange={(e) => update({ history_days_limit: Number(e.target.value) })}
+                      className="slider" />
+                    <span className="slider-val">{t("opt_history_days_value", String(settings.history_days_limit))}</span>
+                  </div>
+                </div>
+                {/* Nothing said this anywhere, and it makes a working sync look broken: a
+                    user checks yesterday on the receiving machine, finds nothing, and
+                    concludes the history never arrived. Chrome's history.addUrl takes no
+                    visit time (Firefox's does, and we pass it), so on Chromium the arriving
+                    page can only be stamped with the moment it arrived. */}
+                <InfoHint>{t("opt_history_hint")}</InfoHint>
+              </div>
+              )}
+
+              {missingExtensions.length > 0 && (
+                <>
+                  <div className="settings-section">
+                    <div className="settings-card-head">{t("opt_missing_ext_head", String(missingExtensions.length))}</div>
+                    {missingExtensions.map((ext) => (
+                      <div key={ext.id} className="settings-row">
+                        <div className="settings-row-left">
+                          <Puzzle size={16} className="row-icon" />
+                          <div>
+                            <div className="row-label">
+                              <bdi>{ext.name}</bdi>{" "}
+                              <span className="row-desc">{t("opt_ext_from", STORE_NAME[inferStore(ext)])}</span>
+                            </div>
+                            {ext.description && <div className="row-desc" dir="auto">{ext.description.slice(0, 80)}</div>}
+                          </div>
+                        </div>
+                        <a href={installOrSearchUrl(ext, currentStore())} target="_blank" rel="noreferrer" className="btn-install">
+                          {inferStore(ext) === currentStore() ? t("opt_ext_install") : t("opt_ext_find")}
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <div className="notice-warn">
+                <AlertTriangle size={14} />
+                <div>
+                  <strong>{t("opt_no_password_title")}</strong>{" "}
+                  {t("opt_no_password_body")}{" "}
+                  {passwordManagers()}
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {/* ── DEVICE ── */}
+          {activeNav === "device" && (
+            <div className="section-wrap">
+              <h1 className="page-title">{t("opt_device_head")}</h1>
+              <p className="page-subtitle">{t("opt_device_head_sub")}</p>
+
+              <div className="settings-section">
+                <div className="settings-card-head">{t("opt_identity_section")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_device_name_label")}</div>
+                      <div className="row-desc">{t("opt_device_name_desc")}</div>
+                    </div>
+                  </div>
+                  <input className="field-input-inline" dir="auto"
+                    value={settings.device_label}
+                    onChange={(e) => update({ device_label: e.target.value })}
+                    placeholder={t("opt_device_name_placeholder")} />
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_device_id_label")}</div>
+                      <div className="row-desc">{t("opt_device_id_desc")}</div>
+                    </div>
+                  </div>
+                  <span className="mono-value">{settings.device_id.slice(0, 16)}…</span>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-card-head">{t("opt_behavior_section")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div><div className="row-label">{t("opt_sync_on_change_label")}</div><div className="row-desc">{t("opt_sync_on_change_desc")}</div></div>
+                  </div>
+                  <label className="toggle-wrap">
+                    <input type="checkbox" className="toggle-input" checked={settings.sync_on_change ?? true}
+                      onChange={(e) => update({ sync_on_change: e.target.checked })} />
+                    <span className="toggle-track"><span className="toggle-thumb" /></span>
+                  </label>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div><div className="row-label">{t("opt_auto_sync_label")}</div><div className="row-desc">{t("opt_auto_sync_desc")}</div></div>
+                  </div>
+                  <label className="toggle-wrap">
+                    <input type="checkbox" className="toggle-input" checked={settings.auto_sync}
+                      onChange={(e) => update({ auto_sync: e.target.checked })} />
+                    <span className="toggle-track"><span className="toggle-thumb" /></span>
+                  </label>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div><div className="row-label">{t("opt_notifications_label")}</div><div className="row-desc">{t("opt_notifications_desc")}</div></div>
+                  </div>
+                  <label className="toggle-wrap">
+                    <input type="checkbox" className="toggle-input" checked={settings.notifications_enabled}
+                      onChange={(e) => update({ notifications_enabled: e.target.checked })} />
+                    <span className="toggle-track"><span className="toggle-thumb" /></span>
+                  </label>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div><div className="row-label">{t("opt_interval_label")}</div><div className="row-desc">{t("opt_interval_desc")}</div></div>
+                  </div>
+                  <div className="slider-wrap">
+                    <input type="range" min={30} max={600} step={30}
+                      value={settings.sync_interval_seconds}
+                      onChange={(e) => update({ sync_interval_seconds: Number(e.target.value) })}
+                      className="slider" />
+                    <span className="slider-val">{t("opt_interval_value", String(settings.sync_interval_seconds))}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-card-head">{t("opt_conflict_section")}</div>
+                {([
+                  { value: "lww",           labelKey: "opt_conflict_lww",    descKey: "opt_conflict_lww_desc" },
+                  { value: "prefer-local",  labelKey: "opt_conflict_local",  descKey: "opt_conflict_local_desc" },
+                  { value: "prefer-remote", labelKey: "opt_conflict_remote", descKey: "opt_conflict_remote_desc" },
+                  { value: "manual",        labelKey: "opt_conflict_manual", descKey: "opt_conflict_manual_desc" },
+                ] as const).map(({ value, labelKey, descKey }) => (
+                  <label key={value} className="settings-row radio-row">
+                    <div className="settings-row-left">
+                      <div><div className="row-label">{t(labelKey)}</div><div className="row-desc">{t(descKey)}</div></div>
+                    </div>
+                    {/* The real input stays, hidden, so this is still a radio GROUP to the
+                        keyboard and to a screen reader: arrow keys move between options and
+                        the name attribute ties them together. The circle beside it is the
+                        same one the storage cards draw, which is what makes them match. The
+                        native control was styled with accent-color alone, so it rendered
+                        differently on every platform. */}
+                    <input type="radio" name="conflict" className="radio-input"
+                      value={value} checked={settings.conflict_strategy === value}
+                      onChange={() => update({ conflict_strategy: value })} />
+                    <span className="radio-circle" aria-hidden="true" />
+                  </label>
+                ))}
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-card-head">{t("opt_safety_section")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_bulk_delete_label")}</div>
+                      <div className="row-desc">{t("opt_bulk_delete_desc")}</div>
+                    </div>
+                  </div>
+                  <div className="slider-wrap">
+                    <input type="range" min={50} max={95} step={5}
+                      value={settings.bulk_delete_percent}
+                      onChange={(e) => update({ bulk_delete_percent: Number(e.target.value) })}
+                      className="slider" />
+                    <span className="slider-val">{settings.bulk_delete_percent}%</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {/* ── STATISTICS ── */}
+          {/* ── ACTIVITY ── */}
+          {activeNav === "activity" && (() => {
+            const shown = auditOnlyErrors ? audit.filter((e) => !e.ok) : audit;
+            // Count the two apart. `!e.ok` lumps a deliberate skip in with a failure, so a
+            // log made entirely of harmless notices announced itself as "143 with errors"
+            // right above 143 yellow warning icons.
+            const errorCount = audit.filter((e) => (e.level ?? (e.ok ? "ok" : "error")) === "error").length;
+            const noticeCount = audit.filter((e) => e.level === "notice").length;
+            return (
+              <div className="section-wrap">
+                <h1 className="page-title">{t("opt_activity_head")}</h1>
+                <p className="page-subtitle">{t("opt_activity_head_sub")}</p>
+
+                {/* ── Conflicts (#35) ──
+                    First on the tab, because the popup's Resolve button lands here and a
+                    question waiting for an answer should not sit below the device list. */}
+                <ConflictsSection
+                  conflicts={syncState?.pending_conflicts ?? []}
+                  onResolved={async () => {
+                    const after = await request({ type: "GET_STATE" });
+                    if (after.ok && after.res.type === "STATE") setSyncState(after.res.payload);
+                  }}
+                />
+
+                <div className="settings-section">
+                  <div className="settings-card-head">{t("opt_sync_activity_section")}</div>
+                  <div className="stat-grid">
+                    <div className="stat-tile"><div className="stat-value">{formatBytes(syncState?.bytes_transferred ?? 0)}</div><div className="stat-label">{t("opt_stat_transferred")}</div></div>
+                    <div className="stat-tile"><div className="stat-value">{totalSyncRuns}</div><div className="stat-label">{t("opt_stat_runs")}</div></div>
+                    <div className="stat-tile"><div className="stat-value stat-value-sm">{lastSyncLabel}</div><div className="stat-label">{t("opt_stat_last_sync")}</div></div>
+                  </div>
+                </div>
+
+                {/* Replaces the "Devices: 3" and "Peer sessions" tiles. A count answered the
+                    wrong question: with two Windows laptops both on Brave, knowing there are
+                    three of them doesn't tell you WHICH is which, and that is exactly what
+                    cost half a day on a field report. */}
+                <div className="settings-section">
+                  <div className="settings-card-head">
+                    {t("opt_devices_section")}
+                    <span className="head-sub">{t("opt_devices_section_sub")}</span>
+                  </div>
+                  {forgetResult && (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="row-desc">
+                          {plural("opt_forget_result", forgetResult.removed, [String(forgetResult.removed), isolate(forgetResult.label)])}
+                        </div>
+                      </div>
+                      <button className="btn-secondary" style={{ flexShrink: 0 }}
+                        onClick={() => setForgetResult(null)}>{t("opt_dismiss")}</button>
+                    </div>
+                  )}
+                  {devicesError && (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="row-desc" style={{ color: "var(--danger)" }}>
+                          {t("opt_devices_error", devicesError)}
+                          {!devicesError.startsWith(PERMISSION_LOST_PREFIX) && <> {t("opt_error_check_connection")}</>}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {devices === null && !devicesError && (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="row-desc"><Loader2 size={12} className="spin" /> {t("opt_devices_loading")}</div>
+                      </div>
+                    </div>
+                  )}
+                  {devices?.length === 0 && !devicesError && (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="row-desc">{t("opt_devices_empty")}</div>
+                      </div>
+                    </div>
+                  )}
+                  {devices?.map((d) => (
+                    <Fragment key={d.device_id}>
+                      <div className="settings-row">
+                        <div className="settings-row-left">
+                          <div>
+                            <div className="row-label">
+                              {d.label != null ? <bdi>{d.label}</bdi> : t("opt_device_unnamed", d.device_id.slice(0, 8))}
+                              {/* What the device runs, from its own packets (#10). It tells the
+                                  Chrome build and the Firefox build on one machine apart; two
+                                  identical machines it cannot, which the time below does. */}
+                              {d.browser && <span className="device-browser">{browserText(d.browser)}</span>}
+                              {d.isSelf && <span className="badge-active" style={{ marginLeft: 8 }}>{t("opt_this_device")}</span>}
+                              {isDormant(d.lastSeen, d.isSelf, Date.now()) && <span className="badge-quiet">{t("opt_device_dormant")}</span>}
+                            </div>
+                            <div className="row-desc">
+                              {d.types.join(", ")}
+                              {/* "39 days ago" is what tells a ghost from a live device at a
+                                  glance; the exact time stays one hover away. */}
+                              {d.lastSeen && <> <span title={new Date(d.lastSeen).toLocaleString()}>
+                                {t("opt_last_upload_ago", relativeTime(d.lastSeen, Date.now(), catalogueLocale()))}
+                              </span></>}
+                            </div>
+                            {/* A mark, never an action: the files are in the user's own storage,
+                                so Forget stays theirs to press (#10, open question 3). */}
+                            {isDormant(d.lastSeen, d.isSelf, Date.now()) && (
+                              <div className="row-desc">{plural("opt_device_dormant_note", DORMANT_DEVICE_DAYS)}</div>
+                            )}
+                          </div>
+                        </div>
+                        {/* No trash can. The icon did more of the work than the word did: a bin
+                            next to "Forget" reads as "your bookmarks are about to go", when what
+                            goes is a few files in your own storage folder. */}
+                        {!d.isSelf && confirmForget !== d.device_id && (
+                          <button className="btn-secondary" disabled={forgetting !== null}
+                            onClick={() => setConfirmForget(d.device_id)}>
+                            {forgetting === d.device_id && <Loader2 size={12} className="spin" />} {t("opt_forget")}
+                          </button>
+                        )}
+                      </div>
+                      {/* The confirm carries the facts, because this is where the decision is
+                          made — a line in the section header above is read once, if at all. */}
+                      {confirmForget === d.device_id && (
+                        <div className="settings-row">
+                          <div className="settings-row-left">
+                            <div className="row-desc">
+                              {plural("opt_forget_confirm", d.types.length, [String(d.types.length), d.types.join(", ")])}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                            <button className="btn-secondary" onClick={() => setConfirmForget(null)}>{t("opt_cancel")}</button>
+                            <button className="btn-secondary" style={{ color: "var(--danger)" }}
+                              onClick={() => void forgetDevice(d.device_id, d.label ?? t("opt_that_device"))}>
+                              {t("opt_forget_it")}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </Fragment>
+                  ))}
+                </div>
+
+                {/* ── Blocked deletion ──
+                    Shown only while one is pending. The popup banner has always sent
+                    people here, but until now the only thing waiting for them was a log
+                    line: the percentage slider tops out at 95%, so a peer clearing
+                    nearly its whole tree stayed blocked at every setting and the
+                    warning never cleared (#18). This is the way through it. */}
+                {syncState?.recovery_notice && (
+                  <div className="settings-section">
+                    <div className="settings-card-head">
+                      {t("opt_blocked_section")}
+                      <span className="head-sub">{t("opt_blocked_section_sub")}</span>
+                    </div>
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        {/* minWidth 0 lets a long address in the list below end in an
+                            ellipsis instead of pushing the Apply button off the card. */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {/* "48 of your 49" is the number that decides this, and a bare
+                              48 is not: a notice from an older build has no total, so it
+                              falls back to the count it does have rather than to "of 0". */}
+                          <div className="row-label">
+                            {syncState.recovery_notice.local_total != null
+                              ? plural("opt_blocked_headline", syncState.recovery_notice.blocked,
+                                  [String(syncState.recovery_notice.blocked), String(syncState.recovery_notice.local_total)])
+                              : plural("opt_blocked_count", syncState.recovery_notice.blocked)}
+                          </div>
+                          <div className="row-desc">
+                            {syncState.recovery_notice.device_label
+                              ? t("opt_blocked_from", isolate(syncState.recovery_notice.device_label))
+                              : t("opt_blocked_from_unknown")}{" "}
+                            {t("opt_blocked_saved")}
+                          </div>
+                          {/* A deletion under the cap on its own, held back for what other
+                              devices removed here just before it (#41). Without this line
+                              "10 of your 40" at a 60% limit reads as the guard misfiring. */}
+                          {(syncState.recovery_notice.recent ?? 0) > 0 && (
+                            <div className="row-desc">
+                              {plural("opt_blocked_recent", syncState.recovery_notice.recent ?? 0)}
+                            </div>
+                          )}
+                          {/* Which bookmarks, not only how many (#23): "did I mean this?" is
+                              answered by recognizing them, or by not recognizing them, which
+                              points at a different bug. These are the ones Apply removes. A
+                              notice from an older build has no sample and shows no list. */}
+                          <BookmarkList
+                            items={syncState.recovery_notice.sample ?? []}
+                            total={syncState.recovery_notice.blocked}
+                          />
+                        </div>
+                      </div>
+                      {confirmApply ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                          <button className="btn-secondary" onClick={() => setConfirmApply(false)} disabled={applyBusy}>{t("opt_cancel")}</button>
+                          <button className="btn-secondary" style={{ color: "var(--danger)", borderColor: "var(--danger)" }} onClick={applyBlockedDeletion} disabled={applyBusy}>
+                            {applyBusy ? <Loader2 size={12} className="spin" /> : <Trash2 size={12} />} {t("opt_blocked_confirm_apply")}
+                          </button>
+                        </div>
+                      ) : (
+                        <button className="btn-secondary" style={{ flexShrink: 0 }} onClick={() => setConfirmApply(true)} disabled={applyBusy}>
+                          <Trash2 size={12} /> {t("opt_blocked_apply")}
+                        </button>
+                      )}
+                    </div>
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="row-desc">{t("opt_blocked_keep")}</div>
+                      </div>
+                    </div>
+                    {applyMsg && (
+                      <div className="settings-row">
+                        <div className="settings-row-left">
+                          <div className="error-row" role="alert"><AlertTriangle size={12} /> {applyMsg}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Restore points ── */}
+                <div className="settings-section">
+                  <div className="settings-card-head">
+                    {t("opt_snapshots_section")}
+                    <span className="head-sub">{t("opt_snapshots_section_sub")}</span>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div>
+                        <div className="row-label">{t("opt_snap_now_label")}</div>
+                        <div className="row-desc">{t("opt_snap_now_desc")}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                      {snapMsg && <span className="row-desc">{snapMsg}</span>}
+                      <button className="btn-secondary" onClick={createSnapshot} disabled={snapBusy}>
+                        {snapBusy ? <Loader2 size={12} className="spin" /> : <Camera size={12} />} {t("opt_snap_create")}
+                      </button>
+                    </div>
+                  </div>
+                  {snapLoad === "loading" ? (
+                    <div className="settings-row">
+                      <div className="settings-row-left"><div className="row-desc">{t("opt_snap_loading")}</div></div>
+                    </div>
+                  ) : snapLoad !== "ok" ? (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="error-row" role="alert">
+                          <AlertTriangle size={12} /> {t("opt_snap_error", snapLoad)}
+                        </div>
+                        <div className="row-desc">
+                          {t("opt_snap_error_desc")}
+                          {/* The permission message says what to do already, and where. */}
+                          {!snapLoad.startsWith(PERMISSION_LOST_PREFIX) && <> {t("opt_error_check_connection")}</>}
+                        </div>
+                      </div>
+                    </div>
+                  ) : snapshots.length === 0 ? (
+                    <div className="settings-row">
+                      <div className="settings-row-left"><div className="row-desc">{t("opt_snap_empty")}</div></div>
+                    </div>
+                  ) : snapshots.map((s) => (
+                    <div key={s.name} className="settings-row">
+                      <div className="settings-row-left">
+                        <div>
+                          <div className="row-label">{new Date(s.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</div>
+                          {/* The count comes from the shared index; an unreadable index
+                              (e.g. no passphrase set yet) leaves it unknown, and a bare
+                              "bookmarks" with no number reads as a rendering fault. */}
+                          <div className="row-desc">
+                            {s.count != null ? plural("opt_snap_count", s.count) : t("opt_snap_unknown")}
+                          </div>
+                        </div>
+                      </div>
+                      {confirmRestore === s.name ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                          <button className="btn-secondary" onClick={() => setConfirmRestore(null)} disabled={snapBusy}>{t("opt_cancel")}</button>
+                          <button className="btn-secondary" style={{ color: "var(--accent)", borderColor: "var(--accent)" }} onClick={() => restoreSnapshot(s.name)} disabled={snapBusy}>
+                            {snapBusy ? <Loader2 size={12} className="spin" /> : <RotateCcw size={12} />} {t("opt_snap_confirm_restore")}
+                          </button>
+                        </div>
+                      ) : confirmDelete === s.name ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                          <button className="btn-secondary" onClick={() => setConfirmDelete(null)} disabled={snapBusy}>{t("opt_cancel")}</button>
+                          <button className="btn-secondary" style={{ color: "var(--danger)", borderColor: "var(--danger)" }} onClick={() => deleteSnapshot(s.name)} disabled={snapBusy}>
+                            {snapBusy ? <Loader2 size={12} className="spin" /> : <Trash2 size={12} />} {t("opt_snap_confirm_delete")}
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                          <button className="btn-secondary" onClick={() => setConfirmRestore(s.name)} disabled={snapBusy}>
+                            <RotateCcw size={12} /> {t("popup_restore")}
+                          </button>
+                          <button className="btn-icon" aria-label={t("opt_snap_delete_aria")} title={t("opt_snap_delete_aria")} onClick={() => setConfirmDelete(s.name)} disabled={snapBusy}>
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="settings-section">
+                  <div className="settings-card-head">
+                    {t("opt_log_section")}
+                    <span className="head-sub">
+                      {audit.length === 0
+                        ? t("opt_log_empty_sub")
+                        : `${plural("opt_log_count", audit.length)}${errorCount ? t("opt_log_errors", String(errorCount)) : ""}${noticeCount ? t("opt_log_skipped", String(noticeCount)) : ""}.`}
+                    </span>
+                  </div>
+
+                  {audit.length > 0 && (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div>
+                          <div className="row-label">{t("opt_log_errors_only_label")}</div>
+                          <div className="row-desc">{t("opt_log_errors_only_desc")}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                        <label className="toggle-wrap">
+                          <input type="checkbox" className="toggle-input"
+                            checked={auditOnlyErrors}
+                            onChange={(e) => setAuditOnlyErrors(e.target.checked)} />
+                          <span className="toggle-track"><span className="toggle-thumb" /></span>
+                        </label>
+                        <button className="btn-secondary" onClick={clearAudit}>
+                          <Trash2 size={12} /> {t("opt_log_clear")}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Word for word, and it says so here: the log names the storage host and
+                      the pages that would not sync, and a report is usually public. */}
+                  {audit.length > 0 && (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div>
+                          <div className="row-label">{t("opt_log_copy_label")}</div>
+                          <div className="row-desc">{t("opt_log_copy_desc")}</div>
+                        </div>
+                      </div>
+                      <button className="btn-secondary" style={{ flexShrink: 0 }} onClick={copyAudit}>
+                        {logCopied ? <Check size={12} /> : <Copy size={12} />} {logCopied ? t("opt_secret_copied") : t("opt_log_copy")}
+                      </button>
+                    </div>
+                  )}
+
+                  {auditMsg && (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="error-row" role="alert"><AlertTriangle size={12} /> {auditMsg}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {shown.length === 0 ? (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="row-desc">
+                          {audit.length === 0
+                            ? t("opt_log_nothing")
+                            : t("opt_log_no_errors")}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div ref={auditFade.ref} className={`audit-list ${auditFade.className}`}>
+                      {shown.map((e, i) => (
+                        <div key={`${e.timestamp}-${i}`} className="audit-row">
+                          {/* `level` when the entry has one; older entries only have
+                              `ok`, so fall back to the old two-way read for those. */}
+                          {(e.level ?? (e.ok ? "ok" : "error")) === "ok"
+                            ? <CheckCircle2 size={13} className="audit-icon ok" />
+                            : (e.level ?? "error") === "notice"
+                              ? <AlertTriangle size={13} className="audit-icon notice" />
+                              : <XCircle size={13} className="audit-icon fail" />}
+                          <div className="audit-main">
+                            <div className="audit-action">
+                              {e.action}
+                              {/* A warning that kept coming back is one entry with a count,
+                                  first time on top and last time under it (appendAudit). */}
+                              {(e.count ?? 1) > 1 && <span className="audit-count">×{e.count}</span>}
+                            </div>
+                            {e.detail && <div className="audit-detail">{e.detail}</div>}
+                          </div>
+                          <div className="audit-time">
+                            <time dateTime={e.timestamp}>{auditTime(e.timestamp)}</time>
+                            {(e.count ?? 1) > 1 && e.last && (
+                              <time dateTime={e.last}>– {auditTime(e.last)}</time>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── ADVANCED ── */}
+          {activeNav === "advanced" && (
+            <div className="section-wrap">
+              <h1 className="page-title">{t("opt_advanced_head")}</h1>
+              <p className="page-subtitle">{t("opt_advanced_head_sub")}</p>
+
+              <div className="settings-section">
+                <div className="settings-card-head">{t("opt_impexp_section")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_export_label")}</div>
+                      <div className="row-desc">{t("opt_export_desc")}</div>
+                    </div>
+                  </div>
+                  <button className="btn-secondary" onClick={exportData}>
+                    {exportStatus === "ok" ? <><CheckCircle2 size={12} /> {t("opt_exported")}</> :
+                     exportStatus === "error" ? <><XCircle size={12} /> {t("opt_export_failed")}</> :
+                     t("opt_export")}
+                  </button>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_import_label")}</div>
+                      <div className="row-desc">
+                        {importStatus === "ok"
+                          ? plural("opt_import_ok", importCount, [String(importCount), IMPORT_FOLDER_NAME])
+                          : importStatus === "error"
+                          ? t("opt_import_bad_file")
+                          : t("opt_import_desc")}
+                      </div>
+                    </div>
+                  </div>
+                  <label className="btn-secondary" style={{ cursor: "pointer" }}>
+                    {importStatus === "ok" ? <><CheckCircle2 size={12} /> {t("opt_import_done")}</> :
+                     importStatus === "error" ? <><XCircle size={12} /> {t("opt_import_error")}</> :
+                     t("opt_import")}
+                    <input
+                      type="file" accept=".json" style={{ display: "none" }}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) importData(f); e.target.value = ""; }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-card-head">
+                  {t("opt_feedback_section")}
+                  <span className="head-sub">{t("opt_feedback_section_sub")}</span>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_report_label")}</div>
+                      <div className="row-desc">{t("opt_report_desc")}</div>
+                    </div>
+                  </div>
+                  <a className="link-external" href="https://github.com/konabe-studio/konode/issues" target="_blank" rel="noreferrer">
+                    <Github size={12} /> {t("opt_open_issues")} <ExternalLink size={10} />
+                  </a>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_email_label")}</div>
+                      <div className="row-desc">{t("opt_email_desc")}</div>
+                    </div>
+                  </div>
+                  <a className="link-external" href="mailto:konabe@proton.me">
+                    <Mail size={12} /> konabe@proton.me
+                  </a>
+                </div>
+                {REVIEW_PAGE && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div>
+                        <div className="row-label">{t("opt_rate_label")}</div>
+                        <div className="row-desc">{t("opt_rate_desc")}</div>
+                      </div>
+                    </div>
+                    <a className="link-external" href={REVIEW_PAGE.url} target="_blank" rel="noreferrer"
+                      onClick={() => void setRateAnswered(new Date().toISOString())}>
+                      <Star size={12} /> {REVIEW_PAGE.store} <ExternalLink size={10} />
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-card-head">{t("opt_developer_section")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div><div className="row-label">{t("opt_debug_label")}</div><div className="row-desc">{t("opt_debug_desc")}</div></div>
+                  </div>
+                  <label className="toggle-wrap">
+                    <input type="checkbox" className="toggle-input" checked={settings.debug_mode}
+                      onChange={(e) => update({ debug_mode: e.target.checked })} />
+                    <span className="toggle-track"><span className="toggle-thumb" /></span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-card-head">{t("opt_about_section")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left"><div><div className="row-label">{t("opt_version_label")}</div></div></div>
+                  <span className="mono-value">{APP_VERSION}</span>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div><div className="row-label">{t("opt_source_label")}</div><div className="row-desc">{t("opt_source_desc")}</div></div>
+                  </div>
+                  <a href="https://github.com/konabe-studio/konode" target="_blank" rel="noreferrer" className="link-external">
+                    <Github size={12} /> GitHub <ExternalLink size={10} />
+                  </a>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+        </div>
+
+        {/* ONE bar, and a direct child of the scroller rather than of the sheet. A sticky
+            element cannot be painted below its containing block, so while this lived inside
+            .section-wrap it could never reach the bottom of the window: the sheet's own
+            bottom padding sat under it and page content showed through the gap. On a desktop
+            the page fitted, so the bar was at its natural position and this never showed.
+
+            Which tabs get one is a fact about the tab, not something each tab remembers to
+            render, so it lives here instead of being called in four places. */}
+        {/* Never disabled on a passphrase mismatch. save() already refuses and says exactly
+            why, and the bar shows that error on every tab — whereas a disabled Save is a dead
+            button whose cause can be on a tab you are not looking at. Same rule as the unsaved
+            check: a misleading disable costs more than a redundant click. */}
+        {SAVEABLE_TABS.has(activeNav) && saveRow()}
+      </main>
+    </div>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────
+
+const STYLES = `
+  /* No external font fetch — a privacy-first extension shouldn't ping Google
+     Fonts on every open. Falls back to the system UI font. */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* Color/type/shape tokens live in src/theme.css (imported by main.tsx),
+     shared with the onboarding wizard. */
+
+  html, body, #root { height: 100%; background: var(--bg); }
+  /* Always reserve the vertical scrollbar gutter so switching between a short tab
+     (no scrollbar) and a tall one (scrollbar) doesn't shift the centered layout. */
+  html { scrollbar-gutter: stable; }
+  .settings-root { --sheet-pad: var(--sp-xl); display: flex; flex-direction: column; height: 100vh; font-family: var(--font); font-size: var(--fs-sm); color: var(--text-primary); background: var(--bg); -webkit-font-smoothing: antialiased; }
+
+  /* Top horizontal tab bar (Proton Pass settings pattern): brand at the left,
+     horizontal tabs that scroll on narrow widths, active tab underlined in accent. */
+  .topbar { position: sticky; top: 0; z-index: 10; display: flex; justify-content: center; align-items: center; height: var(--control-h); padding: 0; background: var(--bg-sidebar); border-bottom: 1px solid var(--border); }
+  /* The same column as the content, so the brand and tabs line up with the sheet's
+     left edge instead of floating at their own natural width. The bar itself still
+     spans the window; only this block is constrained. A too-narrow window scrolls the
+     tabbar (overflow-x:auto below). */
+  .topbar-inner { display: flex; align-items: center; justify-content: flex-start; gap: var(--sp-xl); width: 100%; max-width: var(--content-max); height: 100%; padding: 0 var(--sp-xl); }
+  .topbar-brand { display: flex; align-items: center; gap: var(--sp-ms); flex-shrink: 0; }
+  .topbar-logo { width: 24px; height: 24px; background: var(--accent); border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0; }
+  .topbar-title { font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); }
+  .tabbar { display: flex; align-items: stretch; height: 100%; gap: var(--sp-3xs); overflow-x: auto; scrollbar-width: none; }
+  .tabbar::-webkit-scrollbar { display: none; }
+  .tab-item { display: flex; align-items: center; padding: 0 var(--sp-md); border: none; background: transparent; color: var(--text-secondary); font-family: var(--font); font-size: var(--fs-sm); cursor: pointer; white-space: nowrap; position: relative; border-bottom: 2px solid transparent; transition: color .1s, border-color .1s; }
+  .tab-item:hover { color: var(--text-primary); }
+  .tab-item.active { color: var(--nav-active-text); font-weight: 500; border-bottom-color: var(--nav-active-bar); }
+
+  /* The document itself no longer scrolls: .content does. That is what makes the sticky
+     topbar actually stick, and it is what lets the Activity log claim the leftover
+     height instead of pushing the page taller than the window.
+
+     NOT a flex container, and that matters. As display:flex with the default
+     align-items:stretch, a scrolling container sizes its child to the VISIBLE height
+     rather than to the content, so the sheet's background stopped at the fold while the
+     rows kept going, and the last section and the Save button sat outside it on the bare
+     page. Plain block flow plus margin auto centres the column without lying about its
+     height. min-height:100% is what still fills the window when a tab is short. */
+  .content { flex: 1; min-height: 0; overflow-y: auto; padding: 0; }
+
+  /* The column is a SHEET, not just a width constraint. Cards sitting directly on the
+     page had nothing holding them together; this is the layer that says "these belong
+     to each other". Cards keep their own surface, so the depth reads page → sheet → card. */
+    /* The inset is a VARIABLE because the sticky action bar has to bleed out to the
+     sheet's edges by exactly this much. Hardcoding it in two places is how the two
+     drift apart the next time one of them is tuned. */
+  .content-inner { width: 100%; max-width: var(--content-max); min-height: 100%; margin: 0 auto; background: var(--bg-sheet); padding: var(--sheet-pad); }
+  .section-wrap { padding-bottom: var(--sp-lg); }
+  .page-title { font-size: var(--fs-lg); font-weight: 400; color: var(--text-primary); margin-bottom: var(--sp-2xs); }
+  .page-subtitle { font-size: var(--fs-sm); color: var(--text-secondary); margin-bottom: var(--sp-xl); line-height: 1.5; }
+  /* Card header lives INSIDE the section so the whole group reads as one titled
+     card (a single shadow/ring — no seam from stacking two shadowed elements). */
+  .settings-card-head { padding: var(--sp-xl); border-bottom: 1px solid var(--border); font-size: var(--fs-sm); font-weight: 600; color: var(--text-primary); background: var(--bg); }
+  .settings-card-head .head-sub { display: block; font-size: var(--fs-xs); font-weight: 400; color: var(--text-secondary); margin-top: var(--sp-3xs); line-height: 1.45; }
+
+  .settings-section { background: transparent; border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; margin-bottom: var(--sp-lg); }
+  /* A row wraps when its control cannot fit beside 14rem of text: a switch stays beside its
+     label on a phone, a wide button such as Copy log goes under the description instead of
+     squeezing it into a column (QA AN, Hungarian at 375 px). */
+  .settings-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-lg); padding: var(--sp-xl); border-bottom: 1px solid var(--border); min-height: 52px; background: transparent; transition: background .1s; }
+  .settings-row:last-child { border-bottom: none; }
+  .settings-row:hover:not(.row-disabled) { background: var(--bg-hover); }
+  .settings-row.radio-row { cursor: pointer; }
+  .settings-row.row-disabled { opacity: .45; pointer-events: none; }
+  /* Not "disabled": there is nothing left to disable, the switch itself is gone. Only the
+     LABEL dims — the sentence explaining why is the entire content of the row and has to
+     stay properly readable, which is exactly what a blanket opacity would ruin. */
+  .settings-row.is-unavailable .row-label { color: var(--text-secondary); }
+  .settings-row-left { display: flex; align-items: flex-start; gap: var(--sp-md); flex: 1 1 14rem; min-width: 0; }
+  .row-icon { color: var(--text-secondary); margin-top: 1px; flex-shrink: 0; }
+  .row-label { font-size: var(--fs-sm); color: var(--text-primary); }
+  .row-desc { font-size: var(--fs-xs); color: var(--text-secondary); margin-top: var(--sp-3xs); line-height: 1.45; }
+
+    /* Same radius and the same bottom gap as .settings-section: it IS one of these groups,
+     it just happens to hold provider cards. It was the only 16px corner on the page, and
+     the only group that let the next section butt straight up against it. */
+  .card-list { background: transparent; border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; margin-bottom: var(--sp-lg); }
+  .backend-card { padding: var(--sp-xl); cursor: pointer; border-bottom: 1px solid var(--border); transition: background .1s; background: transparent; }
+  .backend-card:last-child { border-bottom: none; }
+  .backend-card:hover { background: var(--bg-hover); }
+  .backend-card.selected { background: var(--bg-card-sel); }
+  .backend-card-header { display: flex; align-items: flex-start; gap: var(--sp-md); }
+  .backend-icon-wrap { width: 30px; height: 30px; background: var(--bg-hover); border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); flex-shrink: 0; margin-top: 1px; }
+  .backend-card.selected .backend-icon-wrap { background: var(--accent); color: white; }
+  .backend-info { flex: 1; min-width: 0; }
+  .backend-name { display: flex; align-items: center; gap: var(--sp-xs); font-size: var(--fs-sm); color: var(--text-primary); margin-bottom: var(--sp-3xs); }
+  .backend-desc { font-size: var(--fs-xs); color: var(--text-secondary); line-height: 1.4; }
+  .badge-active { font-size: var(--fs-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; background: var(--accent-solid); color: var(--on-accent); padding: var(--sp-3xs) var(--sp-xs); border-radius: var(--r-xs); }
+  /* The inactive device mark. Calm on purpose: an outline in the secondary text colour, not
+     the danger red, because nothing is wrong and nothing will happen to that device. */
+  .badge-quiet { font-size: var(--fs-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); border: 1px solid var(--border-input); padding: 0 var(--sp-xs); border-radius: var(--r-xs); margin-left: var(--sp-sm); white-space: nowrap; }
+  .device-browser { font-size: var(--fs-xs); color: var(--text-secondary); margin-left: var(--sp-sm); }
+  .radio-circle { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border-input); flex-shrink: 0; margin-top: var(--sp-2xs); background: var(--bg-card); transition: border-color .15s; }
+  .radio-circle.checked { border-color: var(--accent); background: radial-gradient(circle at center, var(--accent) 38%, transparent 42%); }
+
+  .backend-config { margin-top: var(--sp-md); padding-top: var(--sp-md); border-top: 1px solid var(--border); }
+  /* Stack fields vertically everywhere — side-by-side inputs overflowed the popup
+     and narrow (mobile/Orion) widths. The per-field flex:1/flex:2 inline styles are
+     inert on block children; field-group's own margin-top keeps the 10px rhythm. */
+  .field-row-2 { display: block; }
+  .field-group { margin-top: var(--sp-ms); }
+  .field-label { display: block; font-size: var(--fs-xs); color: var(--text-secondary); margin-bottom: var(--sp-2xs); }
+  .field-label .optional { opacity: .7; }
+  .field-input { width: 100%; padding: var(--sp-sm) var(--sp-md); background: var(--bg-input); border: 1px solid var(--border-input); border-radius: var(--r-md); font-family: var(--font); font-size: var(--fs-sm); color: var(--text-primary); outline: none; transition: border-color .15s, box-shadow .15s; }
+  .field-input.mono { font-family: var(--font-mono); font-size: var(--fs-xs); }
+  .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(18,183,106,.18); }
+  .field-input-inline { padding: var(--sp-sm) var(--sp-ms); width: 180px; background: var(--bg-input); border: 1px solid var(--border-input); border-radius: var(--r-md); font-family: var(--font); font-size: var(--fs-sm); color: var(--text-primary); outline: none; }
+  .field-input-inline:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(18,183,106,.18); }
+
+  .input-pw-wrap { position: relative; }
+  .input-pw-wrap /* Not spacing: room for the icon buttons that sit INSIDE the field (three of them on
+     the password field). Derived from the control sizes, so rounding these to the spacing
+     scale would slide the icons over the text. */
+  .field-input { padding-right: 36px; }
+  .input-pw-wrap-2 .field-input { padding-right: 86px; }
+  .btn-eye { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-secondary); padding: var(--sp-3xs); display: flex; align-items: center; }
+  .btn-eye:hover { color: var(--text-primary); }
+  .btn-eye-group { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: var(--sp-3xs); }
+  .btn-eye-group .btn-eye { position: static; transform: none; }
+
+  .verify-row { display: flex; align-items: center; gap: var(--sp-2xs); font-size: var(--fs-xs); color: var(--text-secondary); margin-top: var(--sp-2xs); }
+  .verify-row.ok { color: var(--success); }
+
+  .account-row { display: flex; align-items: center; gap: var(--sp-ms); padding: var(--sp-3xs) 0; }
+  .account-avatar { width: 28px; height: 28px; background: var(--bg-hover); border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); flex-shrink: 0; }
+  .account-info { flex: 1; }
+  .account-name { font-size: var(--fs-sm); font-weight: 500; color: var(--text-primary); }
+  .account-email { font-size: var(--fs-xs); color: var(--text-secondary); }
+
+  .btn-connect-google { display: flex; align-items: center; justify-content: center; gap: var(--sp-sm); width: 100%; height: var(--control-h); padding: 0 var(--sp-lg); background: var(--bg-card); border: 1px solid var(--border-input); border-radius: var(--r-md); cursor: pointer; font-family: var(--font); font-size: var(--fs-sm); font-weight: 500; color: var(--text-primary); transition: background .1s, border-color .1s; }
+  .btn-connect-google:hover { background: var(--bg-hover); border-color: var(--accent); }
+  .btn-connect-google:disabled { opacity: .55; cursor: not-allowed; }
+  .btn-disconnect { display: flex; align-items: center; gap: var(--sp-2xs); padding: var(--sp-xs) var(--sp-md); border-radius: var(--r-md); border: 1px solid var(--border-input); background: var(--bg-card); cursor: pointer; font-family: var(--font); font-size: var(--fs-xs); color: var(--text-secondary); transition: color .1s, border-color .1s, background .1s; white-space: nowrap; }
+  .btn-disconnect:hover { color: var(--danger); border-color: var(--danger); }
+  .config-hint { display: flex; align-items: flex-start; gap: var(--sp-ms); font-size: var(--fs-xs); color: var(--info-text); background: var(--info-bg); border: 1px solid var(--info-border); border-radius: var(--r-sm); padding: var(--sp-xl); margin-top: var(--sp-sm); line-height: 1.4; }
+  .config-hint svg { margin-top: 1px; flex-shrink: 0; color: var(--info-border); }
+  .config-hint code { font-family: var(--font-mono); font-size: var(--fs-xs); background: var(--bg-hover); padding: var(--sp-3xs) var(--sp-2xs); border-radius: var(--sp-3xs); }
+  .error-row { display: flex; align-items: center; gap: var(--sp-2xs); font-size: var(--fs-xs); color: var(--danger); margin-top: var(--sp-sm); }
+  .link-external { display: inline-flex; align-items: center; gap: var(--sp-2xs); font-size: var(--fs-xs); color: var(--text-link); text-decoration: none; margin-top: var(--sp-ms); }
+  .link-external:hover { text-decoration: underline; }
+
+  /* STICKY, not fixed, and the difference is the whole requirement. Sticky keeps its
+     place in the flow: it rides the bottom of the scroller while its natural position is
+     still below the fold, and once you reach that position it settles into the page. So at
+     the bottom of a tab it covers nothing, with no compensating padding to maintain. Fixed
+     leaves the flow entirely, which means it sits on top of the last row forever unless
+     something reserves space for it by hand.
+     Bleeds to the sheet's edges via --sheet-pad so it reads as a bar rather than a floating
+     button, and carries the sheet's own background so the rows don't show through. */
+  /* Sticky, not fixed, and the difference is the requirement: sticky keeps its place in
+     the flow, so it rides the bottom of the scroller while its natural position is still
+     below the fold and settles into the page once reached. At the end of a tab it therefore
+     covers nothing, with no reserved padding to keep in sync. Fixed leaves the flow, and
+     then sits on the last row forever unless something compensates by hand.
+     Same width as the sheet, centred the same way, so it reads as the sheet's own footer. */
+  .action-row { position: sticky; bottom: 0; z-index: 5; width: 100%; max-width: var(--content-max); margin: 0 auto; display: flex; align-items: center; gap: var(--sp-lg); padding: var(--sp-md) var(--sheet-pad); background: var(--bg-sheet); border-top: 1px solid var(--border); }
+  /* Primary first, secondary beside it. They wrap as a PAIR when there isn't room,
+     rather than being separated by whatever message happens to be showing. */
+  .action-buttons { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-md); }
+  /* Beside the buttons, not under them. This was a column because the row used to hold a
+     variable number of children with space-between, so a message arriving rearranged
+     everything; the messages have their own container now, which makes a row stable. */
+  .action-messages { display: flex; flex-direction: column; gap: var(--sp-2xs); min-width: 0; }
+  .unsaved-note { display: flex; align-items: center; gap: var(--sp-2xs); font-size: var(--fs-xs); color: var(--warn-text); }
+  /* A ring rather than a different fill: the button keeps reading as the primary action,
+     it just gains something to notice. */
+  .btn-save.pending { box-shadow: 0 0 0 3px var(--warn-bg); }
+  /* Sits under the fields, separated by the same hairline the rows use. Wraps so the result
+     drops below the button instead of squeezing it on a phone. */
+  .card-test { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-md); margin-top: var(--sp-lg); padding-top: var(--sp-lg); border-top: 1px solid var(--border); }
+  /* Wraps freely now that it has a line to itself; it used to be nowrap because it was
+     competing with the buttons for the same row. */
+  .test-result { display: flex; align-items: center; gap: var(--sp-2xs); font-size: var(--fs-xs); }
+  .test-result.ok { color: var(--success); }
+  .test-result.fail { color: var(--danger); }
+
+  .toggle-wrap { position: relative; display: inline-flex; align-items: center; cursor: pointer; flex-shrink: 0; }
+  .toggle-input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .toggle-track { width: 34px; height: 18px; background: var(--toggle-off); border-radius: var(--r-md); position: relative; transition: background .2s; }
+  .toggle-input:checked ~ .toggle-track { background: var(--toggle-on); }
+  .toggle-input:disabled ~ .toggle-track { opacity: .4; cursor: not-allowed; }
+  .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; background: var(--toggle-thumb); border-radius: 50%; transition: transform .18s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+  .toggle-input:checked ~ .toggle-track .toggle-thumb { transform: translateX(16px); }
+  /* Visually hidden, not display:none — display:none would take it out of the tab order
+     and out of the accessibility tree, which is the whole reason it is still here. */
+  .radio-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .radio-input:checked + .radio-circle { border-color: var(--accent); background: radial-gradient(circle at center, var(--accent) 38%, transparent 42%); }
+  .radio-input:focus-visible + .radio-circle { box-shadow: 0 0 0 3px var(--accent-light); }
+  /* The card version nudges down to line up with a two-line block; these rows centre. */
+  .radio-row .radio-circle { margin-top: 0; }
+  .slider-wrap { display: flex; align-items: center; gap: var(--sp-sm); }
+  .slider { width: 110px; accent-color: var(--accent); cursor: pointer; -webkit-appearance: none; height: 4px; background: var(--border); border-radius: var(--sp-3xs); outline: none; }
+  .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--accent); border-radius: 50%; }
+  .slider-val { font-size: var(--fs-xs); font-family: var(--font-mono); color: var(--text-secondary); min-width: 30px; text-align: right; }
+  .mono-value { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-secondary); }
+
+  /* Sized by padding, like .btn-install, instead of a fixed control height. Ben wanted
+     the Activity and Advanced actions to match the Install buttons next to them. */
+  /* Height from the token, not from the padding: without it this was the one standalone
+     button style with no stated height, so it came out around 36px on its own and 48 next
+     to the icon-only Restore-point button, which shares a stretch row with it. */
+  .btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-xs); height: var(--control-h-sm); padding: 0 var(--sp-xl); border-radius: var(--r-md); border: 1px solid var(--border-input); background: var(--bg-card); cursor: pointer; font-family: var(--font); font-size: var(--fs-sm); color: var(--text-secondary); transition: background .1s, border-color .1s, color .1s; white-space: nowrap; }
+  .btn-secondary:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--accent); }
+  .btn-secondary:disabled { opacity: .5; cursor: not-allowed; }
+  /* Icon-only: square by construction — one token drives both width and height, and
+     flex-basis is pinned so a tight row can't squash it into a rectangle. A
+     destructive action stays quiet until hover, so it's never the easiest hit. */
+  .btn-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: var(--control-h-sm); height: var(--control-h-sm); padding: 0; border-radius: var(--r-md); border: 1px solid var(--border-input); background: var(--bg-card); cursor: pointer; color: var(--text-secondary); transition: background .1s, border-color .1s, color .1s; }
+  .btn-icon:hover { background: var(--bg-hover); color: var(--danger); border-color: var(--danger); }
+  .btn-icon:disabled { opacity: .5; cursor: not-allowed; }
+  /* Borderless, so padding alone left it 2px shorter than the bordered Test
+     Connection button beside it. Height comes from the shared token instead. */
+  .btn-save { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-sm); height: var(--control-h); padding: 0 var(--sp-2xl); border-radius: var(--r-md); border: none; background: var(--accent-solid); color: var(--on-accent); font-family: var(--font); font-size: var(--fs-sm); font-weight: 500; cursor: pointer; transition: background .15s; white-space: nowrap; }
+  .btn-save:hover { background: var(--accent-solid-hover); }
+  .btn-save.saved { background: var(--accent-solid); }
+  .btn-save:disabled { opacity: .6; cursor: not-allowed; }
+  .btn-install { display: inline-flex; align-items: center; padding: var(--sp-sm) var(--sp-xl); border-radius: var(--r-md); background: var(--accent-solid); color: var(--on-accent); font-size: var(--fs-xs); font-weight: 500; text-decoration: none; flex-shrink: 0; transition: background .1s; }
+  .btn-install:hover { background: var(--accent-solid-hover); }
+
+  .notice-warn { display: flex; align-items: flex-start; gap: var(--sp-ms); padding: var(--sp-md) 14px; margin-top: 14px; background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: var(--r-md); font-size: var(--fs-xs); color: var(--warn-text); line-height: 1.5; }
+  .notice-warn svg { margin-top: 1px; flex-shrink: 0; color: var(--warn-border); }
+  .notice-warn a { color: var(--text-link); }
+
+  select.field-input { cursor: pointer; }
+
+  /* Segmented toggle (pCloud EU/US region). */
+  .seg-group { display: inline-flex; border: 1px solid var(--border-input); border-radius: var(--r-md); overflow: hidden; }
+  .seg-btn { padding: 7px var(--sp-lg); border: none; background: var(--bg-input); color: var(--text-secondary); font-family: var(--font); font-size: var(--fs-sm); cursor: pointer; transition: background .1s, color .1s; }
+  .seg-btn + .seg-btn { border-left: 1px solid var(--border-input); }
+  .seg-btn.on { background: var(--accent-solid); color: var(--on-accent); font-weight: 600; }
+
+  .setup-card { margin-bottom: var(--sp-xl); padding: var(--sp-lg); background: var(--accent-light); border: 1px solid var(--accent); border-radius: var(--r-md); }
+  .setup-card-head { display: flex; align-items: flex-start; gap: var(--sp-md); }
+  .setup-card-mark { width: 30px; height: 30px; border-radius: var(--r-sm); background: var(--accent-solid); color: var(--on-accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .setup-card-title { font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); margin-bottom: var(--sp-3xs); }
+  .setup-card-sub { font-size: var(--fs-xs); color: var(--text-secondary); line-height: 1.5; }
+  .setup-steps { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-sm); }
+  .setup-steps li { display: flex; align-items: center; gap: var(--sp-ms); padding: var(--sp-sm) var(--sp-ms); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r-md); font-size: var(--fs-sm); color: var(--text-primary); }
+  .setup-steps li.done .step-text { color: var(--text-secondary); }
+  .step-badge { width: 20px; height: 20px; border-radius: 50%; background: var(--bg-hover); color: var(--text-secondary); display: flex; align-items: center; justify-content: center; font-size: var(--fs-xs); font-weight: 600; flex-shrink: 0; }
+  .setup-steps li.done .step-badge { background: transparent; color: var(--success); }
+  .step-text { flex: 1; }
+  .step-action { display: inline-flex; align-items: center; gap: var(--sp-2xs); padding: var(--sp-2xs) var(--sp-ms); border-radius: var(--r-sm); border: 1px solid var(--accent); background: var(--bg-card); color: var(--text-link); font-family: var(--font); font-size: var(--fs-xs); font-weight: 500; cursor: pointer; white-space: nowrap; }
+  .step-action:hover { background: var(--accent-light); }
+
+  /* Audit log rows. Denser than a settings-row (a log is scanned, not read), with the
+     timestamp right-aligned and tabular so the column stays straight. */
+  /* Bounded, and the page scrolls around it. It used to claim the whole leftover height,
+     which only worked while the log was the ONLY thing on this tab. Now that the sync
+     numbers sit above it that premise is gone, and a height that depends on how much wraps
+     above it is a height that collapses on a narrow window. */
+  .audit-list { min-height: 12rem; max-height: 60vh; overflow-y: auto; }
+
+  /* ─── Scroll fades ────────────────────────────────────────────────────────
+     A MASK rather than a gradient overlay, for two reasons: an overlay has to know the
+     colour it fades into (so it lies the moment a surface colour changes), and it sits on
+     top of the content, so it needs pointer-events:none or it swallows clicks. A mask
+     fades the content itself. -webkit- goes with it for WebKit, i.e. Orion.
+
+     ONE declaration covers all four states, because a zero-length fade is no fade: with
+     --fade-start at 0 the gradient is transparent at 0 and opaque at 0, which is simply
+     opaque. So the classes only have to set a length, and useScrollEdges only has to say
+     which edges are live. No combinatorial CSS. */
+  .scroll-fade { --fade-start: 0px; --fade-end: 0px; }
+  .scroll-fade.fade-start { --fade-start: var(--sp-2xl); }
+  .scroll-fade.fade-end   { --fade-end: var(--sp-2xl); }
+  .audit-list.scroll-fade {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent 100%);
+  }
+  .tabbar.scroll-fade {
+    /* Shorter than the vertical fade: the strip is one row tall, and eating 24px of a tab
+       label is worse than the hint is worth. */
+    --fade-start: 0px; --fade-end: 0px;
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent 100%);
+  }
+  .tabbar.scroll-fade.fade-start { --fade-start: var(--sp-lg); }
+  .tabbar.scroll-fade.fade-end   { --fade-end: var(--sp-lg); }
+  .audit-row { display: flex; align-items: flex-start; gap: var(--sp-ms); padding: var(--sp-sm) var(--sp-xl); border-bottom: 1px solid var(--border); }
+  .audit-row:last-child { border-bottom: none; }
+  .audit-icon { flex-shrink: 0; margin-top: var(--sp-3xs); }
+  .audit-icon.ok { color: var(--success); }
+  .audit-icon.fail { color: var(--danger); }
+  /* A deliberate skip is not a failure. Warnings used to render in --danger, which is
+     why a routine import read as 176 errors out of 188. */
+  .audit-icon.notice { color: var(--warn-border); }
+  .audit-main { flex: 1; min-width: 0; }
+  .audit-action { font-size: var(--fs-sm); color: var(--text-primary); }
+  .audit-detail { font-size: var(--fs-xs); color: var(--text-secondary); margin-top: 1px; word-break: break-word; }
+  .audit-time { flex-shrink: 0; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-secondary); font-variant-numeric: tabular-nums; padding-top: 1px; }
+  .audit-time time { display: block; }
+  .audit-count { margin-left: var(--sp-xs); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+
+  /* Stat tiles: a hairline grid inside a titled card (the card clips the 1px gaps). */
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 1px; background: var(--border); }
+  .stat-tile { background: var(--bg-card); padding: var(--sp-lg); display: flex; flex-direction: column; gap: var(--sp-2xs); }
+  .stat-value { font-size: var(--fs-lg); font-weight: 600; color: var(--text-primary); line-height: 1.15; word-break: break-word; }
+  .stat-value-sm { font-size: var(--fs-md); }
+  .stat-label { font-size: var(--fs-xs); color: var(--text-secondary); }
+
+  .spin { animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Narrow widths (small windows, mobile/Orion, or the page opened in a popup-sized
+     tab): let the save/test row wrap instead of pushing content off-screen, and tuck
+     the horizontal padding in. The connection-status text no longer forces overflow. */
+  @media (max-width: 560px) {
+    .content { padding: var(--sp-md) var(--sp-sm) var(--sp-5xl); }
+    /* The sheet goes nearly edge to edge on a phone. Its 20px inset plus the page
+       padding ate a third of the width on an iPhone, which is real: Kesonode runs on
+       Orion on iOS today, with a WebDAV backend. */
+    .settings-root { --sheet-pad: var(--sp-md); }
+    /* auto-fit still fits two 128px columns on a phone, which leaves the numbers and
+       their labels fighting for about 60px each. One per row. */
+    .stat-grid { grid-template-columns: 1fr; }
+    /* Under the buttons on a phone: there is no room for a sentence beside them. */
+    .action-row { flex-direction: column; align-items: flex-start; gap: var(--sp-md); }
+  }
+
+`;

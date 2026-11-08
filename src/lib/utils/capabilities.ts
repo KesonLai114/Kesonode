@@ -1,0 +1,411 @@
+/**
+ * What the browser Kesonode is running in can actually DO — as opposed to what its
+ * manifest says it may do.
+ *
+ * The two are not the same thing, and the gap is not theoretical. Firefox for Android
+ * accepts `"permissions": ["bookmarks"]` at install time and then ships no bookmarks API
+ * at all: the permission is granted, `browser.bookmarks` is `undefined`, and every call
+ * into it is a TypeError. The same holds for `history`. A field report from a Fennec user
+ * showed exactly the shape that produces — bookmarks failing with "getTree", the History
+ * toggle refusing to turn on, and the setup wizard blaming the WebDAV server for a
+ * permission problem that had nothing to do with WebDAV.
+ *
+ * So: ASK the browser, don't assume from the manifest, and don't assume from the engine
+ * name either. A capability check answers correctly for browsers that don't exist yet;
+ * a `/Android/` sniff only answers for the ones we thought of.
+ *
+ * Sources for the platform facts referenced here:
+ *   - bookmarks API missing on Firefox for Android — mozilla-mobile/fenix#21830
+ *   - history API missing on Firefox for Android — Rayquaza01/HistoryCleaner#22
+ *   - permissions.request() unimplemented on GeckoView — bugzilla 1601420,
+ *     mdn/browser-compat-data#13299
+ */
+import { browser } from "@/lib/utils/ext";
+import { logger } from "@/lib/utils/logger";
+import type { DataType } from "@/lib/types";
+
+/**
+ * The optional permission a data type needs, for the types that need one.
+ *
+ * `bookmarks` is absent on purpose — it is a REQUIRED manifest permission, always held,
+ * never requested. That absence is load-bearing in `dataTypeAvailability` below.
+ */
+export const PERMISSION_FOR_TYPE: Partial<Record<DataType, string>> = {
+  history: "history",
+  sessions: "tabs",
+  extensions: "management",
+};
+
+/**
+ * The namespace and one method each data type cannot work without.
+ *
+ * One method rather than the whole namespace: a browser that exposes a stub `bookmarks`
+ * object with nothing on it is just as unusable as one that exposes nothing, and the
+ * check should say so either way.
+ */
+const API_FOR_TYPE: Record<DataType, readonly [ns: string, method: string]> = {
+  bookmarks: ["bookmarks", "getTree"],
+  history: ["history", "search"],
+  sessions: ["tabs", "query"],
+  extensions: ["management", "getAll"],
+};
+
+/** Does this browser implement `browser.<ns>.<method>()`? */
+export function apiPresent(ns: string, method: string): boolean {
+  // Deliberately loose: `browser` is typed as `typeof chrome`, which declares every
+  // namespace as always present. That type is a promise about the API surface, not a
+  // fact about the running browser, and this function exists precisely to check the fact.
+  const table = browser as unknown as Record<string, Record<string, unknown> | undefined>;
+  try {
+    return typeof table[ns]?.[method] === "function";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Does this browser implement the `browser.<ns>.<event>` event?
+ *
+ * Separate from `apiPresent` because an event is an OBJECT carrying `addListener`, not a
+ * function, so a `typeof … === "function"` check answers "no" for every event that
+ * exists — which is a quiet way to switch off working listeners.
+ */
+export function eventPresent(ns: string, event: string): boolean {
+  const table = browser as unknown as
+    Record<string, Record<string, { addListener?: unknown } | undefined> | undefined>;
+  try {
+    return typeof table[ns]?.[event]?.addListener === "function";
+  } catch {
+    return false;
+  }
+}
+
+/** Does this browser implement the API a data type is built on? */
+export function dataTypeApiPresent(type: DataType): boolean {
+  const [ns, method] = API_FOR_TYPE[type];
+  return apiPresent(ns, method);
+}
+
+/**
+ * Whether a data type can be synced here, and if not, which kind of "not".
+ *
+ * The distinction matters because the two need opposite treatment. A permission we
+ * simply haven't asked for yet is one click away; an API the browser doesn't implement
+ * is never coming, and offering a toggle for it is a lie.
+ *
+ * Telling them apart takes a permission check, because an optional-permission API is
+ * `undefined` until its permission is granted — so a missing `browser.history` means
+ * "not granted yet" on Chrome and "never implemented" on Firefox for Android, and only
+ * `permissions.contains()` says which. It says so by THROWING: Firefox for Android has no
+ * `history` permission in its schema at all, so the question is rejected as a type error
+ * rather than answered "no". Read as a plain "no", that offered History as a switch whose
+ * permission no settings screen could ever grant, and setup could not finish while it
+ * was on (seen on Firefox 158).
+ */
+export type Availability =
+  | { state: "ready" }
+  | { state: "needs-permission"; permission: string }
+  | { state: "unsupported" };
+
+export async function dataTypeAvailability(type: DataType): Promise<Availability> {
+  const permission = PERMISSION_FOR_TYPE[type];
+
+  // Ask about the PERMISSION first, whether or not the API is still standing.
+  //
+  // For history and management the two answers agree, because revoking the permission
+  // takes the API object with it. `tabs` does not work that way: `browser.tabs.query`
+  // stays callable without the `tabs` permission and simply returns tabs with no url, so
+  // an API-presence check calls Sessions ready while nothing it produces is usable. Seen
+  // on Firefox, where these toggles sit in about:addons and are easy to turn off: History
+  // and Extensions said the permission was gone, Sessions said nothing at all.
+  //
+  // The data was never at risk (`isPayloadEmpty` refuses to publish a tab-less session
+  // over a good one, and says why). What was missing is that anyone was told.
+  if (permission) {
+    const held = await permissionState(permission);
+    // A permission the browser has never heard of, with no API either, is never coming.
+    // The API check stays, so a contains() that fails for some other reason on a browser
+    // that does have the API still reads as a permission to ask for, as it always did.
+    if (held === "unknown" && !dataTypeApiPresent(type)) return { state: "unsupported" };
+    if (held !== "held") return { state: "needs-permission", permission };
+  }
+
+  if (dataTypeApiPresent(type)) return { state: "ready" };
+
+  // No API, and either no permission gates it (bookmarks) or the permission IS held:
+  // either way this browser doesn't implement it and there is nothing to ask for.
+  return { state: "unsupported" };
+}
+
+/** Availability for every data type at once, for a UI that renders all four. */
+export async function allDataTypeAvailability(): Promise<Record<DataType, Availability>> {
+  const types = Object.keys(API_FOR_TYPE) as DataType[];
+  const entries = await Promise.all(types.map(async (t) => [t, await dataTypeAvailability(t)] as const));
+  return Object.fromEntries(entries) as Record<DataType, Availability>;
+}
+
+/**
+ * What to tell someone whose browser doesn't implement a data type's API.
+ *
+ * Named platforms rather than a bare "not supported": the first thing anyone does with
+ * "bookmarks can't sync" is check whether their setup is broken, and knowing it's the
+ * browser — and that the desktop build is fine — ends that search immediately.
+ */
+const UNSUPPORTED_MESSAGE: Record<DataType, string> = {
+  bookmarks: "This browser doesn't provide a bookmarks API, so bookmarks can't sync here. Firefox for Android is the usual case; bookmark sync works on desktop Firefox and on Chromium browsers.",
+  history: "This browser doesn't provide a history API, so history can't sync here. Firefox for Android is the usual case; history sync works on desktop Firefox and on Chromium browsers.",
+  sessions: "This browser doesn't provide a tabs API, so open tabs can't sync here.",
+  extensions: "This browser doesn't provide an extension-management API, so your extension list can't sync here.",
+};
+
+/** The sentence to show for a type this browser can't sync. */
+export function unsupportedReason(type: DataType): string {
+  return UNSUPPORTED_MESSAGE[type];
+}
+
+/**
+ * Throw a sentence a person can act on, rather than let the call fail as a TypeError.
+ *
+ * "Cannot read properties of undefined (reading 'getTree')" is what a Fennec user was
+ * shown for a browser that simply has no bookmarks API, and it reads like a crash in
+ * Kesonode. Every handler entry point checks this first.
+ */
+export function assertDataTypeApi(type: DataType): void {
+  if (!dataTypeApiPresent(type)) throw new Error(UNSUPPORTED_MESSAGE[type]);
+}
+
+// ─── Permissions ──────────────────────────────────────────────────────────
+
+/** `permissions.contains()`, never throwing — an unanswerable question is a "no". */
+export async function hasPermission(req: chrome.permissions.Permissions): Promise<boolean> {
+  try {
+    return await browser.permissions.contains(req);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `permissions.contains()` for one API permission, keeping apart the "no" that
+ * `hasPermission` folds together: `unknown` is the browser refusing the question, which
+ * is what it does with a permission name its schema lacks (Firefox for Android with
+ * `history`, `bookmarks` or `tabGroups`).
+ */
+export async function permissionState(permission: string): Promise<"held" | "not-held" | "unknown"> {
+  try {
+    return (await browser.permissions.contains({ permissions: [permission] })) ? "held" : "not-held";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * The result of trying to obtain a permission.
+ *
+ * `cannot-prompt` is the one that earns its place: Firefox for Android does not implement
+ * `permissions.request()` (bugzilla 1601420), so the call resolves false — or throws —
+ * no matter what the user would have said. Reporting that as "you declined" is simply
+ * false, and it is what left a Fennec user staring at "Kesonode needs permission to reach
+ * your WebDAV server" with no prompt in sight and no way forward. On that platform the
+ * permission has to be granted from Firefox's own add-on settings instead, which is
+ * something we can tell the user only if we know the difference.
+ */
+export type PermissionOutcome = "granted" | "denied" | "cannot-prompt";
+
+/**
+ * Make sure a permission is held, prompting only if it isn't.
+ *
+ * `request()` goes FIRST, before anything else is awaited. By "from a user input handler"
+ * Firefox does not mean "shortly after the click", it means the current task: the answer
+ * to any other extension API arrives on a new one, and from there `request()` throws
+ * `permissions.request may only be called from a user input handler`. A single
+ * `contains()` in front of it is enough to lose the gesture, and a `contains()` is what
+ * 1.2.1 put there. From then on Firefox showed no prompt at all, in the wizard or in
+ * Settings, so every WebDAV setup on it dead-ended in "Kesonode needs permission to reach
+ * your WebDAV server" with nothing to allow. Chrome went on working, because its gesture
+ * is a few-second window rather than the current task, which is why the Chromium devices
+ * and the fakes both reported this path healthy.
+ *
+ * Asking first costs nothing. A permission already held resolves `true` with no prompt on
+ * every browser that implements the call, and the `contains()` below still answers for the
+ * browser that doesn't: Firefox for Android never prompts (bugzilla 1601420), so granting
+ * by hand in the add-on's own settings is the only way to hold a permission there, and
+ * that has to keep reading as "granted" rather than as a refusal.
+ *
+ * MUST be called synchronously from a user gesture. Await nothing ahead of it, here or in
+ * the click handler that calls it.
+ */
+export async function ensurePermission(req: chrome.permissions.Permissions): Promise<PermissionOutcome> {
+  let granted = false;
+  try {
+    granted = await browser.permissions.request(req);
+  } catch (err) {
+    // Swallowed in silence until now, which is how a thrown "may only be called from a
+    // user input handler" reached the user as "your WebDAV server refused permission".
+    // Declining resolves false rather than throwing, so a refusal never lands here.
+    logger.warn("permissions.request failed", err instanceof Error ? err.message : String(err));
+    granted = false;
+  }
+  if (granted) return "granted";
+
+  // A false here is not proof of a refusal, see PermissionOutcome. Re-check what we
+  // actually hold before deciding which story to tell.
+  if (await hasPermission(req)) return "granted";
+
+  return (await promptsForPermissions()) ? "denied" : "cannot-prompt";
+}
+
+/** How long a permission prompt may stay unanswered before the caller is told. */
+export const PERMISSION_SLOW_MS = 8000;
+
+/**
+ * `ensurePermission`, with word when the answer is slow in coming.
+ *
+ * Vivaldi on Android (8.2) neither showed the prompt nor answered the request, so the
+ * setup's Finish waited on a promise that never settled and looked like a dead button
+ * (reported on Reddit, fixed in Vivaldi Snapshot). The request is not abandoned, since a
+ * real prompt may simply be read slowly; `onSlow` runs once it has gone unanswered for
+ * `slowMs`, so the caller can say what to do if no prompt is on screen.
+ *
+ * The request itself is made before anything is awaited, so it keeps the click's gesture.
+ */
+export async function ensurePermissionWatched(
+  req: chrome.permissions.Permissions,
+  onSlow: () => void,
+  slowMs = PERMISSION_SLOW_MS,
+): Promise<PermissionOutcome> {
+  const timer = setTimeout(onSlow, slowMs);
+  try {
+    return await ensurePermission(req);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Can this browser show a runtime permission prompt at all?
+ *
+ * There is no capability bit for this — `permissions.request` is a perfectly normal
+ * function on Firefox for Android, it just never asks anybody. So this is the one place
+ * that has to identify the platform rather than the feature, and it does it through
+ * `runtime.getPlatformInfo()` rather than the user agent, which is spoofable.
+ *
+ * Cached: the answer cannot change within a page's lifetime, and the callers are click
+ * handlers.
+ */
+let promptsCache: boolean | undefined;
+export async function promptsForPermissions(): Promise<boolean> {
+  if (promptsCache !== undefined) return promptsCache;
+  promptsCache = !(await isAndroid());
+  return promptsCache;
+}
+
+/** Test seam: forget the cached platform answers. */
+export function resetCapabilityCache(): void {
+  promptsCache = undefined;
+  androidCache = undefined;
+  iosCache = undefined;
+  tabGroupsAskableCache = undefined;
+}
+
+// ─── Tab groups (#11) ─────────────────────────────────────────────────────
+
+/**
+ * How much of a tab group this browser can carry.
+ *
+ * - `none`: no `tabs.group` at all (Firefox for Android, Safari, Firefox before 138, and
+ *   probably Orion, which only a device can say). Sessions restore ungrouped, as before.
+ * - `membership`: `tabs.group` and `Tab.groupId` work, and they need NO permission on
+ *   either engine (Chromium gates only the `tabGroups` namespace; MDN says the same for
+ *   Firefox). Names and colours are out of reach, because `tabGroups` is not granted or
+ *   the browser has none (Firefox 138).
+ * - `full`: `tabGroups` granted, so names and colours can be read and written too. The
+ *   namespace is `undefined` until the permission is granted, like `history`, which is
+ *   why the permission is checked and not just the API.
+ */
+export type TabGroupSupport = "none" | "membership" | "full";
+
+export async function tabGroupSupport(): Promise<TabGroupSupport> {
+  if (!apiPresent("tabs", "group")) return "none";
+  if (apiPresent("tabGroups", "get") && (await hasPermission({ permissions: ["tabGroups"] }))) {
+    return "full";
+  }
+  return "membership";
+}
+
+let tabGroupsAskableCache: boolean | undefined;
+/**
+ * Does this browser know the `tabGroups` permission, so it can be asked for?
+ *
+ * It has to be known BEFORE the click, because `permissions.request()` must be the first
+ * thing a click awaits (see `ensurePermission`), and it has to be known at all because one
+ * permission the browser does not recognise makes the WHOLE request fail. Firefox 138 has
+ * `tabs.group` and no `tabGroups` (that came in 139), so asking there would take the Open
+ * tabs switch down with it, and in the wizard the whole setup.
+ *
+ * Answered by asking, not by the version: `permissions.contains()` resolves for a
+ * permission the browser knows, granted or not, and throws for one it doesn't, on Chrome
+ * and on Firefox alike.
+ */
+export async function tabGroupsAskable(): Promise<boolean> {
+  if (tabGroupsAskableCache !== undefined) return tabGroupsAskableCache;
+  if (!apiPresent("tabs", "group")) return (tabGroupsAskableCache = false);
+  try {
+    await browser.permissions.contains({ permissions: ["tabGroups"] });
+    tabGroupsAskableCache = true;
+  } catch {
+    tabGroupsAskableCache = false;
+  }
+  return tabGroupsAskableCache;
+}
+
+/**
+ * The permissions to ask for when a data type is switched on.
+ *
+ * Open tabs also asks for `tabGroups` where the browser knows it, in the same request
+ * (decided 2026-10-02): from Settings or the wizard, never from the popup. Chrome shows its
+ * warning ("View and manage your tab groups") in the one prompt; Firefox grants it without
+ * a prompt at all. `askTabGroups` comes from `tabGroupsAskable()`, read before the click.
+ */
+export function permissionsToEnable(type: DataType, askTabGroups: boolean): string[] {
+  const perm = PERMISSION_FOR_TYPE[type];
+  if (!perm) return [];
+  return type === "sessions" && askTabGroups ? [perm, "tabGroups"] : [perm];
+}
+
+let iosCache: boolean | undefined;
+/**
+ * iOS, where every browser is WebKit underneath (Orion, Safari, and the rest).
+ *
+ * Only a HINT, never a gate: it lets the first session restore on a WebKit engine take
+ * the single-open path instead of learning it the expensive way. If it answers wrong in
+ * either direction, `importSession` measures the truth and remembers it, so the cost of
+ * being wrong is one restore, not a broken feature.
+ */
+export async function isIOS(): Promise<boolean> {
+  if (iosCache !== undefined) return iosCache;
+  try {
+    const info = await browser.runtime.getPlatformInfo();
+    // Not in the typed PlatformOs union (which predates any iOS port), but it is what a
+    // WebKit build answers, so compare as a string rather than narrowing it away.
+    iosCache = String(info.os) === "ios";
+  } catch {
+    iosCache = /iphone|ipad|ipod/i.test(globalThis.navigator?.userAgent ?? "");
+  }
+  return iosCache;
+}
+
+let androidCache: boolean | undefined;
+export async function isAndroid(): Promise<boolean> {
+  if (androidCache !== undefined) return androidCache;
+  try {
+    const info = await browser.runtime.getPlatformInfo();
+    androidCache = info.os === "android";
+  } catch {
+    // Older/limited builds may not answer. The user agent is a worse signal — it can be
+    // spoofed — but a wrong answer here only changes the wording of an error message,
+    // never whether something is allowed.
+    androidCache = /android/i.test(globalThis.navigator?.userAgent ?? "");
+  }
+  return androidCache;
+}

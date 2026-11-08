@@ -1,0 +1,111 @@
+name: Release
+
+# Cut a GitHub release on a version tag:  git tag vX.Y.Z && git push origin vX.Y.Z
+# Builds the extension and attaches the Chrome and Firefox zips to the release.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # required to create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The TAG names the release; package.json names the zips inside it, because
+      # sync-version stamps it into the manifest and the packaging scripts read it back.
+      # Nothing tied the two together, so tagging before the release commit landed would
+      # have produced a release titled v1.3.1 containing kesonode-chrome-1.3.0.zip: wrong in
+      # a way that is easy to miss on the release page and awkward to take back once people
+      # have downloaded it. First step, before npm ci, so a mismatch costs no CI time.
+      - name: Tag must match package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME says $tag, package.json says $pkg. Bump the version and re-tag."
+            exit 1
+          fi
+          echo "Tag and package.json agree on $pkg"
+
+      - run: npm ci --no-audit --no-fund
+
+      # Tag pushes don't trigger ci.yml, so gate the release on the same checks.
+      - name: Check
+        run: npm run check
+
+      # SOURCE builds, for both browsers, into web-ext-artifacts/source/.
+      #
+      # A release page is a public download, so what goes on it must not carry Kesonode's own
+      # Google OAuth client secret: these are the "bring your own OAuth client" variant, and
+      # Drive sign-in in them needs the user's own. The zips uploaded to the Chrome Web Store,
+      # Microsoft Edge Add-ons and AMO are built locally WITH the secret, by hand, and land in
+      # web-ext-artifacts/chrome/ (the Web Store and Edge take the same file) and
+      # .../firefox/ instead.
+      #
+      # `package:source` does not merely rely on CI having no .env. It builds through
+      # `--mode source`, which blanks the secret via .env.source, and then reads the built
+      # bundle back and refuses to zip if a secret is in there after all. That check is the
+      # point: the two variants are otherwise indistinguishable once zipped.
+      - name: Package (source builds, both browsers)
+        run: npm run package:source
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          web-ext-artifacts/source/kesonode-chrome-*.zip
+          web-ext-artifacts/source/kesonode-firefox-*.zip
+          --title "$GITHUB_REF_NAME"
+          --generate-notes
+
+      # The site renders a strip of store version numbers, and it has to be told to go and
+      # look again. The obvious place for that was a `release: published` trigger in
+      # notify-site.yml, and it never once fired: the release above is created by
+      # github.token, and GitHub does not start workflows from events that token created.
+      # So the one moment a version number actually changes was the one moment nothing
+      # knocked. Knocking from inside the job that published is the only version of this
+      # that runs.
+      #
+      # Soft on purpose. A missing or expired token must not turn a release that already
+      # succeeded into a red run, and the site polls daily anyway, so a failed knock costs
+      # latency rather than the update. Same event type the docs pushes send, because on
+      # the site side it means "go re-read the stores" either way.
+      #
+      # This cannot make the site lead the stores. AMO serves a new version within minutes
+      # of its upload, the Chrome Web Store only after a review that takes days, and both
+      # uploads are manual steps that happen after this workflow has finished. So the knock
+      # refreshes whatever is live at that moment, and the daily poll is still what
+      # eventually catches Chrome.
+      - name: Tell the site a release went out
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+        run: |
+          gh api repos/benstone326/konode-site/dispatches \
+            --method POST \
+            -f event_type=upstream-docs-changed
+
+# `--generate-notes` only produces a "Full Changelog" compare link, which is not enough on
+# its own: a visitor cannot tell the two zips apart, and cannot know that Drive needs their
+# own OAuth client in these builds. Replace the body by hand after the run: which download
+# for which browser, the Drive caveat, an upgrade note. Take the SHAPE from the v1.4.0
+# release, not the words, and say under "Which download" that Edge Add-ons carries the same
+# package as the Chrome Web Store. All three stores have listings now, so a body copied
+# verbatim would repeat review states that are wrong by the next release.
+#
+# Not done, worth doing: GitHub already publishes a SHA-256 digest per release asset, so the
+# download itself is covered. What `npm run checksum` adds is the reproducible part, a
+# fingerprint of dist/ someone can regenerate from the tag. It is only worth printing if the
+# run that BUILT the asset computes it, which means composing the notes here instead of
+# --generate-notes, so it waits for a release where the notes step can actually be tried.

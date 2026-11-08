@@ -1,0 +1,1797 @@
+{
+  "locale_bcp47": {
+    "message": "en",
+    "description": "NOT a sentence: the BCP 47 tag for THIS catalogue, written into <html lang> so the browser and screen readers know what language the page is in. Replace it with your own tag and nothing else, lowercase language and uppercase region: de, es, pt-BR, zh-CN. Do not translate the word."
+  },
+  "extension_name": {
+    "message": "Kesonode | Private Bookmark & Tab Sync",
+    "description": "The extension's name. This IS the Chrome Web Store listing title, so it carries the search terms people actually type: bookmark, tab, sync. Keep 'Kesonode' first and keep the whole thing under 45 characters. Translate the part after the bar into what someone would search for in your language; leave 'Kesonode' alone, it is the product name."
+  },
+  "extension_description": {
+    "message": "Privacy-first browser sync to your own storage: Google Drive, WebDAV, GitHub.",
+    "description": "Shown in the browser's extension list, and used as the store summary when the listing does not override it."
+  },
+  "datatype_bookmarks": {
+    "message": "Bookmarks",
+    "description": "One of the four data types. Also a section heading in Settings."
+  },
+  "datatype_history": {
+    "message": "History",
+    "description": "One of the four data types."
+  },
+  "datatype_sessions": {
+    "message": "Sessions",
+    "description": "One of the four data types: the tabs a device has open."
+  },
+  "datatype_extensions": {
+    "message": "Extensions",
+    "description": "One of the four data types: the list of installed extensions."
+  },
+  "status_idle": {
+    "message": "Ready",
+    "description": "Sync status: nothing is happening and nothing is wrong. Not 'finished'. This is the resting state."
+  },
+  "status_syncing": {
+    "message": "Syncing…",
+    "description": "Sync status: a sync is running now."
+  },
+  "status_success": {
+    "message": "Synced",
+    "description": "Sync status: the last sync completed."
+  },
+  "status_error": {
+    "message": "Error",
+    "description": "Sync status: the last sync failed."
+  },
+  "status_conflict": {
+    "message": "Conflict",
+    "description": "Sync status: a conflict is waiting for the user to choose a version."
+  },
+  "stream_off": {
+    "message": "off",
+    "description": "Per-data-type state, shown in a tooltip after the type name: this type is turned off in Settings. Lower case: it follows 'Bookmarks: '."
+  },
+  "stream_syncing": {
+    "message": "syncing…",
+    "description": "Per-data-type state: this type is being synced right now."
+  },
+  "stream_pending": {
+    "message": "waiting",
+    "description": "Per-data-type state: a sync is running but has not reached this type yet."
+  },
+  "stream_never": {
+    "message": "not synced yet",
+    "description": "Per-data-type state: this type has never completed a sync. Must not sound like success."
+  },
+  "stream_stale": {
+    "message": "last sync failed",
+    "description": "Per-data-type state: this type has synced before, but the most recent attempt failed."
+  },
+  "stream_synced": {
+    "message": "synced",
+    "description": "Per-data-type state: this type synced successfully."
+  },
+  "popup_settings_aria": {
+    "message": "Settings",
+    "description": "Accessible name of the gear button in the popup's top-right corner."
+  },
+  "popup_sync_now": {
+    "message": "Sync now",
+    "description": "The popup's primary button. While a sync runs it shows status_syncing instead."
+  },
+  "popup_load_error": {
+    "message": "Couldn't reach Kesonode. Tap to retry.",
+    "description": "The popup could not read its own state. The whole banner is a button, hence 'tap to retry'."
+  },
+  "popup_recovery_notice": {
+    "message": "An unusual deletion ($COUNT$ bookmarks) was blocked and a restore point was saved. Apply it or keep them in Settings → Activity.",
+    "description": "The mass-delete guard refused a peer's deletions. Reassuring by design: nothing was lost. Said 'Review in' until there was something to decide there; now the banner leads to a real choice, so it names it. 'Settings → Activity' names a tab, so it must match the tab's own translation.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
+  "popup_no_backend": {
+    "message": "No backend configured",
+    "description": "No storage provider has been set up yet. The banner opens Settings."
+  },
+  "popup_setup_title": {
+    "message": "Finish setting up Kesonode",
+    "description": "First-run card in the popup, shown until a storage provider is chosen. The button opens the setup wizard."
+  },
+  "popup_setup_body": {
+    "message": "Choose where your data is stored. Nothing is synced or uploaded until you do.",
+    "description": "Body of the first-run card. The second sentence is a promise about data and must be translated literally."
+  },
+  "popup_setup_cta": {
+    "message": "Start setup",
+    "description": "Button on the first-run card. Opens the setup wizard in a new tab."
+  },
+  "popup_keep_local": {
+    "message": "Keep local",
+    "description": "Conflict resolution: keep what this device has."
+  },
+  "popup_use_remote": {
+    "message": "Use remote",
+    "description": "Conflict resolution: take the other device's version."
+  },
+  "popup_conflict_resolve": {
+    "message": "Resolve",
+    "description": "Button on a conflict card in the popup, next to the other device's name. Opens Settings → Activity, which lists what differs between the two devices and offers the same two answers."
+  },
+  "popup_active_streams": {
+    "message": "Active streams",
+    "description": "Heading above the four data-type dots. The stylesheet displays it in capitals, so do not capitalise it here."
+  },
+  "popup_missing_extensions_one": {
+    "message": "$COUNT$ missing extension",
+    "description": "Exactly one extension is installed on another device but not on this one.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "popup_missing_extensions_other": {
+    "message": "$COUNT$ missing extensions",
+    "description": "More than one extension is installed on another device but not on this one. In languages that use the singular after a numeral, this is the same wording as the _one form.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "7"
+      }
+    }
+  },
+  "popup_open_all": {
+    "message": "Open all",
+    "description": "Opens a store page for every missing extension, one tab each."
+  },
+  "popup_sessions_head": {
+    "message": "Sessions from other devices",
+    "description": "Heading above the restorable sessions list. The stylesheet displays it in capitals, so do not capitalise it here."
+  },
+  "popup_unknown_device": {
+    "message": "Unknown device",
+    "description": "Fallback name for a peer device whose session carries no label."
+  },
+  "popup_tabs_one": {
+    "message": "$COUNT$ tab",
+    "description": "How many tabs a peer's session holds, in the case of exactly one.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "popup_tabs_other": {
+    "message": "$COUNT$ tabs",
+    "description": "How many tabs a peer's session holds. In languages that use the singular after a numeral, this is the same wording as the _one form.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "23"
+      }
+    }
+  },
+  "popup_restore": {
+    "message": "Restore",
+    "description": "Opens the tabs of a peer device's session. Adds tabs; removes nothing."
+  },
+  "popup_rate_body": {
+    "message": "Kesonode has been syncing your devices for a while now. If it works for you, a rating in the store helps other people find it."
+  },
+  "popup_rate_yes": {
+    "message": "Rate it"
+  },
+  "popup_rate_no": {
+    "message": "No thanks"
+  },
+  "popup_restore_confirm_one": {
+    "message": "Open $COUNT$ tab",
+    "description": "The Restore button after a first press, on a session large enough to ask first: the second press opens this many tabs. Exactly one; never shown in practice, since only large sessions ask.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "popup_restore_confirm_other": {
+    "message": "Open $COUNT$ tabs",
+    "description": "The Restore button after a first press, on a session large enough to ask first: the second press opens this many tabs. Keep it short, it is a button. In languages that use the singular after a numeral, this is the same wording as the _one form.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "142"
+      }
+    }
+  },
+  "popup_tabs_open_here_one": {
+    "message": "$COUNT$ open here",
+    "description": "Beside a peer's session in the popup: how many of its tabs are already open in this browser, so Restore will not open them again. In the case of exactly one.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "popup_tabs_open_here_other": {
+    "message": "$COUNT$ open here",
+    "description": "Beside a peer's session in the popup: how many of its tabs are already open in this browser, so Restore will not open them again. In languages that use the singular after a numeral, this is the same wording as the _one form.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "10"
+      }
+    }
+  },
+  "popup_restore_all_open": {
+    "message": "All open",
+    "description": "The Restore button, disabled, when every tab of the session is already open in this browser. Keep it short, it is a button."
+  },
+  "popup_backend_label": {
+    "message": "Backend",
+    "description": "Footer label before the storage provider's name."
+  },
+  "popup_backend_none": {
+    "message": "None",
+    "description": "Footer value when no storage provider is set up."
+  },
+  "popup_device_label": {
+    "message": "Device",
+    "description": "Footer label before this device's name."
+  },
+  "popup_configure": {
+    "message": "Configure →",
+    "description": "Footer link to Settings. Keep the arrow."
+  },
+  "popup_activity_log": {
+    "message": "Activity log →",
+    "description": "Footer link that opens Settings on the Activity tab. Keep the arrow."
+  },
+  "common_back": {
+    "message": "Back",
+    "description": "Wizard navigation: one step back."
+  },
+  "common_continue": {
+    "message": "Continue",
+    "description": "Wizard navigation: one step forward."
+  },
+  "common_open_settings": {
+    "message": "Open Settings"
+  },
+  "common_close": {
+    "message": "Close",
+    "description": "Closes the setup tab."
+  },
+  "common_show": {
+    "message": "Show",
+    "description": "Tooltip on the eye button that reveals a password."
+  },
+  "common_hide": {
+    "message": "Hide",
+    "description": "Tooltip on the eye button that hides a password again."
+  },
+  "common_e2ee": {
+    "message": "End-to-end encryption"
+  },
+  "common_generate_key": {
+    "message": "Generate a strong key"
+  },
+  "provider_gdrive_desc": {
+    "message": "Syncs straight to your own Google Drive. Thanks to OAuth, the access token is kept on this device only.",
+    "description": "Storage provider card description."
+  },
+  "provider_nextcloud_desc": {
+    "message": "Your own Nextcloud or ownCloud server."
+  },
+  "provider_nextcloud_note": {
+    "message": "Enter just your server host; use an App Password (Settings → Security).",
+    "description": "Extra hint shown under the card once it is selected."
+  },
+  "provider_pcloud_desc": {
+    "message": "pCloud storage. Needs a paid pCloud plan."
+  },
+  "provider_pcloud_note": {
+    "message": "Pick the $REGION$ region if that is where your pCloud account lives.",
+    "placeholders": {
+      "region": {
+        "content": "$1",
+        "example": "EU"
+      }
+    }
+  },
+  "provider_koofr_desc": {
+    "message": "Koofr cloud storage."
+  },
+  "provider_koofr_note": {
+    "message": "Use your Koofr email as the username, and a Koofr app password as the password."
+  },
+  "provider_fastmail_desc": {
+    "message": "Fastmail file storage."
+  },
+  "provider_fastmail_note": {
+    "message": "Use your full Fastmail address as the username, and an app password that has Files (WebDAV) access."
+  },
+  "provider_jianguoyun_desc": {
+    "message": "Nutstore cloud storage, widely used in mainland China."
+  },
+  "provider_jianguoyun_note": {
+    "message": "Use your Nutstore email as the username, and a third-party app password as the password. On a free account, raise Sync interval to 120 seconds or more once you have three devices: Nutstore allows 600 WebDAV requests every 30 minutes."
+  },
+  "provider_github_desc": {
+    "message": "Your synced data lives in a private GitHub repository, which Kesonode reaches with a Personal Access Token."
+  },
+  "provider_webdav_desc": {
+    "message": "Synology, kDrive, or any other WebDAV server."
+  },
+  "provider_syncing_to": {
+    "message": "Syncing to $URL$.",
+    "description": "$URL$ is rendered in a monospace <code> element, so the sentence is split at the placeholder rather than interpolated. Keep the placeholder as one piece.",
+    "placeholders": {
+      "url": {
+        "example": "https://app.koofr.net/dav/Koofr",
+        "content": "$1"
+      }
+    }
+  },
+  "onb_welcome_title": {
+    "message": "Welcome to Kesonode"
+  },
+  "onb_welcome_subtitle": {
+    "message": "Browser sync where your data stays genuinely yours. Your bookmarks, sessions and extensions go straight to storage you own. No server in between."
+  },
+  "onb_feature_storage": {
+    "message": "Your data always stays on storage you own."
+  },
+  "onb_feature_instant": {
+    "message": "Syncs every change as it happens."
+  },
+  "onb_feature_browsers": {
+    "message": "Works in Chromium and Firefox based browsers."
+  },
+  "onb_feature_providers": {
+    "message": "You decide where your data lives."
+  },
+  "onb_get_started": {
+    "message": "Get started"
+  },
+  "onb_backend_title": {
+    "message": "Choose your storage"
+  },
+  "onb_backend_subtitle": {
+    "message": "Where should Kesonode store your data?"
+  },
+  "onb_use_provider": {
+    "message": "Use $PROVIDER$",
+    "description": "Accessible name of a storage-provider card. $PROVIDER$ is a brand name and is never translated.",
+    "placeholders": {
+      "provider": {
+        "example": "Koofr",
+        "content": "$1"
+      }
+    }
+  },
+  "opt_use_provider": {
+    "message": "Use $PROVIDER$",
+    "description": "Accessible name of a storage card in Settings, as in the setup wizard. $PROVIDER$ is a brand name and is never translated.",
+    "placeholders": {
+      "provider": {
+        "example": "Koofr",
+        "content": "$1"
+      }
+    }
+  },
+  "opt_provider_active": {
+    "message": "active",
+    "description": "Badge on the storage card that is saved and in use. Shown in capitals."
+  },
+  "opt_drive_disconnect": {
+    "message": "Disconnect",
+    "description": "Button on the Google Drive card: this device forgets its Google sign-in. Nothing in Drive is deleted."
+  },
+  "opt_drive_unavailable": {
+    "message": "Google sign-in isn't available in this browser. Pick another option.",
+    "description": "On the Google Drive card in Settings, on a browser with no way to sign in to Google (Firefox for Android has no identity API). The same sentence as setup's."
+  },
+  "provider_webdav_other": {
+    "message": "WebDAV (other)",
+    "description": "Name of the storage card for any other WebDAV server. WebDAV is not translated, only the word in brackets."
+  },
+  "onb_drive_unavailable": {
+    "message": "Google sign-in isn't available in this browser. Pick another option."
+  },
+  "onb_connecting": {
+    "message": "Connecting…"
+  },
+  "onb_sign_in_google": {
+    "message": "Sign in with Google"
+  },
+  "onb_signin_failed": {
+    "message": "Sign-in failed.",
+    "description": "Last-resort text when the sign-in threw something with no message of its own."
+  },
+  "onb_webdav_user_placeholder": {
+    "message": "Username"
+  },
+  "onb_webdav_pass_placeholder": {
+    "message": "Password / App token"
+  },
+  "onb_verifying": {
+    "message": "Verifying…"
+  },
+  "onb_github_401": {
+    "message": "GitHub rejected this token. Check it hasn't expired, and that you pasted all of it."
+  },
+  "onb_github_http": {
+    "message": "GitHub couldn't verify the token (HTTP $STATUS$).",
+    "placeholders": {
+      "status": {
+        "example": "500",
+        "content": "$1"
+      }
+    }
+  },
+  "onb_github_unreachable": {
+    "message": "Couldn't reach GitHub. Check your connection and try again."
+  },
+  "onb_github_branch_placeholder": {
+    "message": "Branch (default: main)"
+  },
+  "onb_github_token_link": {
+    "message": "Create a fine-grained token (only this repo) →"
+  },
+  "onb_data_title": {
+    "message": "What to sync?"
+  },
+  "onb_data_subtitle": {
+    "message": "You can change this anytime in Settings."
+  },
+  "onb_device_name_label": {
+    "message": "Name this device"
+  },
+  "onb_device_name_desc": {
+    "message": "How it appears in the session list on your other devices."
+  },
+  "onb_device_name_placeholder": {
+    "message": "Work laptop",
+    "description": "An example name, not a default. The field arrives pre-filled with the detected one."
+  },
+  "onb_encrypt_title": {
+    "message": "Encrypt your data?"
+  },
+  "onb_encrypt_subtitle": {
+    "message": "If you turn encryption on, your data is encrypted on this device before it is uploaded. Not even your storage provider can read what it contains."
+  },
+  "onb_e2ee_desc": {
+    "message": "AES-256-GCM. Recommended."
+  },
+  "onb_pass_placeholder": {
+    "message": "Choose a passphrase, or generate an encryption key"
+  },
+  "onb_pass_missing": {
+    "message": "Enter a passphrase, or generate a key."
+  },
+  "onb_pass_too_short": {
+    "message": "At least $MIN$ characters. Synced data can be attacked offline, so short passphrases are guessable.",
+    "placeholders": {
+      "min": {
+        "example": "12",
+        "content": "$1"
+      }
+    }
+  },
+  "onb_pass_confirm_placeholder": {
+    "message": "Confirm passphrase"
+  },
+  "onb_pass_confirm_missing": {
+    "message": "Confirm your passphrase."
+  },
+  "onb_pass_mismatch": {
+    "message": "Passphrases don't match yet."
+  },
+  "onb_save_passphrase_lead": {
+    "message": "Save this passphrase.",
+    "description": "Shown in bold, immediately before onb_save_passphrase_rest. One sentence on its own."
+  },
+  "onb_save_passphrase_rest": {
+    "message": "It never leaves this device and cannot be recovered if you lose it. You have to enter the same passphrase on every device. You can copy it later in Settings."
+  },
+  "onb_plaintext_note": {
+    "message": "Without encryption, your data goes to your own storage $WORD$. That can be the right choice if you fully trust your storage provider. You can turn encryption on later in Settings at any time.",
+    "description": "$WORD$ is onb_plaintext_word, shown in bold inside this sentence, so the sentence is split at the placeholder.",
+    "placeholders": {
+      "word": {
+        "example": "unencrypted",
+        "content": "$1"
+      }
+    }
+  },
+  "onb_plaintext_word": {
+    "message": "in readable form",
+    "description": "The bold word dropped into onb_plaintext_note. Lower case: it sits mid-sentence."
+  },
+  "onb_setting_up": {
+    "message": "Setting up…"
+  },
+  "onb_finish_sync": {
+    "message": "Finish & Sync"
+  },
+  "onb_waiting_permission": {
+    "message": "Waiting for permission…",
+    "description": "The Finish & Sync button while the browser's permission prompt is open."
+  },
+  "onb_perm_prompt_slow": {
+    "message": "No permission prompt on screen? Some browsers don't show one. Allow Kesonode's permissions in your browser's extension settings and press Finish & Sync again, or go back and turn off the data types that need them.",
+    "description": "Shown under Finish & Sync when the permission prompt has gone unanswered for several seconds, because some browsers never show it. Name the button as it reads in your translation."
+  },
+  "onb_err_bad_webdav_url": {
+    "message": "That WebDAV address doesn't look like a valid URL."
+  },
+  "onb_err_perms_webdav": {
+    "message": "Kesonode needs permission to reach your WebDAV server and the data types you chose. Please allow them to continue."
+  },
+  "onb_err_perms_no_prompt": {
+    "message": "This browser can't show permission prompts, so Kesonode couldn't ask for the access it needs. Grant it on Kesonode's permissions screen in your browser's extension settings, then press Finish again."
+  },
+  "onb_err_perms_types": {
+    "message": "Some permissions were declined. Grant them, or turn off those data types, to continue."
+  },
+  "onb_err_read_settings": {
+    "message": "Couldn't read your current settings. Try again."
+  },
+  "onb_err_save": {
+    "message": "Couldn't save your setup: $ERROR$",
+    "description": "$ERROR$ is a message from the engine and stays in English. See CLAUDE.md on why the diagnostic layer is not translated.",
+    "placeholders": {
+      "error": {
+        "example": "HTTP 403",
+        "content": "$1"
+      }
+    }
+  },
+  "onb_sync_title": {
+    "message": "Syncing your data…"
+  },
+  "onb_sync_subtitle": {
+    "message": "Kesonode is running its first sync. This also runs in the background, so you don't have to wait here."
+  },
+  "onb_sync_error_title": {
+    "message": "Couldn't finish the first sync"
+  },
+  "onb_sync_error_subtitle": {
+    "message": "Your settings are saved. Open Settings to fix this, or finish and let Kesonode retry in the background."
+  },
+  "onb_sync_timeout": {
+    "message": "This is taking longer than usual. A large history can do that. The sync keeps running in the background, so you can finish now."
+  },
+  "onb_finish": {
+    "message": "Finish"
+  },
+  "onb_finish_anyway": {
+    "message": "Finish anyway"
+  },
+  "onb_done_title": {
+    "message": "You're all set!"
+  },
+  "onb_done_subtitle": {
+    "message": "Kesonode is now syncing your browser data to $BACKEND$. The first sync is already running in the background.",
+    "description": "$BACKEND$ is shown in bold and is a brand name, so the sentence is split at the placeholder.",
+    "placeholders": {
+      "backend": {
+        "example": "Google Drive",
+        "content": "$1"
+      }
+    }
+  },
+  "onb_done_backend": {
+    "message": "Storage connected successfully"
+  },
+  "onb_done_autosync": {
+    "message": "Syncing runs automatically in the background"
+  },
+  "onb_done_adjust": {
+    "message": "You can change the settings at any time"
+  },
+  "datatype_bookmarks_desc": {
+    "message": "Full bookmark tree with folders and ordering.",
+    "description": "Shown under the data type on BOTH the setup wizard and Settings. The two screens used to carry different wording and drifted apart."
+  },
+  "datatype_sessions_desc": {
+    "message": "Named tab sessions you can restore anywhere.",
+    "description": "Deliberately not 'tab groups': that names a Chrome feature Kesonode does not sync, which the setup wizard used to claim."
+  },
+  "datatype_history_desc": {
+    "message": "Browsing history, limited by the days setting.",
+    "description": "Not a fixed number of days: the setup wizard used to promise 'Last 30 days' while the limit is adjustable in Settings."
+  },
+  "datatype_extensions_desc": {
+    "message": "Extension list, showing missing ones with install links."
+  },
+  "opt_secret_copy": {
+    "message": "Copy",
+    "description": "Tooltip on the button that copies a saved secret (token, password, passphrase) to the clipboard."
+  },
+  "opt_secret_copied": {
+    "message": "Copied",
+    "description": "Replaces opt_secret_copy for a moment after the copy succeeded."
+  },
+  "opt_secret_replace": {
+    "message": "Replace",
+    "description": "Tooltip on the button that clears a saved secret so a new one can be typed. Kesonode never shows a saved secret in an editable field, so replacing is the only way to change it."
+  },
+  "opt_webdav_user_label": {
+    "message": "Username"
+  },
+  "opt_webdav_user_placeholder": {
+    "message": "username",
+    "description": "Greyed-out example inside the empty username field. Lowercase on purpose, so it reads as an example rather than a filled-in value."
+  },
+  "opt_webdav_pass_label": {
+    "message": "Password / App token",
+    "description": "Most WebDAV servers want an app-specific token here rather than the account password, which is why both words appear."
+  },
+  "opt_webdav_http_warn": {
+    "message": "This is an $SCHEME$ URL, so your password would be sent unencrypted.",
+    "description": "Warning under a WebDAV card whose address would send credentials in the clear. $SCHEME$ is rendered as code and is never translated. Split around the placeholder with tParts, so word order stays yours.",
+    "placeholders": {
+      "scheme": {
+        "content": "$1",
+        "example": "http://"
+      }
+    }
+  },
+  "opt_webdav_http_use": {
+    "message": "Use $SCHEME$.",
+    "description": "Follows opt_webdav_http_warn. $SCHEME$ is rendered as code and is never translated.",
+    "placeholders": {
+      "scheme": {
+        "content": "$1",
+        "example": "https://"
+      }
+    }
+  },
+  "opt_snap_saved": {
+    "message": "Restore point saved."
+  },
+  "opt_snap_restored_one": {
+    "message": "Restored $COUNT$ bookmark. Syncing to your other devices…",
+    "description": "A restore only ever ADDS bookmarks back, so this number is what was re-added, never what was removed.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "opt_snap_restored_other": {
+    "message": "Restored $COUNT$ bookmarks. Syncing to your other devices…",
+    "description": "Plural form of opt_snap_restored_one. Hungarian keeps the singular after a numeral, so both forms are worded the same there.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
+  "opt_snap_deleted": {
+    "message": "Restore point deleted."
+  },
+  "opt_err_perms_no_prompt": {
+    "message": "This browser can't show permission prompts, so Kesonode couldn't ask for access to your WebDAV server. Grant it on Kesonode's permissions screen in your browser's extension settings, then try again.",
+    "description": "Firefox for Android implements no runtime permission prompts. Saying 'you declined' there would blame the user for something they were never asked."
+  },
+  "opt_err_perms_bad_url": {
+    "message": "Kesonode has no usable WebDAV address to ask for access to. Check the server URL above."
+  },
+  "opt_err_perms_denied": {
+    "message": "Permission to access the WebDAV server was not granted."
+  },
+  "opt_err_pass_too_short": {
+    "message": "Use at least $MIN$ characters. Synced data can be attacked offline, so a short passphrase is guessable. Longer is better, or generate a key.",
+    "description": "Settings' version of onb_pass_too_short. Longer than the onboarding one because here there is room to say what to do about it.",
+    "placeholders": {
+      "min": {
+        "content": "$1",
+        "example": "12"
+      }
+    }
+  },
+  "opt_err_pass_mismatch": {
+    "message": "The two passphrases don't match. Re-enter to confirm before saving."
+  },
+  "opt_saving": {
+    "message": "Saving…"
+  },
+  "opt_saved": {
+    "message": "Saved",
+    "description": "Shown on the Save button for a moment after a write the extension actually confirmed. Never shown for a write that failed."
+  },
+  "opt_save_changes": {
+    "message": "Save changes"
+  },
+  "opt_nav_backend": {
+    "message": "Storage",
+    "description": "Tab in the Settings navigation strip. Keep every nav label short: the strip has to stay legible when the window is narrow. The section heading is a separate key (opt_backend_head), so you can be shorter here than there."
+  },
+  "opt_nav_data": {
+    "message": "Data Types",
+    "description": "Tab in the Settings navigation strip. Keep it short, see opt_nav_backend."
+  },
+  "opt_nav_device": {
+    "message": "Device",
+    "description": "Tab in the Settings navigation strip. Keep it short, see opt_nav_backend."
+  },
+  "opt_nav_activity": {
+    "message": "Activity",
+    "description": "Tab in the Settings navigation strip. Keep it short, see opt_nav_backend."
+  },
+  "opt_nav_advanced": {
+    "message": "Advanced",
+    "description": "Tab in the Settings navigation strip. Keep it short, see opt_nav_backend."
+  },
+  "opt_setup_title": {
+    "message": "Finish setting up Kesonode",
+    "description": "Card shown at the top of Settings until first-run setup is complete."
+  },
+  "opt_setup_step_storage": {
+    "message": "Choose where your data is stored"
+  },
+  "opt_setup_step_types": {
+    "message": "Pick what to sync"
+  },
+  "opt_backend_head": {
+    "message": "Storage",
+    "description": "Heading of the Storage section. Separate from the nav label opt_nav_backend, which has to fit a narrow strip, so this one can be as long as it needs to be."
+  },
+  "opt_backend_head_sub": {
+    "message": "Choose where your sync data is stored. Your data never touches our servers."
+  },
+  "opt_gdrive_connect_failed": {
+    "message": "Connection failed",
+    "description": "Fallback when Google sign-in throws without a message of its own."
+  },
+  "opt_gdrive_scope_hint": {
+    "message": "Only the $SCOPE$ scope, so Kesonode can only access files it creates.",
+    "description": "$SCOPE$ is the OAuth scope name drive.file, rendered as code and never translated. Split around the placeholder with tParts.",
+    "placeholders": {
+      "scope": {
+        "content": "$1",
+        "example": "drive.file"
+      }
+    }
+  },
+  "opt_drive_folder_label": {
+    "message": "Drive Folder ID"
+  },
+  "opt_optional": {
+    "message": "(optional)",
+    "description": "Appended to a field label the user can leave empty. Keep the parentheses."
+  },
+  "opt_drive_folder_placeholder": {
+    "message": "Leave blank to auto-create a 'Konode' folder",
+    "description": "'Konode' is the folder name the extension creates. It is data, not copy, so leave the word itself untranslated."
+  },
+  "opt_region_label": {
+    "message": "Region"
+  },
+  "opt_webdav_host_label": {
+    "message": "Server host"
+  },
+  "opt_webdav_url_label": {
+    "message": "Server URL"
+  },
+  "opt_github_token_label": {
+    "message": "Personal Access Token",
+    "description": "GitHub's own name for this credential. If GitHub's interface uses a translated name in your language, match it."
+  },
+  "opt_github_repo_label": {
+    "message": "Repository"
+  },
+  "opt_github_branch_label": {
+    "message": "Branch",
+    "description": "The git branch. Most languages keep the English word here; use whatever git's own interface uses in yours."
+  },
+  "opt_stat_never": {
+    "message": "Never",
+    "description": "Value of the 'Last sync' tile when this device has never completed a sync."
+  },
+  "opt_setup_sub": {
+    "message": "Kesonode syncs your browser to storage you own. There's no Kesonode server. Two quick steps and you're done. (If the setup wizard never opened on your browser, you can do everything right here.)"
+  },
+  "opt_data_head": {
+    "message": "Data Types",
+    "description": "Heading of the Data Types tab. Separate from the nav label opt_nav_data, which has to fit a narrow strip."
+  },
+  "opt_data_head_sub": {
+    "message": "Choose what gets synced across your devices."
+  },
+  "opt_data_section": {
+    "message": "Data to sync"
+  },
+  "opt_data_permission_lost": {
+    "message": "Kesonode doesn't have the permission this needs any more, so it isn't syncing. Switch it off and on again to restore it.",
+    "description": "A browser can revoke an optional permission from its own extension settings without telling the extension, which leaves a data type looking enabled while it syncs nothing."
+  },
+  "opt_tab_groups_label": {
+    "message": "Tab group names and colours"
+  },
+  "opt_tab_groups_desc": {
+    "message": "Open tabs come back in their groups either way. With this on, the groups keep their names and colours as well."
+  },
+  "opt_tab_groups_denied": {
+    "message": "Kesonode needs the \"tabGroups\" permission for this. Your groups still come back, without names."
+  },
+  "opt_history_days_label": {
+    "message": "Days to sync"
+  },
+  "opt_history_days_desc": {
+    "message": "Recommended: 30 days."
+  },
+  "opt_history_days_value": {
+    "message": "$COUNT$d",
+    "description": "The slider's current value, in a narrow space beside it. Abbreviate the unit if your language can; there is not much room.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "30"
+      }
+    }
+  },
+  "opt_history_hint": {
+    "message": "Pages from your other devices are added with the time they arrived, not the time you first visited them, so on Chromium browsers they show up under today rather than the day you were browsing. Firefox keeps the original date.",
+    "description": "Chrome's history.addUrl takes no visit time; Firefox's does and Kesonode passes it. Without this note a working sync looks broken."
+  },
+  "opt_missing_ext_head": {
+    "message": "Missing extensions ($COUNT$)",
+    "description": "Heading over the list of extensions your other devices have and this one does not.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "6"
+      }
+    }
+  },
+  "opt_ext_from": {
+    "message": "· from $STORE$",
+    "description": "Which store a missing extension can be installed from. $STORE$ is a store's brand name (Chrome Web Store or Firefox Add-ons) and is never translated. Naming the store in full is deliberate: this line sits near a list of devices, and a bare 'Chrome' was read as one. Keep the leading middle dot, it separates this from the extension's name.",
+    "placeholders": {
+      "store": {
+        "content": "$1",
+        "example": "Firefox"
+      }
+    }
+  },
+  "opt_ext_install": {
+    "message": "Install",
+    "description": "Link on a missing extension that exists in THIS browser's store, so it can be installed directly."
+  },
+  "opt_ext_find": {
+    "message": "Find",
+    "description": "Replaces opt_ext_install when the extension came from the other browser's store: extension IDs don't cross stores, so the link can only run a name search."
+  },
+  "opt_no_password_title": {
+    "message": "Password sync not available."
+  },
+  "opt_no_password_body": {
+    "message": "Browser extensions cannot access the native password store.",
+    "description": "A deliberate security boundary in the browser, not a Kesonode limitation."
+  },
+  "opt_no_password_use": {
+    "message": "Use $MANAGERS$ for self-hosted password sync.",
+    "description": "$MANAGERS$ is rendered as two product links joined by opt_or, so it is never translated. Split around the placeholder with tParts.",
+    "placeholders": {
+      "managers": {
+        "content": "$1",
+        "example": "Bitwarden or Proton Pass"
+      }
+    }
+  },
+  "opt_or": {
+    "message": "or",
+    "description": "Joins two alternatives that are each their own link, so they cannot be part of one translatable sentence."
+  },
+  "opt_device_head": {
+    "message": "Device",
+    "description": "Heading of the Device tab. Separate from the nav label opt_nav_device, which has to fit a narrow strip."
+  },
+  "opt_device_head_sub": {
+    "message": "Identify this device in the sync network."
+  },
+  "opt_identity_section": {
+    "message": "Identity"
+  },
+  "opt_device_name_label": {
+    "message": "Device name"
+  },
+  "opt_device_name_desc": {
+    "message": "How this device appears in sync logs."
+  },
+  "opt_device_name_placeholder": {
+    "message": "My Laptop",
+    "description": "Example device name in the empty field. Use something ordinary in your language, it is only an example."
+  },
+  "opt_device_id_label": {
+    "message": "Device ID"
+  },
+  "opt_device_id_desc": {
+    "message": "Auto-generated. Do not change.",
+    "description": "Every synced file is named after this id, so a new one would orphan the old files."
+  },
+  "opt_behavior_section": {
+    "message": "Sync behavior"
+  },
+  "opt_sync_on_change_label": {
+    "message": "Sync on change"
+  },
+  "opt_sync_on_change_desc": {
+    "message": "Instantly sync bookmarks when they change. Recommended."
+  },
+  "opt_auto_sync_label": {
+    "message": "Auto sync"
+  },
+  "opt_auto_sync_desc": {
+    "message": "Also sync on a regular schedule. History, open tabs and the extension list travel only this way."
+  },
+  "opt_notifications_label": {
+    "message": "Notifications"
+  },
+  "opt_notifications_desc": {
+    "message": "Sync status and conflict alerts."
+  },
+  "opt_interval_label": {
+    "message": "Sync interval"
+  },
+  "opt_interval_desc": {
+    "message": "How often this device pulls remote changes. 30s is the browser's minimum for background checks. Your own changes upload almost instantly."
+  },
+  "opt_interval_value": {
+    "message": "$COUNT$s",
+    "description": "The interval slider's current value in seconds, in a narrow space beside it. Abbreviate the unit if your language can.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "30"
+      }
+    }
+  },
+  "opt_conflict_section": {
+    "message": "Conflict resolution"
+  },
+  "opt_conflict_lww": {
+    "message": "Last Write Wins"
+  },
+  "opt_conflict_lww_desc": {
+    "message": "The newest change wins. A bookmark deleted on another device is deleted here too, unless you added it again after it was deleted there.",
+    "description": "Under 'Last Write Wins' in Settings → Device → Conflict resolution. Each of the four options says what it does with bookmarks another device deletes, because that is where they differ most."
+  },
+  "opt_conflict_local": {
+    "message": "Prefer Local"
+  },
+  "opt_conflict_local_desc": {
+    "message": "This device's bookmarks win. New bookmarks from other devices still arrive, but their deletions, moves and renames are never applied here.",
+    "description": "Under 'Prefer Local'. The important promise is that deletions made on other devices never remove anything on this device."
+  },
+  "opt_conflict_remote": {
+    "message": "Prefer Remote"
+  },
+  "opt_conflict_remote_desc": {
+    "message": "Other devices' moves and renames win over yours. Their deletions are applied the same way as Last Write Wins.",
+    "description": "Under 'Prefer Remote'. 'Last Write Wins' is the name of the first option (opt_conflict_lww), so use the same translation for it here."
+  },
+  "opt_conflict_manual": {
+    "message": "Manual"
+  },
+  "opt_conflict_manual_desc": {
+    "message": "Ask me in the popup when this device and another one differ. Until you choose that device's version, none of its bookmark changes are applied here, deletions included.",
+    "description": "Under 'Manual'. The popup shows a card per device with 'Keep local' and 'Use remote'; 'choose that device's version' means 'Use remote'."
+  },
+  "opt_safety_section": {
+    "message": "Safety"
+  },
+  "opt_bulk_delete_label": {
+    "message": "Max bulk delete from a peer"
+  },
+  "opt_bulk_delete_desc": {
+    "message": "A safety net: if a peer's deletions would remove more than this share of your local bookmarks, the merge skips them (guards against a corrupt sync wiping your tree). Raise it if you routinely delete in bulk."
+  },
+  "bm_exclude_label": {
+    "message": "Exclude bookmarks from sync",
+    "description": "The switch, under Bookmarks in Settings and in the setup wizard, that opens a tree of this browser's bookmarks for picking what stays out of sync."
+  },
+  "bm_exclude_desc": {
+    "message": "Tick the folders and bookmarks this device keeps to itself. They stay here untouched, and nothing your other devices do changes them.",
+    "description": "Explains the switch above it."
+  },
+  "bm_exclude_hint": {
+    "message": "Excluding something deletes nothing: copies your other devices already have stay there. Moving a bookmark into an excluded folder later removes it from your other devices, as if you had deleted it.",
+    "description": "Shown under the bookmark tree in Settings."
+  },
+  "bm_exclude_loading": {
+    "message": "Loading your bookmarks…",
+    "description": "Shown while the bookmark tree is being read."
+  },
+  "bm_exclude_error": {
+    "message": "Couldn't read your bookmarks: $ERROR$",
+    "description": "The browser refused to hand over the bookmark tree. $ERROR$ is its own message, usually English.",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "Bookmarks API unavailable"
+      }
+    }
+  },
+  "bm_exclude_empty": {
+    "message": "There are no bookmarks on this device yet.",
+    "description": "Shown instead of the tree when there are no bookmarks at all."
+  },
+  "bm_exclude_untitled": {
+    "message": "(untitled)",
+    "description": "A folder with no name, in the bookmark tree."
+  },
+  "bm_exclude_expand": {
+    "message": "Open $NAME$",
+    "description": "Screen-reader label of the arrow that opens a folder in the bookmark tree.",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "Reading list"
+      }
+    }
+  },
+  "bm_exclude_collapse": {
+    "message": "Close $NAME$",
+    "description": "Screen-reader label of the arrow that closes a folder in the bookmark tree.",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "Reading list"
+      }
+    }
+  },
+  "bm_exclude_count_one": {
+    "message": "$COUNT$ bookmark",
+    "description": "How many bookmarks a folder holds, beside it in the tree, in the case of exactly one.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "bm_exclude_count_other": {
+    "message": "$COUNT$ bookmarks",
+    "description": "How many bookmarks a folder holds, beside it in the tree. In languages that use the singular after a numeral, this is the same wording as the _one form.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "4182"
+      }
+    }
+  },
+  "bm_exclude_more_one": {
+    "message": "Show $COUNT$ more",
+    "description": "A button at the end of a long folder in the bookmark tree, showing the next entries.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "bm_exclude_more_other": {
+    "message": "Show $COUNT$ more",
+    "description": "A button at the end of a long folder in the bookmark tree, showing the next entries.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "200"
+      }
+    }
+  },
+  "bm_list_more_one": {
+    "message": "and $COUNT$ more",
+    "description": "Under a short list of bookmarks, for the ones not listed. Shown under the bookmarks a blocked deletion would remove, in Settings → Activity. Starts lowercase because it continues the list.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "bm_list_more_other": {
+    "message": "and $COUNT$ more",
+    "description": "Plural of bm_list_more_one.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "43"
+      }
+    }
+  },
+  "opt_conflicts_section": {
+    "message": "Conflicts",
+    "description": "Card in Settings → Activity, shown only while Manual conflict resolution is waiting for an answer. The popup's Resolve button leads here."
+  },
+  "opt_conflicts_section_sub": {
+    "message": "This device and another one hold different versions. Conflict resolution is set to Manual, so Kesonode waits for you to choose.",
+    "description": "Sub-heading under 'Conflicts'. 'Manual' is the conflict resolution option of that name (opt_conflict_manual)."
+  },
+  "opt_conflicts_explain": {
+    "message": "$KEEP$ leaves this device as it is. $REMOTE$ merges the other device's changes into this one.",
+    "description": "What the two buttons do. $KEEP$ and $REMOTE$ are the buttons' own labels (popup_keep_local, popup_use_remote), filled in by the code.",
+    "placeholders": {
+      "keep": {
+        "content": "$1",
+        "example": "Keep local"
+      },
+      "remote": {
+        "content": "$2",
+        "example": "Use remote"
+      }
+    }
+  },
+  "opt_conflict_bookmarks": {
+    "message": "Bookmarks: this device and $DEVICE$",
+    "description": "Heading of one conflict. $DEVICE$ is the other device's name, which the user chose.",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
+  },
+  "opt_conflict_history": {
+    "message": "History: this device and $DEVICE$",
+    "description": "Heading of one conflict. $DEVICE$ is the other device's name, which the user chose.",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
+  },
+  "opt_diff_loading": {
+    "message": "Comparing the two versions…",
+    "description": "Shown while the two versions are being compared. With encryption on this can take a few seconds."
+  },
+  "opt_diff_failed": {
+    "message": "Couldn't compare the two versions.",
+    "description": "Shown if the comparison gave no usable answer."
+  },
+  "opt_diff_only_remote": {
+    "message": "Only on $DEVICE$ ($COUNT$)",
+    "description": "Above a list of bookmarks or visited pages that the other device has and this one does not. $DEVICE$ is that device's name, $COUNT$ how many there are.",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      },
+      "count": {
+        "content": "$2",
+        "example": "12"
+      }
+    }
+  },
+  "opt_diff_only_local": {
+    "message": "Only on this device ($COUNT$)",
+    "description": "Above a list of bookmarks or visited pages that this device has and the other one does not. $COUNT$ is how many there are.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "opt_diff_changed_one": {
+    "message": "$COUNT$ bookmark is on both, under a different title or in a different folder.",
+    "description": "Bookmarks with the same address on both devices, but renamed or in a different folder on one of them.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "opt_diff_changed_other": {
+    "message": "$COUNT$ bookmarks are on both, under a different title or in a different folder.",
+    "description": "Plural of opt_diff_changed_one.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "opt_diff_none_bookmarks": {
+    "message": "Both devices have the same bookmarks now.",
+    "description": "Shown instead of the lists when nothing differs any more between the two devices' bookmarks."
+  },
+  "opt_diff_none_history": {
+    "message": "Both devices visited the same pages. Only the visit times or counts differ.",
+    "description": "Shown instead of the lists when both devices visited the same pages and only the visit details differ."
+  },
+  "bm_exclude_summary_one": {
+    "message": "$COUNT$ item kept out of sync",
+    "description": "Under the bookmark tree: how many folders and bookmarks are ticked, in the case of exactly one.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "bm_exclude_summary_other": {
+    "message": "$COUNT$ items kept out of sync",
+    "description": "Under the bookmark tree: how many folders and bookmarks are ticked.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "bm_exclude_none": {
+    "message": "Nothing is excluded yet.",
+    "description": "Under the bookmark tree, when nothing is ticked."
+  },
+  "opt_activity_head": {
+    "message": "Activity",
+    "description": "Heading of the Activity tab. Separate from the nav label opt_nav_activity, which has to fit a narrow strip."
+  },
+  "opt_activity_head_sub": {
+    "message": "What Kesonode did on this device, and what it has to work with. All computed here: the numbers, the restore points and the last 200 log entries are local and nothing on this page is ever uploaded."
+  },
+  "opt_sync_activity_section": {
+    "message": "Sync activity"
+  },
+  "opt_stat_transferred": {
+    "message": "Data transferred"
+  },
+  "opt_stat_runs": {
+    "message": "Sync runs"
+  },
+  "opt_stat_last_sync": {
+    "message": "Last sync"
+  },
+  "opt_devices_section": {
+    "message": "Devices"
+  },
+  "opt_devices_section_sub": {
+    "message": "Every device with files in your sync folder, and what each one last uploaded. Forgetting a device deletes its files from your storage. It removes no bookmarks from any browser."
+  },
+  "opt_forget_result_one": {
+    "message": "Deleted one file belonging to $LABEL$. If that browser is still running, it will upload itself again within a minute and reappear here. That is not a fault: to keep a device out, turn Kesonode off there first, then forget it here.",
+    "description": "$LABEL$ is the device's own name, so it is never translated. $COUNT$ is available as the second substitution but this form does not need it.",
+    "placeholders": {
+      "label": {
+        "content": "$2",
+        "example": "Work laptop"
+      }
+    }
+  },
+  "opt_forget_result_other": {
+    "message": "Deleted $COUNT$ files belonging to $LABEL$. If that browser is still running, it will upload itself again within a minute and reappear here. That is not a fault: to keep a device out, turn Kesonode off there first, then forget it here.",
+    "description": "Plural of opt_forget_result_one. $LABEL$ is the device's own name and is never translated.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      },
+      "label": {
+        "content": "$2",
+        "example": "Work laptop"
+      }
+    }
+  },
+  "opt_dismiss": {
+    "message": "Dismiss"
+  },
+  "opt_devices_error": {
+    "message": "Couldn't read your devices: $ERROR$. This does not mean you have none.",
+    "description": "An empty list must never stand in for a list that failed to load. $ERROR$ is the technical message and is not translated.",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "404 Not Found"
+      }
+    }
+  },
+  "opt_error_check_connection": {
+    "message": "Check the connection in Storage and reopen this tab.",
+    "description": "Follows the device-list and restore-point errors when the error itself gives no advice. Left out after the lost-permission message, which already says to open Settings → Storage and press Save. 'Storage' names the tab, so it must match the tab's own translation."
+  },
+  "opt_devices_loading": {
+    "message": "Reading your sync folder…"
+  },
+  "opt_devices_empty": {
+    "message": "Nothing in the folder yet. Run a sync and this device will appear."
+  },
+  "opt_device_unnamed": {
+    "message": "Unnamed device ($ID$)",
+    "description": "Shown when every packet Kesonode could read for a device came from a build that carried no name. $ID$ is the start of the device id.",
+    "placeholders": {
+      "id": {
+        "content": "$1",
+        "example": "a1b2c3d4"
+      }
+    }
+  },
+  "opt_this_device": {
+    "message": "THIS DEVICE",
+    "description": "Badge marking your own device in the list. Upper case matches the other badges; use whatever reads as a badge in your language."
+  },
+  "opt_last_upload_ago": {
+    "message": "· last upload $WHEN$",
+    "description": "Follows the list of data types on a device row. $WHEN$ is how long ago, already worded by the browser in your language, such as \"39 days ago\", \"3 hours ago\" or \"2 years ago\", so build the phrase around a time of that shape. Keep the leading middle dot, it separates this from the types.",
+    "placeholders": {
+      "when": {
+        "content": "$1",
+        "example": "39 days ago"
+      }
+    }
+  },
+  "opt_device_browser": {
+    "message": "$BROWSER$ ($ENGINE$)",
+    "description": "The browser a device runs and the engine it is built on, shown after the device's name, for example \"Brave (Chromium)\" or \"Firefox (Gecko)\". Both are product names and are never translated. Change only the punctuation, if your language writes brackets differently.",
+    "placeholders": {
+      "browser": {
+        "content": "$1",
+        "example": "Brave"
+      },
+      "engine": {
+        "content": "$2",
+        "example": "Chromium"
+      }
+    }
+  },
+  "opt_device_dormant": {
+    "message": "INACTIVE",
+    "description": "Badge on a device in the list that has uploaded nothing for a long time (the line under it says how long). Calm, not alarming: nothing is wrong and nothing happens to the device. Upper case matches the other badges; use whatever reads as a badge in your language."
+  },
+  "opt_device_dormant_note_one": {
+    "message": "Nothing uploaded in over a day. That can mean nothing changed there, or that this browser is gone. If it is gone, you can forget it.",
+    "description": "Under a device marked INACTIVE. A device uploads only when something it syncs has changed, so a long silence is not proof the device is gone, and this says both. \"Forget\" is the button on the same row. $COUNT$ is available but this form does not need it."
+  },
+  "opt_device_dormant_note_other": {
+    "message": "Nothing uploaded in over $COUNT$ days. That can mean nothing changed there, or that this browser is gone. If it is gone, you can forget it.",
+    "description": "Plural of opt_device_dormant_note_one. $COUNT$ is a number of days, 30 today.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "30"
+      }
+    }
+  },
+  "opt_forget": {
+    "message": "Forget",
+    "description": "Button that deletes a device's files from your storage. Deliberately not a bin icon: what goes is a few files in your own folder, not anybody's bookmarks."
+  },
+  "opt_forget_it": {
+    "message": "Forget it",
+    "description": "Confirms the Forget action."
+  },
+  "opt_forget_confirm_one": {
+    "message": "Deletes the one file this device has in your storage ($TYPES$). No bookmarks are removed from any browser, here or there. If that browser is still running it will upload itself again and reappear; to keep it out, turn Kesonode off there first.",
+    "description": "$TYPES$ is the list of data types, already translated elsewhere and joined with commas.",
+    "placeholders": {
+      "types": {
+        "content": "$2",
+        "example": "Bookmarks, Sessions"
+      }
+    }
+  },
+  "opt_forget_confirm_other": {
+    "message": "Deletes the $COUNT$ files this device has in your storage ($TYPES$). No bookmarks are removed from any browser, here or there. If that browser is still running it will upload itself again and reappear; to keep it out, turn Kesonode off there first.",
+    "description": "Plural of opt_forget_confirm_one.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "4"
+      },
+      "types": {
+        "content": "$2",
+        "example": "Bookmarks, Sessions"
+      }
+    }
+  },
+  "opt_that_device": {
+    "message": "that device",
+    "description": "Stands in for a device's name in opt_forget_result_* when the device never published one."
+  },
+  "opt_cancel": {
+    "message": "Cancel"
+  },
+  "opt_blocked_section": {
+    "message": "Blocked deletion",
+    "description": "Card in Settings → Activity, shown only while the mass-delete guard is holding a peer's deletion back. This is where the popup banner sends people."
+  },
+  "opt_blocked_section_sub": {
+    "message": "Another device asked to remove an unusual number of your bookmarks, so Kesonode held it back. Apply it if you meant to, or keep them.",
+    "description": "Sub-heading under 'Blocked deletion'. Says what happened and that there is a choice to make."
+  },
+  "opt_blocked_headline_one": {
+    "message": "$COUNT$ of your $TOTAL$ bookmarks",
+    "description": "How big the blocked deletion is. The proportion is the whole point, so both numbers stay in the sentence.",
+    "placeholders": {
+      "count": { "content": "$1", "example": "1" },
+      "total": { "content": "$2", "example": "49" }
+    }
+  },
+  "opt_blocked_headline_other": {
+    "message": "$COUNT$ of your $TOTAL$ bookmarks",
+    "description": "Plural of opt_blocked_headline_one.",
+    "placeholders": {
+      "count": { "content": "$1", "example": "48" },
+      "total": { "content": "$2", "example": "49" }
+    }
+  },
+  "opt_blocked_count_one": {
+    "message": "$COUNT$ bookmark",
+    "description": "Fallback headline for a notice saved by an older version, which recorded the count but not the size of the tree.",
+    "placeholders": { "count": { "content": "$1", "example": "1" } }
+  },
+  "opt_blocked_count_other": {
+    "message": "$COUNT$ bookmarks",
+    "description": "Plural of opt_blocked_count_one.",
+    "placeholders": { "count": { "content": "$1", "example": "48" } }
+  },
+  "opt_blocked_from": {
+    "message": "Asked for by $DEVICE$.",
+    "description": "Names the peer device that sent the deletion. $DEVICE$ is a name the user chose.",
+    "placeholders": { "device": { "content": "$1", "example": "boxbox" } }
+  },
+  "opt_blocked_from_unknown": {
+    "message": "Asked for by another device.",
+    "description": "Used when the peer's packet carries no device name (older builds did not send one)."
+  },
+  "opt_blocked_saved": {
+    "message": "Nothing was removed, and a restore point was saved first.",
+    "description": "The reassurance. Sits right after opt_blocked_from in the same paragraph."
+  },
+  "opt_blocked_recent_one": {
+    "message": "Other devices already removed $COUNT$ bookmark here in the last 24 hours, and this would take the total past your bulk-delete limit.",
+    "description": "Under the blocked-deletion headline, only when earlier deletions from other devices are why a deletion smaller than the limit was held back: the guard adds up what peers removed here over a day (#41). The limit is the 'Max bulk delete from a peer' setting.",
+    "placeholders": { "count": { "content": "$1", "example": "1" } }
+  },
+  "opt_blocked_recent_other": {
+    "message": "Other devices already removed $COUNT$ bookmarks here in the last 24 hours, and this would take the total past your bulk-delete limit.",
+    "description": "Plural of opt_blocked_recent_one.",
+    "placeholders": { "count": { "content": "$1", "example": "30" } }
+  },
+  "opt_blocked_apply": {
+    "message": "Apply the deletion",
+    "description": "Button. First step of two, because applying removes bookmarks."
+  },
+  "opt_blocked_confirm_apply": {
+    "message": "Apply and delete",
+    "description": "The confirming second click. Deliberately says the word delete."
+  },
+  "opt_blocked_keep": {
+    "message": "To keep them instead, restore a point from before the cleanup on the device that asked. That clears its record of the deletion, so it stops being sent here.",
+    "description": "The other way out, which has to happen on the OTHER device. Worth stating because there is nothing on this device that can stop the asking."
+  },
+  "opt_snapshots_section": {
+    "message": "Restore points"
+  },
+  "opt_snapshots_section_sub": {
+    "message": "Timestamped copies of your bookmarks on the backend, shared by all your devices. Restoring adds back any bookmarks missing on this device (it never deletes). The newest 10 are kept; older ones are removed automatically, and you can delete any of them here."
+  },
+  "opt_snap_now_label": {
+    "message": "Save a restore point now"
+  },
+  "opt_snap_now_desc": {
+    "message": "A restore point of your current bookmark tree."
+  },
+  "opt_snap_create": {
+    "message": "Create restore point"
+  },
+  "opt_snap_loading": {
+    "message": "Loading restore points…"
+  },
+  "opt_snap_error": {
+    "message": "Couldn't read your restore points: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "404 Not Found"
+      }
+    }
+  },
+  "opt_snap_error_desc": {
+    "message": "This does not mean you have none. They live on your storage and could not be listed just now.",
+    "description": "On a recovery screen, 'you have no backups' is the worst possible thing to say by mistake."
+  },
+  "opt_snap_empty": {
+    "message": "No restore points yet. Create one above, or one is saved automatically if an unusual deletion is ever blocked."
+  },
+  "opt_snap_count_one": {
+    "message": "$COUNT$ bookmark",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "opt_snap_count_other": {
+    "message": "$COUNT$ bookmarks",
+    "description": "Plural of opt_snap_count_one. Hungarian and German keep the same noun form here.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
+  "opt_snap_unknown": {
+    "message": "Bookmark restore point",
+    "description": "Used instead of a count when the shared index could not be read, for instance before a passphrase is set. A bare 'bookmarks' with no number reads as a rendering fault."
+  },
+  "opt_snap_confirm_restore": {
+    "message": "Confirm restore"
+  },
+  "opt_snap_confirm_delete": {
+    "message": "Confirm delete"
+  },
+  "opt_snap_delete_aria": {
+    "message": "Delete this restore point"
+  },
+  "opt_log_section": {
+    "message": "Log"
+  },
+  "opt_log_empty_sub": {
+    "message": "No entries yet."
+  },
+  "opt_log_count_one": {
+    "message": "$COUNT$ entry",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "opt_log_count_other": {
+    "message": "$COUNT$ entries",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "200"
+      }
+    }
+  },
+  "opt_log_errors": {
+    "message": " · $COUNT$ with errors",
+    "description": "Appended after opt_log_count_*. Keep the leading space and middle dot, they separate it from what came before.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "opt_log_skipped": {
+    "message": " · $COUNT$ skipped",
+    "description": "Appended after opt_log_count_* and opt_log_errors. Keep the leading space and middle dot.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
+  "opt_log_errors_only_label": {
+    "message": "Show errors only"
+  },
+  "opt_log_errors_only_desc": {
+    "message": "Hide successful entries."
+  },
+  "opt_log_clear": {
+    "message": "Clear log"
+  },
+  "opt_log_copy_label": {
+    "message": "Copy for a bug report",
+    "description": "Row label next to the Copy log button in Settings → Activity."
+  },
+  "opt_log_copy_desc": {
+    "message": "Word for word, oldest first, with the Kesonode version and your browser. That includes your storage server's address and those of pages Kesonode couldn't sync, so read it before posting it anywhere public.",
+    "description": "Says the copy is not redacted, and why that matters. The log lines themselves stay in English on purpose."
+  },
+  "opt_log_copy": {
+    "message": "Copy log",
+    "description": "Button. Puts the whole Activity log on the clipboard as text."
+  },
+  "opt_log_copy_failed": {
+    "message": "This browser wouldn't let Kesonode copy the log. Select the entries below and copy them by hand.",
+    "description": "Shown when the clipboard refuses the copy."
+  },
+  "opt_log_nothing": {
+    "message": "Nothing logged yet. Run a sync and it'll show up here."
+  },
+  "opt_log_no_errors": {
+    "message": "No errors logged. Nice."
+  },
+  "opt_encryption_section": {
+    "message": "Encryption"
+  },
+  "opt_e2ee_desc": {
+    "message": "AES-256-GCM. Data is encrypted with your passphrase before it leaves this device, so the storage provider can never read it. Keep the passphrase safe: without it, encrypted data can't be recovered, and every device must use the same one."
+  },
+  "opt_e2ee_disable_confirm": {
+    "message": "Turn off encryption? Your synced data will be stored $UNENCRYPTED$ on your backend from the next sync on. Every device must then also turn it off.",
+    "description": "$UNENCRYPTED$ is opt_unencrypted, rendered bold. Split around the placeholder with tParts. Turning E2EE off is a downgrade, which is why it asks.",
+    "placeholders": {
+      "unencrypted": {
+        "content": "$1",
+        "example": "unencrypted"
+      }
+    }
+  },
+  "opt_unencrypted": {
+    "message": "unencrypted",
+    "description": "Rendered bold inside opt_e2ee_disable_confirm and opt_e2ee_off_warning. It is the word carrying the warning, which is why it is emphasised."
+  },
+  "opt_e2ee_turn_off": {
+    "message": "Turn off"
+  },
+  "opt_passphrase_label": {
+    "message": "Passphrase"
+  },
+  "opt_passphrase_desc": {
+    "message": "Derives the encryption key. Stored only on this device, never uploaded."
+  },
+  "opt_passphrase_placeholder": {
+    "message": "Choose a strong passphrase"
+  },
+  "opt_passphrase_confirm_placeholder": {
+    "message": "Confirm passphrase"
+  },
+  "opt_passphrase_match": {
+    "message": "Passphrases match."
+  },
+  "opt_genkey_saved_warning": {
+    "message": "Save this now. It's the only way to recover your data if you forget it. Enter the same key on your other devices."
+  },
+  "opt_e2ee_no_passphrase": {
+    "message": "Encryption is on but no passphrase is set, so sync keeps uploading plaintext until you add one."
+  },
+  "opt_e2ee_off_warning": {
+    "message": "Encryption is off, so your synced data (bookmarks, history, sessions, extensions) is stored $UNENCRYPTED$ on your backend. Turn it on to encrypt everything before it leaves this device.",
+    "description": "$UNENCRYPTED$ is opt_unencrypted, rendered bold. Split around the placeholder with tParts.",
+    "placeholders": {
+      "unencrypted": {
+        "content": "$1",
+        "example": "unencrypted"
+      }
+    }
+  },
+  "opt_advanced_head": {
+    "message": "Advanced",
+    "description": "Heading of the Advanced tab. Separate from the nav label opt_nav_advanced, which has to fit a narrow strip."
+  },
+  "opt_advanced_head_sub": {
+    "message": "Backups, feedback and developer options."
+  },
+  "opt_impexp_section": {
+    "message": "Import / Export"
+  },
+  "opt_export_label": {
+    "message": "Export backup"
+  },
+  "opt_export_desc": {
+    "message": "Download bookmarks, history, and extensions as a JSON file. No cloud needed."
+  },
+  "opt_export": {
+    "message": "Export"
+  },
+  "opt_exported": {
+    "message": "Exported"
+  },
+  "opt_export_failed": {
+    "message": "Failed"
+  },
+  "opt_import_label": {
+    "message": "Import backup"
+  },
+  "opt_import_desc": {
+    "message": "Restore from a Kesonode JSON backup. Bookmarks added to a new folder."
+  },
+  "opt_import_bad_file": {
+    "message": "Invalid or unsupported file format."
+  },
+  "opt_import_ok_one": {
+    "message": "✓ Imported $COUNT$ bookmark into the $FOLDER$ folder.",
+    "description": "$FOLDER$ is the folder name the import creates. It is data shared across devices, so it is never translated.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      },
+      "folder": {
+        "content": "$2",
+        "example": "Kesonode Import"
+      }
+    }
+  },
+  "opt_import_ok_other": {
+    "message": "✓ Imported $COUNT$ bookmarks into the $FOLDER$ folder.",
+    "description": "Plural of opt_import_ok_one. $FOLDER$ is never translated.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      },
+      "folder": {
+        "content": "$2",
+        "example": "Kesonode Import"
+      }
+    }
+  },
+  "opt_import": {
+    "message": "Import"
+  },
+  "opt_import_done": {
+    "message": "Done"
+  },
+  "opt_import_error": {
+    "message": "Error"
+  },
+  "opt_feedback_section": {
+    "message": "Feedback"
+  },
+  "opt_feedback_section_sub": {
+    "message": "Nothing is sent automatically. These just open when you click them."
+  },
+  "opt_report_label": {
+    "message": "Report a bug or request a feature"
+  },
+  "opt_report_desc": {
+    "message": "Opens the project's GitHub issues (public, tied to your GitHub account)."
+  },
+  "opt_open_issues": {
+    "message": "Open issues"
+  },
+  "opt_email_label": {
+    "message": "Email us"
+  },
+  "opt_email_desc": {
+    "message": "For anything you'd rather not post publicly."
+  },
+  "opt_rate_label": {
+    "message": "Rate it in the store"
+  },
+  "opt_rate_desc": {
+    "message": "If Kesonode works for you, a rating helps other people find it (public, tied to your store account)."
+  },
+  "opt_developer_section": {
+    "message": "Developer"
+  },
+  "opt_debug_label": {
+    "message": "Debug mode"
+  },
+  "opt_debug_desc": {
+    "message": "Verbose logging, to the browser console and to Activity so you can share it. Turn it off when you're done."
+  },
+  "opt_about_section": {
+    "message": "About"
+  },
+  "opt_version_label": {
+    "message": "Version"
+  },
+  "opt_source_label": {
+    "message": "Source code"
+  },
+  "opt_source_desc": {
+    "message": "No telemetry. No external servers."
+  },
+  "opt_devices_bad_reply": {
+    "message": "Couldn't read the device list.",
+    "description": "Reported through opt_devices_error when the extension replies in a shape the page did not expect. An empty list must never stand in for a list that failed to load."
+  }
+}

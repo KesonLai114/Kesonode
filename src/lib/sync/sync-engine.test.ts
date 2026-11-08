@@ -1,0 +1,2180 @@
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { SyncEngine, statusAfterSync, conflictsThatCanExist, conflictsStillOpen, explainSyncFailure, backendOrigins } from "@/lib/sync/sync-engine";
+import { HttpError } from "@/lib/utils/retry";
+import { BADGE_TEXT, BADGE_COLORS, PERMISSION_LOST_PREFIX } from "@/lib/constants";
+import { createKeyVerifier } from "@/lib/crypto/encryption";
+import { DEFAULT_SETTINGS, DEFAULT_STATE, getState, setState, setTombstones, acquireSyncLock, KEYS, getRemoteSessions, normalizeRemoteExtensions, getBulkDeleteApproval, setBulkDeleteApproval, getListFailureNoted } from "@/lib/utils/storage";
+import type {
+  IBackend,
+  DataType,
+  SyncPacket,
+  SyncState,
+  SyncSettings,
+  SyncBookmark,
+  BookmarkPayload,
+  RemoteSessionEntry,
+  SyncSession,
+  ConflictItem,
+} from "@/lib/types";
+
+// Integration test for SyncEngine.syncType against an in-memory backend +
+// the chrome.bookmarks/storage fakes from test/setup.ts. Covers the
+// pull → fold-every-peer (merge) → push-merged path for bookmarks.
+
+class FakeBackend implements IBackend {
+  readonly type = "github" as const;
+  files = new Map<string, SyncPacket>();
+  uploads: SyncPacket[] = [];
+  isConfigured(): boolean { return true; }
+  connect(): Promise<void> { return Promise.resolve(); }
+  disconnect(): Promise<void> { return Promise.resolve(); }
+  upload(packet: SyncPacket): Promise<void> {
+    this.files.set(`${packet.data_type}_${packet.device_id}`, packet);
+    // Under the name a real backend writes, so a `listFiles` sees what an upload actually
+    // produced — which is what the missing-own-file check reads.
+    this.blobs.set(`konode_${packet.data_type}_${packet.device_id}.json`, JSON.stringify(packet));
+    this.uploads.push(packet);
+    return Promise.resolve();
+  }
+  downloadAll(data_type: DataType, excludeDeviceId?: string): Promise<SyncPacket[]> {
+    return Promise.resolve(
+      [...this.files.values()].filter(
+        (p) => p.data_type === data_type && p.device_id !== excludeDeviceId
+      )
+    );
+  }
+  listVersions(): Promise<string[]> { return Promise.resolve([]); }
+  testConnection(): Promise<{ ok: boolean; message: string }> {
+    return Promise.resolve({ ok: true, message: "" });
+  }
+  blobs = new Map<string, string>();
+  putFile(name: string, content: string): Promise<void> { this.blobs.set(name, content); return Promise.resolve(); }
+  getFile(name: string): Promise<string | null> { return Promise.resolve(this.blobs.get(name) ?? null); }
+  listFiles(prefix: string): Promise<string[]> {
+    return Promise.resolve([...this.blobs.keys()].filter((n) => n.startsWith(prefix)));
+  }
+  deleteFile(name: string): Promise<void> { this.blobs.delete(name); return Promise.resolve(); }
+}
+
+// Typed view of the private members we drive directly in tests.
+type EnginePrivate = {
+  syncType(dataType: DataType, backend: IBackend, state: SyncState): Promise<void>;
+  syncAllTypes(types: DataType[], backend: IBackend, state: SyncState): Promise<string[]>;
+  buildPacket(dataType: DataType, payload: unknown): Promise<SyncPacket>;
+  recordBlockedDeletion(
+    blocked: BlockedArg,
+    syncedBookmarks: boolean
+  ): Promise<SyncState["recovery_notice"]>;
+  findOwnMissingFiles(backend: IBackend, types: DataType[]): Promise<void>;
+  encryptionWarnings: Map<string, string>;
+  failedTypes: Set<DataType>;
+  bulkBlockedThisSync: BlockedArg;
+  bulkApprovedThisSync: number;
+};
+function priv(engine: SyncEngine): EnginePrivate {
+  return engine as unknown as EnginePrivate;
+}
+
+/** What the merge hands the engine when the guard blocks, or null when it didn't. */
+type BlockedArg =
+  | {
+      blocked: number; cap: number; localTotal: number; pct: number;
+      sample?: { title: string; url: string }[];
+      device_id?: string; device_label?: string | null;
+    }
+  | null;
+
+/** A blocked deletion of `n`, with the arithmetic a 60% guard on a 100-bookmark tree
+ *  would actually have produced. The numbers past `blocked` only ride along to the
+ *  notice, so the tests that care about latching pass the same plausible set every time. */
+function block(n: number, device_label: string | null = "peer-1"): BlockedArg {
+  return { blocked: n, cap: 60, localTotal: 100, pct: 60, device_id: "peer", device_label };
+}
+
+function makeEngine(): SyncEngine {
+  const settings: SyncSettings = {
+    ...DEFAULT_SETTINGS,
+    device_id: "me",
+    conflict_strategy: "lww",
+    encryption_enabled: false,
+  };
+  return new SyncEngine(settings, () => {});
+}
+
+function payload(
+  barChildren: SyncBookmark[],
+  tombstones: BookmarkPayload["tombstones"] = []
+): BookmarkPayload {
+  return {
+    tree: [
+      {
+        id: "0",
+        parentId: null,
+        title: "",
+        dateAdded: 0,
+        children: [
+          { id: "1", parentId: "0", title: "Bookmarks bar", dateAdded: 0, children: barChildren },
+          { id: "2", parentId: "0", title: "Other bookmarks", dateAdded: 0, children: [] },
+          { id: "3", parentId: "0", title: "Mobile bookmarks", dateAdded: 0, children: [] },
+        ],
+      },
+    ],
+    tombstones,
+  };
+}
+
+function link(title: string, url: string): SyncBookmark {
+  return { id: `r-${url}`, parentId: "1", title, url, dateAdded: 1 };
+}
+
+function flatUrls(tree: SyncBookmark[]): string[] {
+  const urls: string[] = [];
+  const walk = (n: SyncBookmark) => { if (n.url) urls.push(n.url); n.children?.forEach(walk); };
+  tree.forEach(walk);
+  return urls.sort();
+}
+
+async function localUrls(): Promise<string[]> {
+  const tree = await chrome.bookmarks.getTree();
+  const urls: string[] = [];
+  const walk = (n: chrome.bookmarks.BookmarkTreeNode) => {
+    if (n.url) urls.push(n.url);
+    n.children?.forEach(walk);
+  };
+  tree.forEach(walk);
+  return urls.sort();
+}
+
+async function peerPacket(engine: SyncEngine, deviceId: string, p: BookmarkPayload): Promise<SyncPacket> {
+  const packet = await priv(engine).buildPacket("bookmarks", p);
+  packet.device_id = deviceId; // checksum is over the payload, so it stays valid
+  return packet;
+}
+
+describe("SyncEngine.syncType — bookmarks", () => {
+  it("uploads local data when there are no peers", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(backend.uploads).toHaveLength(1);
+    expect(backend.uploads[0].device_id).toBe("me");
+    const sent = JSON.parse(backend.uploads[0].payload) as BookmarkPayload;
+    expect(flatUrls(sent.tree)).toContain("https://a.com");
+  });
+
+  it("merges a peer's bookmarks into local and uploads the merged result", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set(
+      "bookmarks_peer1",
+      await peerPacket(engine, "peer1", payload([link("B", "https://b.com")]))
+    );
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(await localUrls()).toEqual(["https://a.com", "https://b.com"]);
+    const merged = JSON.parse(backend.uploads[backend.uploads.length - 1].payload) as BookmarkPayload;
+    expect(flatUrls(merged.tree)).toEqual(["https://a.com", "https://b.com"]);
+  });
+
+  it("folds in multiple peers in a single cycle", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+    backend.files.set("bookmarks_peer2", await peerPacket(engine, "peer2", payload([link("C", "https://c.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(await localUrls()).toEqual(["https://b.com", "https://c.com"]);
+  });
+
+  it("excludes our own file from the peer download", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    // A stale file under our own device id must not be folded back in.
+    backend.files.set("bookmarks_me", await peerPacket(engine, "me", payload([link("Z", "https://z.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(await localUrls()).toEqual([]);
+  });
+
+  it("skips re-upload when nothing changed since the last upload", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    // Second cycle found nothing new → no redundant commit (no 409 to race into).
+    expect(backend.uploads).toHaveLength(1);
+  });
+
+  it("skips a peer whose file fails to apply (checksum mismatch) and folds in the rest", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    const good = await peerPacket(engine, "peer1", payload([link("B", "https://b.com")]));
+    const bad = await peerPacket(engine, "peer2", payload([link("C", "https://c.com")]));
+    bad.checksum = "0".repeat(64); // 64-char but wrong → checksum verification throws
+
+    backend.files.set("bookmarks_peer1", good);
+    backend.files.set("bookmarks_peer2", bad);
+
+    // Must not throw; the good peer applies, the corrupt one is skipped.
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(await localUrls()).toEqual(["https://b.com"]);
+  });
+
+  it("uploads again once the data changes", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    await chrome.bookmarks.create({ parentId: "1", title: "B", url: "https://b.com" });
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(backend.uploads).toHaveLength(2);
+  });
+});
+
+describe("SyncEngine.syncType — concurrent moves (C3)", () => {
+  it("converges a 3-device concurrent move to the newest move's folder, no duplicate", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    // Local: X lives in "LocalF".
+    const lf = await chrome.bookmarks.create({ parentId: "1", title: "LocalF" });
+    await chrome.bookmarks.create({ parentId: lf.id, title: "X", url: "https://x.com" });
+
+    const now = Date.now();
+    const movePayload = (folderTitle: string, at: number): BookmarkPayload => ({
+      tree: [{ id: "0", parentId: null, title: "", dateAdded: 0, children: [
+        { id: "1", parentId: "0", title: "Bookmarks bar", dateAdded: 0, children: [
+          { id: `f-${folderTitle}`, parentId: "1", title: folderTitle, dateAdded: 1, children: [link("X", "https://x.com")] },
+        ] },
+        { id: "2", parentId: "0", title: "Other bookmarks", dateAdded: 0, children: [] },
+        { id: "3", parentId: "0", title: "Mobile bookmarks", dateAdded: 0, children: [] },
+      ] }],
+      tombstones: [],
+      moves: [{ url: "https://x.com", at }],
+    });
+
+    // Peer B moved X to BFolder (older); peer C moved it to CFolder (newer).
+    backend.files.set("bookmarks_peerB", await peerPacket(engine, "peerB", movePayload("BFolder", now - 10_000)));
+    backend.files.set("bookmarks_peerC", await peerPacket(engine, "peerC", movePayload("CFolder", now - 1_000)));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    // Newest move wins → X ends up under CFolder, exactly once.
+    const bar = await chrome.bookmarks.getChildren("1");
+    const cFolder = bar.find((c) => !c.url && c.title === "CFolder");
+    expect(cFolder).toBeTruthy();
+    const cKids = await chrome.bookmarks.getChildren(cFolder!.id);
+    expect(cKids.some((c) => c.url === "https://x.com")).toBe(true);
+    expect((await localUrls()).filter((u) => u === "https://x.com")).toHaveLength(1);
+  });
+});
+
+describe("SyncEngine.syncType — E2EE", () => {
+  function encEngine(deviceId: string, passphrase: string): SyncEngine {
+    return new SyncEngine(
+      { ...DEFAULT_SETTINGS, device_id: deviceId, conflict_strategy: "lww",
+        encryption_enabled: true, encryption_passphrase: passphrase },
+      () => {}
+    );
+  }
+  async function encPeer(passphrase: string, deviceId: string, p: BookmarkPayload): Promise<SyncPacket> {
+    return priv(encEngine(deviceId, passphrase)).buildPacket("bookmarks", p);
+  }
+
+  it("round-trips a peer encrypted with the SAME passphrase and re-uploads encrypted", async () => {
+    const engine = encEngine("me", "correct horse");
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await encPeer("correct horse", "peer1", payload([link("B", "https://b.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(await localUrls()).toEqual(["https://a.com", "https://b.com"]);
+    const last = backend.uploads[backend.uploads.length - 1];
+    expect(last.encrypted).toBe(true);
+    // No verifier on uploads: encrypt(known-constant) on third-party storage is an
+    // offline brute-force oracle on the passphrase. Mismatch detection relies on
+    // the payload's GCM decrypt failure instead (tests below).
+    expect(last.verifier).toBeUndefined();
+  });
+
+  it("skips (does not merge) a peer with a DIFFERENT passphrase and records a warning — no silent fork", async () => {
+    const engine = encEngine("me", "my-passphrase");
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await encPeer("their-different-one", "peer1", payload([link("B", "https://b.com")])));
+
+    // Non-fatal: no throw. The undecryptable peer is skipped, not merged...
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    expect(await localUrls()).toEqual(["https://a.com"]);
+    // ...but the mismatch is recorded (surfaced by sync() as a visible warning)...
+    expect(priv(engine).encryptionWarnings.has("peer1")).toBe(true);
+    // ...and we still re-upload our own (encrypted) file, so the group can self-heal.
+    const last = backend.uploads[backend.uploads.length - 1];
+    expect(last.encrypted).toBe(true);
+  });
+
+  it("still checks a LEGACY peer's verifier (older builds upload one) on mismatch", async () => {
+    const engine = encEngine("me", "my-passphrase");
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    // A peer on an older build: its packet carries the legacy verifier field.
+    const legacy = await encPeer("their-different-one", "peer1", payload([link("B", "https://b.com")]));
+    legacy.verifier = await createKeyVerifier("their-different-one");
+    backend.files.set("bookmarks_peer1", legacy);
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    // Same non-fatal outcome as the decrypt-failure path: skipped, warned, self-heals.
+    expect(await localUrls()).toEqual(["https://a.com"]);
+    expect(priv(engine).encryptionWarnings.has("peer1")).toBe(true);
+    expect(backend.uploads[backend.uploads.length - 1].encrypted).toBe(true);
+  });
+
+  it("SILENTLY skips a plaintext peer while E2EE is on here (stale/orphan file must not warn forever)", async () => {
+    const engine = encEngine("me", "my-passphrase");
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    // Peer packet built by a NON-encrypting engine → encrypted:false (E2EE off there).
+    backend.files.set("bookmarks_peer1", await peerPacket(makeEngine(), "peer1", payload([link("B", "https://b.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    // The plaintext peer is neither merged...
+    expect(await localUrls()).toEqual(["https://a.com"]);
+    // ...NOR warned about — it's a stale/orphan file, not this device's problem.
+    expect(priv(engine).encryptionWarnings.size).toBe(0);
+    // We still upload our own encrypted file.
+    expect(backend.uploads[backend.uploads.length - 1].encrypted).toBe(true);
+  });
+
+  it("nudges (non-fatal) to enable E2EE when E2EE is off here but a peer is encrypted", async () => {
+    const engine = makeEngine(); // E2EE off, device "me"
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await encPeer("group-passphrase", "peer1", payload([link("B", "https://b.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    // The encrypted peer can't be read here, so it's skipped (not merged)...
+    expect(await localUrls()).toEqual(["https://a.com"]);
+    // ...but the user is nudged on THIS device (the one that can enable E2EE)...
+    expect(priv(engine).encryptionWarnings.has("peer1")).toBe(true);
+    // ...and this device still uploads its own (plaintext) file — non-fatal.
+    expect(backend.uploads[backend.uploads.length - 1].encrypted).toBe(false);
+  });
+
+  it("does NOT decrypt an encrypted peer when E2EE is off but a passphrase lingers (C1 downgrade)", async () => {
+    // Turning E2EE off keeps the passphrase in settings; the device must still NOT
+    // silently decrypt+absorb the encrypted group and re-publish it in plaintext.
+    const engine = new SyncEngine(
+      { ...DEFAULT_SETTINGS, device_id: "me", conflict_strategy: "lww",
+        encryption_enabled: false, encryption_passphrase: "shared-pass" },
+      () => {}
+    );
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await encPeer("shared-pass", "peer1", payload([link("B", "https://b.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    expect(await localUrls()).toEqual(["https://a.com"]);              // encrypted peer NOT absorbed
+    expect(priv(engine).encryptionWarnings.has("peer1")).toBe(true);  // warned on this device
+    expect(backend.uploads[backend.uploads.length - 1].encrypted).toBe(false); // own file stays plaintext
+  });
+
+  it("re-uploads encrypted when E2EE turns on even though the plaintext is unchanged (self-heal, Fix 1)", async () => {
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    const backend = new FakeBackend();
+    // Same device uploads plaintext first (records a plain-form upload tag).
+    await priv(makeEngine()).syncType("bookmarks", backend, DEFAULT_STATE);
+    expect(backend.uploads[backend.uploads.length - 1].encrypted).toBe(false);
+    // Now it turns E2EE on. The plaintext content is identical, but the encryption
+    // FORM differs — so it must re-upload (not skip on the unchanged checksum),
+    // encrypted this time. This is the root cause of the old mixed-state deadlock.
+    await priv(encEngine("me", "pw")).syncType("bookmarks", backend, DEFAULT_STATE);
+    expect(backend.uploads.length).toBe(2);
+    expect(backend.uploads[backend.uploads.length - 1].encrypted).toBe(true);
+  });
+});
+
+describe("SyncEngine — one data type's failure must not abort the others", () => {
+  // A revoked optional permission (history / management) makes that type's export
+  // throw. The bare per-type loop let the throw escape sync(), so every type AFTER the
+  // failing one was skipped — turning off history in chrome://extensions silently
+  // stopped BOOKMARKS from syncing — and the post-loop mass-delete recovery snapshot
+  // never ran either.
+  class FailingBackend extends FakeBackend {
+    constructor(private readonly failFor: DataType[]) { super(); }
+    downloadAll(dataType: DataType, exclude?: string): Promise<SyncPacket[]> {
+      if (this.failFor.includes(dataType)) {
+        return Promise.reject(new Error(`no ${dataType} permission`));
+      }
+      return super.downloadAll(dataType, exclude);
+    }
+  }
+
+  it("syncs the remaining types and reports the one that failed", async () => {
+    const engine = makeEngine();
+    const backend = new FailingBackend(["history"]);
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+
+    // history FIRST — a propagating throw would take bookmarks down with it, which is
+    // the exact shape of the bug.
+    const problems = await priv(engine).syncAllTypes(["history", "bookmarks"], backend, DEFAULT_STATE);
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("history");
+    expect(backend.uploads.map((u) => u.data_type)).toEqual(["bookmarks"]);
+  });
+
+  it("says a rate limit once, with what to do, instead of once per type", async () => {
+    // "WebDAV PUT failed: 429" per type told the user it failed and nothing else.
+    class RateLimitedBackend extends FakeBackend {
+      downloadAll(): Promise<SyncPacket[]> {
+        return Promise.reject(new HttpError(429, "WebDAV list failed: 429"));
+      }
+    }
+    const engine = new SyncEngine({
+      ...DEFAULT_SETTINGS,
+      device_id: "me",
+      active_backend: "webdav",
+      backends: [{ type: "webdav", label: "Nutstore", enabled: true, webdav: { url: "https://dav.jianguoyun.com/dav/", username: "u", password: "p" } }],
+    }, () => {});
+
+    const problems = await priv(engine).syncAllTypes(["history", "bookmarks"], new RateLimitedBackend(), DEFAULT_STATE);
+
+    expect(new Set(problems).size).toBe(1);
+    expect(problems[0]).toContain("dav.jianguoyun.com");
+    expect(problems[0]).toContain("Sync interval");
+    expect(problems[0]).not.toContain("history:");
+  });
+
+  it("reports EVERY failing type, not just the first", async () => {
+    const engine = makeEngine();
+    const backend = new FailingBackend(["history", "extensions"]);
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+
+    const problems = await priv(engine).syncAllTypes(
+      ["history", "extensions", "bookmarks"], backend, DEFAULT_STATE
+    );
+
+    expect(problems).toHaveLength(2);
+    expect(backend.uploads.map((u) => u.data_type)).toEqual(["bookmarks"]);
+  });
+
+  it("names the failing type, so the popup can redden only that stream", async () => {
+    // The popup had nothing but the global status to colour by, so one revoked permission
+    // painted all four Active Streams red and labelled them stale, three of them while
+    // they had just synced in that same cycle.
+    const engine = makeEngine();
+    const backend = new FailingBackend(["history"]);
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+
+    await priv(engine).syncAllTypes(["history", "bookmarks"], backend, DEFAULT_STATE);
+
+    expect([...priv(engine).failedTypes]).toEqual(["history"]);
+  });
+
+  it("reports nothing when every type succeeds", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+
+    expect(await priv(engine).syncAllTypes(["bookmarks"], backend, DEFAULT_STATE)).toEqual([]);
+    expect([...priv(engine).failedTypes]).toEqual([]);
+  });
+
+  it("REPORTS a type whose optional permission is gone, rather than skipping it quietly", async () => {
+    // The other half of the check above, and the opposite answer. Here the browser can do
+    // it and the permission is simply missing, which is the user's to fix. Reported on
+    // 1.2.0 as a raw "undefined is not an object (evaluating 'u.history.search')" once a
+    // cycle; silence would be no better, because the type sits there enabled and syncs
+    // nothing. `history` is undefined AND not granted, which is exactly that state.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    // An empty bookmark payload is deliberately never uploaded, so seed one: this test
+    // is about bookmarks still going out, and it has to have something to send.
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    const history = chrome.history;
+    const permissions = chrome.permissions;
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    delete (chrome as any).history;
+    (chrome as any).permissions = { contains: () => Promise.resolve(false), request: () => Promise.resolve(false) };
+    try {
+      const problems = await priv(engine).syncAllTypes(["history", "bookmarks"], backend, DEFAULT_STATE);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain("history");
+      expect(problems[0]).toContain("permission");
+      // The point of reporting rather than throwing: bookmarks still goes out.
+      expect(backend.uploads.map((u) => u.data_type)).toEqual(["bookmarks"]);
+    } finally {
+      (chrome as any).history = history;
+      (chrome as any).permissions = permissions;
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+    }
+  });
+
+  it("skips a type this browser has no API for, and does NOT call it an error", async () => {
+    // Firefox for Android has no bookmarks API, so `bookmarks` can never produce a byte
+    // there. Reporting that once a minute would pin the extension to a red error state
+    // forever over something the user cannot fix — and bury the real failures under it.
+    // Settings is where this is explained, next to the toggle itself.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    const bookmarks = chrome.bookmarks;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (chrome as any).bookmarks;
+    try {
+      const problems = await priv(engine).syncAllTypes(["bookmarks", "sessions"], backend, DEFAULT_STATE);
+      expect(problems).toEqual([]);
+      expect(backend.uploads.map((u) => u.data_type)).not.toContain("bookmarks");
+    } finally {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (chrome as any).bookmarks = bookmarks;
+    }
+  });
+
+  it("skips History where the browser does not know the permission, rather than asking for it", async () => {
+    // Firefox for Android (158, from the device): no history API, and contains() THROWS
+    // for `history` because the name is not in its schema. That is the case above, not the
+    // missing-permission one: no settings screen there can grant it, so a "permission"
+    // problem would sit in the popup for good over something nobody can fix.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    const history = chrome.history;
+    const permissions = chrome.permissions;
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    delete (chrome as any).history;
+    (chrome as any).permissions = {
+      contains: () => Promise.reject(new Error('Type error for parameter permissions (Error processing permissions.0: Value "history" must either: …)')),
+      request: () => Promise.resolve(false),
+    };
+    try {
+      const problems = await priv(engine).syncAllTypes(["history", "bookmarks"], backend, DEFAULT_STATE);
+      expect(problems).toEqual([]);
+      expect(backend.uploads.map((u) => u.data_type)).toEqual(["bookmarks"]);
+    } finally {
+      (chrome as any).history = history;
+      (chrome as any).permissions = permissions;
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+    }
+  });
+});
+
+describe("SyncEngine.syncType — a tab-less session is not published", () => {
+  // Revoking the optional `tabs` permission doesn't throw: tabs.query resolves, but
+  // every tab arrives without a url, so the export filters them all out. Uploading that
+  // empty session OVERWRITES this device's previously-good session file for every peer.
+
+  it("does not upload a session with no tabs", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+
+    await priv(engine).syncType("sessions", backend, DEFAULT_STATE);
+
+    expect(backend.uploads).toHaveLength(0);
+  });
+
+  it("still uploads a session that has tabs", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await chrome.tabs.create({ url: "https://a.com" });
+
+    await priv(engine).syncType("sessions", backend, DEFAULT_STATE);
+
+    expect(backend.uploads).toHaveLength(1);
+    expect(backend.uploads[0].data_type).toBe("sessions");
+  });
+});
+
+describe("SyncEngine.syncType — a stale peer must not resurrect a deleted bookmark", () => {
+  /** Stamp an explicit packet timestamp — that's what orders the fold. The checksum is
+   *  over the payload only, so it stays valid. */
+  async function agedPeer(
+    engine: SyncEngine, deviceId: string, p: BookmarkPayload, ageMs: number
+  ): Promise<SyncPacket> {
+    const packet = await peerPacket(engine, deviceId, p);
+    packet.timestamp = new Date(Date.now() - ageMs).toISOString();
+    return packet;
+  }
+
+  it("does not re-add a bookmark a NEWER peer tombstoned, even from an OLDER peer's tree", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    // This device never held X — that's what makes it vulnerable: there is no local
+    // copy for the tombstone to match against in Step A.
+    const deletedAt = Date.now() - 1_000;
+
+    // Stale peer (older file) still has X in its tree, and no tombstone.
+    backend.files.set("bookmarks_stale",
+      await agedPeer(engine, "stale", payload([link("X", "https://x.com")]), 60_000));
+    // Fresh peer (newer file) dropped X and carries the tombstone.
+    backend.files.set("bookmarks_fresh",
+      await agedPeer(engine, "fresh", payload([], [{ url: "https://x.com", deletedAt }]), 0));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    // X must NOT come back. Folded oldest-first it was created (with a fresh
+    // dateAdded, which the API won't let us set to the peer's original), and that
+    // fresh stamp then beat the older tombstone — so it survived AND got republished.
+    expect(await localUrls()).toEqual([]);
+
+    // And we must not advertise X to the rest of the mesh either. We publish no tombstone
+    // for it: the deletion is the fresh peer's and it publishes it itself, to a folder
+    // every device reads in full. Repeating someone else's deletion in our own file is
+    // what let one refused deletion become a demand from every device at once (#31).
+    const sent = JSON.parse(backend.uploads[backend.uploads.length - 1].payload) as BookmarkPayload;
+    expect(flatUrls(sent.tree)).toEqual([]);
+    expect(sent.tombstones).toEqual([]);
+  });
+
+  it("still publishes an emptied tree, so our own file stops advertising it", async () => {
+    // Since a device publishes only the deletions it made itself, the one whose last
+    // bookmark was removed by a PEER's deletion has nothing left to say: empty tree,
+    // nothing to ask of anyone. Skipping that upload would leave our previous file
+    // advertising X to every device that reads it, and they would hand it back. The
+    // empty payload IS the statement, so the emptiness test asks the log we HOLD.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "X", url: "https://x.com" });
+    backend.files.set("bookmarks_peer",
+      await peerPacket(engine, "peer", payload([], [{ url: "https://x.com", deletedAt: Date.now() }])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(await localUrls()).toEqual([]); // the peer's deletion applied (under the cap)
+    expect(backend.uploads.length).toBeGreaterThan(0);
+    const sent = JSON.parse(backend.uploads[backend.uploads.length - 1].payload) as BookmarkPayload;
+    expect(flatUrls(sent.tree)).toEqual([]);
+    expect(sent.tombstones).toEqual([]); // theirs to publish, not ours
+  });
+
+  it("still adds a bookmark from an older peer when nobody deleted it", async () => {
+    // The ordering change must not make the fold skip legitimate additions.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+
+    backend.files.set("bookmarks_stale",
+      await agedPeer(engine, "stale", payload([link("A", "https://a.com")]), 60_000));
+    backend.files.set("bookmarks_fresh",
+      await agedPeer(engine, "fresh", payload([link("B", "https://b.com")]), 0));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(await localUrls()).toEqual(["https://a.com", "https://b.com"]);
+  });
+});
+
+describe("SyncEngine.syncType — a deletion-only payload still gets uploaded", () => {
+  // The bookmark payload is a { tree, tombstones } envelope, and the deletion log is
+  // content. Judging "empty" on the tree alone meant deleting EVERY bookmark produced
+  // an "empty" payload that was never uploaded: the tombstones never left the device,
+  // no peer learned of the deletion, and this device's stale remote file kept
+  // advertising the whole old tree — which came back once the tombstones aged out.
+
+  it("uploads the tombstones when every local bookmark has been deleted", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    // Local: no bookmarks left, but a deletion to announce.
+    const future = Date.now() + 60_000;
+    await setTombstones([{ url: "https://b.com", deletedAt: future }]);
+    // The peer still holds the bookmark we deleted.
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    // The peer's copy is suppressed by our newer tombstone, so local stays empty...
+    expect(await localUrls()).toEqual([]);
+    // ...and the deletion must reach the backend, or it propagates to nobody.
+    expect(backend.uploads).toHaveLength(1);
+    const sent = JSON.parse(backend.uploads[0].payload) as BookmarkPayload;
+    expect(flatUrls(sent.tree)).toEqual([]);
+    expect(sent.tombstones.map((t) => t.url)).toEqual(["https://b.com"]);
+  });
+
+  it("still uploads nothing on a fresh device with no bookmarks and no deletions", async () => {
+    // The guard must stay: a device with genuinely nothing to say writes no file.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(backend.uploads).toHaveLength(0);
+  });
+});
+
+describe("SyncEngine — blocked mass-delete takes ONE restore point per incident", () => {
+  // The guard re-blocks the same peer deletions on every merge, so a snapshot per
+  // sync burned through the 10-slot ring in ~10 cycles and deleted the user's own
+  // pre-incident restore points — the exact history they'd recover from.
+
+  /** Counts recovery snapshots and optionally fails the first N attempts. */
+  function countingEngine(failFirst = 0): { engine: SyncEngine; taken: () => number } {
+    const engine = makeEngine();
+    let calls = 0;
+    (engine as unknown as { snapshotNow: () => Promise<unknown> }).snapshotNow = () => {
+      calls++;
+      if (calls <= failFirst) return Promise.reject(new Error("backend unreachable"));
+      return Promise.resolve({ name: "konode_snap_bookmarks_1.json", timestamp: 1, count: 1 });
+    };
+    // `calls` counts attempts; for the success-count assertions failFirst is 0.
+    return { engine, taken: () => calls };
+  }
+
+  it("writes ONE restore point even though the deletion is blocked every sync", async () => {
+    const { engine, taken } = countingEngine();
+
+    const first = await priv(engine).recordBlockedDeletion(block(50), true);
+    const second = await priv(engine).recordBlockedDeletion(block(50), true);
+    const third = await priv(engine).recordBlockedDeletion(block(50), true);
+
+    expect(taken()).toBe(1);
+    // ...but the banner keeps being surfaced while the situation persists.
+    for (const n of [first, second, third]) expect(n?.blocked).toBe(50);
+  });
+
+
+  it("puts the bookmarks the merge named on the card (#23)", async () => {
+    const { engine } = countingEngine();
+    const sample = [{ title: "Docs", url: "https://docs.example/" }];
+
+    const notice = await priv(engine).recordBlockedDeletion(
+      { blocked: 50, cap: 60, localTotal: 100, pct: 60, device_id: "peer", device_label: "peer-1", sample },
+      true,
+    );
+
+    expect(notice).toMatchObject({ blocked: 50, sample });
+  });
+
+  it("earns a new restore point after a clean bookmark sync ends the incident", async () => {
+    const { engine, taken } = countingEngine();
+
+    await priv(engine).recordBlockedDeletion(block(50), true);
+    expect(taken()).toBe(1);
+
+    // A sync that merged bookmarks and blocked nothing → incident over.
+    expect(await priv(engine).recordBlockedDeletion(null, true)).toBeNull();
+
+    // A later block is a NEW incident and deserves its own restore point.
+    await priv(engine).recordBlockedDeletion(block(30), true);
+    expect(taken()).toBe(2);
+  });
+
+  it("a sync that never merged bookmarks does NOT end the incident", async () => {
+    const { engine, taken } = countingEngine();
+
+    await priv(engine).recordBlockedDeletion(block(50), true);
+    await priv(engine).recordBlockedDeletion(null, false); // e.g. sync(["history"])
+    await priv(engine).recordBlockedDeletion(block(50), true);
+
+    expect(taken()).toBe(1);
+  });
+
+  it("writes ONE Activity-log warning per incident, not one per sync", async () => {
+    const { engine } = countingEngine();
+
+    await priv(engine).recordBlockedDeletion(block(50), true);
+    await priv(engine).recordBlockedDeletion(block(50), true);
+    await priv(engine).recordBlockedDeletion(block(50), true);
+    // logger.warn fires appendAudit without awaiting; let the serialized write land.
+    await new Promise((r) => setTimeout(r, 0));
+
+    const entries = ((await chrome.storage.local.get(KEYS.AUDIT_LOG))[KEYS.AUDIT_LOG] ?? []) as
+      { detail?: string }[];
+    const blocked = entries.filter((e) => e.detail?.includes("Blocked a deletion"));
+    // Three blocked syncs, one entry. The guard re-evaluates the same peer deletions
+    // every cycle, and warning each time buried the entry the popup banner points at.
+    expect(blocked).toHaveLength(1);
+    // And it says enough to act on: the proportion, and who asked.
+    expect(blocked[0].detail).toContain("50 of your 100 bookmarks");
+    expect(blocked[0].detail).toContain("peer-1");
+  });
+
+  it("says it again for a NEW incident, once the last one was resolved", async () => {
+    // The other half of the latch: quiet about a repeat, but a genuinely different
+    // deletion later has to speak up. Same shape as the restore-point test below, applied
+    // to the log line.
+    const { engine } = countingEngine();
+
+    await priv(engine).recordBlockedDeletion(block(50), true);
+    await priv(engine).recordBlockedDeletion(null, true);      // a clean bookmark sync ends it
+    await priv(engine).recordBlockedDeletion(block(12), true); // a different deletion, later
+    await new Promise((r) => setTimeout(r, 0));
+
+    const entries = ((await chrome.storage.local.get(KEYS.AUDIT_LOG))[KEYS.AUDIT_LOG] ?? []) as
+      { detail?: string }[];
+    expect(entries.filter((e) => e.detail?.includes("Blocked a deletion"))).toHaveLength(2);
+  });
+
+  it("retries on the next sync when the restore-point write fails", async () => {
+    const { engine, taken } = countingEngine(1); // first snapshotNow() rejects
+
+    // A failed write must not throw out, and must not latch the incident closed.
+    await expect(priv(engine).recordBlockedDeletion(block(50), true)).resolves.toMatchObject({ blocked: 50 });
+    expect(taken()).toBe(1);
+
+    // Next cycle tries again — and this time succeeds.
+    await priv(engine).recordBlockedDeletion(block(50), true);
+    expect(taken()).toBe(2);
+
+    // Now it IS latched, so no third attempt.
+    await priv(engine).recordBlockedDeletion(block(50), true);
+    expect(taken()).toBe(2);
+  });
+});
+
+describe("SyncEngine — a bulk-delete approval lasts exactly one sync", () => {
+  // The approval used to live in storage until a merge that went OVER the cap consumed
+  // it, and only such a merge ever read it. A sync that never reached one therefore left
+  // it armed with nothing to spend it on — and it sat there, through every later sync,
+  // until some unrelated peer deletion happened to fit under it. That one was applied
+  // silently: no restore point, nothing in the Activity log, and no notice, because the
+  // guard never blocked it. The lifetime belongs to the sync now.
+
+  function configured(): SyncEngine {
+    return new SyncEngine(
+      {
+        ...DEFAULT_SETTINGS,
+        device_id: "me",
+        active_backend: "github",
+        backends: [{ type: "github", label: "GitHub", enabled: true, github: { token: "t", repo: "o/r" } }],
+      },
+      () => {}
+    );
+  }
+
+  it("clears the approval even when the sync never reaches a bookmark merge", async () => {
+    // The failure that opened the hole: the user clicks Apply, and that cycle cannot
+    // reach the merge at all — the backend is unreachable. sync() still returns "ran", the
+    // popup shows no error, and sync() has already cleared recovery_notice, so the card
+    // is gone and the user believes it happened.
+    await setBulkDeleteApproval(48);
+
+    await configured().sync(); // no network in the test env: connect() fails inside
+
+    expect(await getBulkDeleteApproval()).toBe(0);
+  });
+
+  it("hands the same approval to every merge in the cycle, not just the first", async () => {
+    // Two peers each asking for a deletion the user approved. The latch used to be spent
+    // by whichever merge read it first, so the second peer was blocked again and the user
+    // had to find the card and click Apply a second time for a deletion they had already
+    // agreed to.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    for (let i = 0; i < 100; i++) {
+      await chrome.bookmarks.create({ parentId: "1", title: `S${i}`, url: `https://s${i}.com` });
+    }
+    const tombstones = Array.from({ length: 70 }, (_, i) => ({ url: `https://s${i}.com`, deletedAt: 9e15 }));
+    backend.files.set("bookmarks_a", await peerPacket(engine, "peer-a", payload([], tombstones)));
+    backend.files.set("bookmarks_b", await peerPacket(engine, "peer-b", payload([], tombstones)));
+
+    // What sync() would have read and cleared at the top of the cycle.
+    priv(engine).bulkApprovedThisSync = 70;
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect((await localUrls()).length).toBe(30);
+    expect(priv(engine).bulkBlockedThisSync).toBeNull();
+  });
+
+  it("keeps the LARGEST block rather than a running total across peers", async () => {
+    // Summing them made the notice describe a deletion that never happened: `blocked` was
+    // a total while cap/localTotal came from whichever peer was last, so two peers asking
+    // for 70 each out of one 100-bookmark tree read as "140 of your 100" — and Apply then
+    // armed an approval for 140, a ceiling bigger than either deletion the user saw.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    for (let i = 0; i < 100; i++) {
+      await chrome.bookmarks.create({ parentId: "1", title: `S${i}`, url: `https://s${i}.com` });
+    }
+    const tombstones = Array.from({ length: 70 }, (_, i) => ({ url: `https://s${i}.com`, deletedAt: 9e15 }));
+    backend.files.set("bookmarks_a", await peerPacket(engine, "peer-a", payload([], tombstones)));
+    backend.files.set("bookmarks_b", await peerPacket(engine, "peer-b", payload([], tombstones)));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    const blocked = priv(engine).bulkBlockedThisSync;
+    expect(blocked?.blocked).toBe(70);      // not 140
+    expect(blocked?.localTotal).toBe(100);  // and the pair still describes one deletion
+    expect((await localUrls()).length).toBe(100);
+  });
+});
+
+describe("SyncEngine.findOwnMissingFiles — an unreadable folder is said once, not every cycle", () => {
+  // Reporting it was right; reporting it per sync was #20 again in a different place.
+  // `logger.warn` is retained, the listing is re-checked every cycle, and a folder that
+  // cannot be read stays that way, so it wrote a kept entry a minute and turned the
+  // 200-entry ring over in about three hours — evicting whatever the user was sent to read.
+
+  async function retained(): Promise<string[]> {
+    await new Promise((r) => setTimeout(r, 0)); // logger fires appendAudit unawaited
+    const entries = ((await chrome.storage.local.get(KEYS.AUDIT_LOG))[KEYS.AUDIT_LOG] ?? []) as
+      { detail?: string; level?: string }[];
+    return entries.filter((e) => e.detail?.includes("Couldn't list the sync folder")).map((e) => e.level ?? "");
+  }
+
+  function failingBackend(): FakeBackend {
+    const backend = new FakeBackend();
+    backend.listFiles = () => Promise.reject(new Error("503 Service Unavailable"));
+    return backend;
+  }
+
+  it("writes ONE retained entry however long the listing keeps failing", async () => {
+    const engine = makeEngine();
+    const backend = failingBackend();
+
+    for (let i = 0; i < 4; i++) await priv(engine).findOwnMissingFiles(backend, ["bookmarks"]);
+
+    expect(await retained()).toHaveLength(1);
+    expect(await getListFailureNoted()).toBe(true);
+  });
+
+  it("says so again for a NEW failure, once the folder has been readable in between", async () => {
+    const engine = makeEngine();
+
+    await priv(engine).findOwnMissingFiles(failingBackend(), ["bookmarks"]);
+    // A working listing ends the incident, and is itself worth one line.
+    await priv(engine).findOwnMissingFiles(new FakeBackend(), ["bookmarks"]);
+    expect(await getListFailureNoted()).toBe(false);
+
+    await priv(engine).findOwnMissingFiles(failingBackend(), ["bookmarks"]);
+
+    expect(await retained()).toHaveLength(2);
+  });
+
+  it("keeps an ordinary sync out of the log entirely", async () => {
+    const engine = makeEngine();
+
+    await priv(engine).findOwnMissingFiles(new FakeBackend(), ["bookmarks"]);
+
+    expect(await retained()).toHaveLength(0);
+    const entries = ((await chrome.storage.local.get(KEYS.AUDIT_LOG))[KEYS.AUDIT_LOG] ?? []) as unknown[];
+    expect(entries).toHaveLength(0);
+  });
+});
+
+describe("SyncEngine.syncType — upload dedup is per DESTINATION", () => {
+  // The dedup checksum is over the payload, so it can't see a destination change.
+  // Without the destination in the upload tag, pointing the device at a new provider /
+  // repo / server left the old checksum matching: nothing was ever uploaded there and
+  // the UI still reported a clean sync.
+  function ghEngine(repo: string, path?: string): SyncEngine {
+    return new SyncEngine(
+      {
+        ...DEFAULT_SETTINGS,
+        device_id: "me",
+        conflict_strategy: "lww",
+        active_backend: "github",
+        backends: [{ type: "github", label: "GitHub", enabled: true, github: { token: "t", repo, path } }],
+      },
+      () => {}
+    );
+  }
+
+  it("re-uploads to a NEW repo even though the payload is unchanged", async () => {
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+
+    const first = new FakeBackend();
+    await priv(ghEngine("owner/repo-one")).syncType("bookmarks", first, DEFAULT_STATE);
+    expect(first.uploads).toHaveLength(1);
+
+    // Same device, same untouched bookmarks, different destination → must upload.
+    const second = new FakeBackend();
+    await priv(ghEngine("owner/repo-two")).syncType("bookmarks", second, DEFAULT_STATE);
+    expect(second.uploads).toHaveLength(1);
+  });
+
+  it("re-uploads when only the subfolder path changes", async () => {
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+
+    const first = new FakeBackend();
+    await priv(ghEngine("owner/repo", "konode")).syncType("bookmarks", first, DEFAULT_STATE);
+    const second = new FakeBackend();
+    await priv(ghEngine("owner/repo", "backup/konode")).syncType("bookmarks", second, DEFAULT_STATE);
+
+    expect(second.uploads).toHaveLength(1);
+  });
+
+  it("still skips the re-upload when destination and payload are both unchanged", async () => {
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    const backend = new FakeBackend();
+
+    await priv(ghEngine("owner/repo-one")).syncType("bookmarks", backend, DEFAULT_STATE);
+    await priv(ghEngine("owner/repo-one")).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(backend.uploads).toHaveLength(1);
+  });
+
+  it("treats an equivalent repo URL and slug as the SAME destination", async () => {
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    const backend = new FakeBackend();
+
+    // Re-typing the repo in URL form isn't a move — it must not force a re-upload.
+    await priv(ghEngine("owner/repo-one")).syncType("bookmarks", backend, DEFAULT_STATE);
+    await priv(ghEngine("https://github.com/owner/repo-one.git")).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(backend.uploads).toHaveLength(1);
+  });
+});
+
+describe("SyncEngine.syncType — manual conflicts (CO-7 / CO-8)", () => {
+  function manualEngine(): SyncEngine {
+    return new SyncEngine({ ...DEFAULT_SETTINGS, device_id: "me", conflict_strategy: "manual" }, () => {});
+  }
+
+  it("queues a conflict per diverging peer, each tagged with its device_id", async () => {
+    const engine = manualEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+    backend.files.set("bookmarks_peer2", await peerPacket(engine, "peer2", payload([link("C", "https://c.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    const conflicts = (await getState()).pending_conflicts;
+    expect(conflicts.map((c) => c.device_id).sort()).toEqual(["peer1", "peer2"]);
+  });
+
+  it("does not re-queue the same peer conflict on the next cycle (dedupe)", async () => {
+    const engine = manualEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect((await getState()).pending_conflicts).toHaveLength(1);
+  });
+
+  it("does not re-queue a RESOLVED conflict on the next cycle (sticky resolution)", async () => {
+    const engine = manualEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+
+    // First cycle queues the conflict; the user resolves it (keep local).
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    const conflict = (await getState()).pending_conflicts[0];
+    await engine.resolveConflict(conflict.id, "local");
+    expect((await getState()).pending_conflicts).toHaveLength(0);
+
+    // Peer's file is unchanged (still diverging), but we already resolved against
+    // this exact content — the next cycle must NOT re-queue and re-notify.
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    expect((await getState()).pending_conflicts).toHaveLength(0);
+  });
+
+  it("re-queues if the peer's content changes after a resolution", async () => {
+    const engine = manualEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    await engine.resolveConflict((await getState()).pending_conflicts[0].id, "local");
+    expect((await getState()).pending_conflicts).toHaveLength(0);
+
+    // The peer edits its bookmarks → new checksum → a fresh conflict must surface.
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("C", "https://c.com")])));
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    expect((await getState()).pending_conflicts).toHaveLength(1);
+  });
+
+  it("still publishes its OWN file while a conflict is pending (manual gates import, not export)", async () => {
+    const engine = manualEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    // The peer is NOT merged — that's what `manual` is for...
+    expect(await localUrls()).toEqual(["https://a.com"]);
+    // ...and the conflict is queued for the user...
+    expect((await getState()).pending_conflicts).toHaveLength(1);
+    // ...but our own data still reaches the backend. Each device owns its own file, so
+    // this can't overwrite the peer — and without it our changes reach nobody, ever.
+    expect(backend.uploads).toHaveLength(1);
+    const sent = JSON.parse(backend.uploads[0].payload) as BookmarkPayload;
+    expect(flatUrls(sent.tree)).toEqual(["https://a.com"]);
+  });
+
+  it("keeps publishing later local changes once the conflict is resolved/deduped", async () => {
+    const engine = manualEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    await engine.resolveConflict((await getState()).pending_conflicts[0].id, "local");
+
+    // No fresh conflict will be queued now (the peer is deduped by checksum), which is
+    // exactly the state in which the device used to go permanently silent.
+    await chrome.bookmarks.create({ parentId: "1", title: "C", url: "https://c.com" });
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect((await getState()).pending_conflicts).toHaveLength(0);
+    const last = JSON.parse(backend.uploads[backend.uploads.length - 1].payload) as BookmarkPayload;
+    expect(flatUrls(last.tree)).toEqual(["https://a.com", "https://c.com"]);
+  });
+
+  it("refuses a manual resolve-remote of a PLAINTEXT peer while E2EE is on (no silent downgrade)", async () => {
+    const engine = new SyncEngine(
+      { ...DEFAULT_SETTINGS, device_id: "me", conflict_strategy: "manual",
+        encryption_enabled: true, encryption_passphrase: "pw" },
+      () => {}
+    );
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    // A plaintext peer packet (built by a non-E2EE engine → encrypted: false).
+    const plainPeer = await peerPacket(makeEngine(), "peer1", payload([link("B", "https://b.com")]));
+    await setState({
+      pending_conflicts: [{
+        id: "c1", data_type: "bookmarks", device_id: "peer1",
+        local_version: null, remote_version: null, remote_packet: plainPeer,
+        timestamp: new Date().toISOString(), resolved: false,
+      }],
+    });
+
+    await expect(engine.resolveConflict("c1", "remote")).rejects.toThrow(/not end-to-end encrypted/);
+    expect(await localUrls()).toEqual(["https://a.com"]); // nothing imported
+  });
+});
+
+describe("SyncEngine.sync — reports whether it actually ran", () => {
+  // sync() returned void, so SYNC_NOW answered a blanket OK even when the sync never
+  // started. Combined with a lock stranded by a worker that died mid-sync, the manual
+  // "Sync now" button was a no-op that reported success for up to the 2-minute TTL.
+  // These paths all return before createBackend(), so they need no real backend.
+
+  function configured(): SyncEngine {
+    return new SyncEngine(
+      {
+        ...DEFAULT_SETTINGS,
+        device_id: "me",
+        active_backend: "github",
+        backends: [{ type: "github", label: "GitHub", enabled: true, github: { token: "t", repo: "o/r" } }],
+      },
+      () => {}
+    );
+  }
+
+  it("reports no-backend when nothing is configured", async () => {
+    expect(await makeEngine().sync()).toBe("no-backend");
+  });
+
+  it("keeps a device that is still being set up out of the Activity log", async () => {
+    // The sync alarm runs from install, so every minute of an unfinished setup wrote
+    // "No active backend configured" as a warning, and it was the first thing a new
+    // device's log showed. Nothing is wrong yet; the console still says it.
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    await makeEngine().sync();
+    await makeEngine().sync();
+    await new Promise((r) => setTimeout(r, 0)); // logger fires appendAudit unawaited
+
+    const entries = ((await chrome.storage.local.get(KEYS.AUDIT_LOG))[KEYS.AUDIT_LOG] ?? []) as
+      { detail?: string }[];
+    expect(entries.filter((e) => e.detail?.includes("No active backend"))).toHaveLength(0);
+  });
+
+  it("reports no-backend when active_backend has no matching config", async () => {
+    const engine = new SyncEngine(
+      { ...DEFAULT_SETTINGS, device_id: "me", active_backend: "github", backends: [] },
+      () => {}
+    );
+    expect(await engine.sync()).toBe("no-backend");
+  });
+
+  it("does not report a sync it never ran when every data type is switched off", async () => {
+    // Reported from a device: turn all four off in Settings, press Sync now, and the popup
+    // answered "Synced". The loop had an empty list to run over, finished with nothing to
+    // report, and success is what no problems used to mean.
+    const engine = new SyncEngine(
+      {
+        ...DEFAULT_SETTINGS,
+        device_id: "me",
+        active_backend: "github",
+        backends: [{ type: "github", label: "GitHub", enabled: true, github: { token: "t", repo: "o/r" } }],
+        enabled_types: [],
+      },
+      () => {}
+    );
+
+    expect(await engine.sync()).toBe("nothing-enabled");
+    const st = await getState();
+    expect(st.status).toBe("idle");       // "Ready": configured, nothing to do
+    expect(st.last_sync).toBeNull();      // and no sync to date-stamp
+    expect(engine.isSyncing).toBe(false);
+  });
+
+  it("keeps a pending conflict visible rather than calling the device idle", async () => {
+    await setState({
+      pending_conflicts: [{ id: "c1", data_type: "bookmarks", device_id: "peer1", timestamp: "2026-08-28T08:00:00.000Z", resolved: false }],
+    });
+    const engine = new SyncEngine(
+      {
+        ...DEFAULT_SETTINGS,
+        device_id: "me",
+        active_backend: "github",
+        backends: [{ type: "github", label: "GitHub", enabled: true, github: { token: "t", repo: "o/r" } }],
+        enabled_types: [],
+      },
+      () => {}
+    );
+
+    expect(await engine.sync()).toBe("nothing-enabled");
+    expect((await getState()).status).toBe("conflict");
+  });
+
+  it("says so once, not on every alarm, while everything stays switched off", async () => {
+    // Checklist O: the early return made no request, which is the part that matters, but it
+    // wrote the same status back and broadcast it every minute, waking an open popup to say
+    // nothing had changed.
+    await setState({ status: "success" });
+    const broadcasts: string[] = [];
+    const engine = new SyncEngine(
+      {
+        ...DEFAULT_SETTINGS,
+        device_id: "me",
+        active_backend: "github",
+        backends: [{ type: "github", label: "GitHub", enabled: true, github: { token: "t", repo: "o/r" } }],
+        enabled_types: [],
+      },
+      (st) => broadcasts.push(st.status)
+    );
+    const writes = vi.spyOn(chrome.storage.local, "set");
+
+    for (let i = 0; i < 3; i++) expect(await engine.sync()).toBe("nothing-enabled");
+
+    expect(broadcasts).toEqual(["idle"]); // "Synced" becomes "Ready" once
+    expect(writes.mock.calls.filter(([items]) => KEYS.STATE in (items as object))).toHaveLength(1);
+    writes.mockRestore();
+  });
+
+  it("still runs for an explicitly named type, which is how the approval path syncs", async () => {
+    // sync(["bookmarks"]) is not the empty case even with everything switched off: the
+    // caller named the type. Only an empty list returns early.
+    const engine = configured();
+    expect(await engine.sync(["bookmarks"])).not.toBe("nothing-enabled");
+  });
+
+  it("reports already-running when a lock is held", async () => {
+    expect(await acquireSyncLock(60_000)).toBe(true); // e.g. stranded by a dead worker
+    expect(await configured().sync()).toBe("already-running");
+  });
+
+  it("reports already-running while a sync is in flight in this worker", async () => {
+    const engine = configured();
+    engine.isSyncing = true;
+    expect(await engine.sync()).toBe("already-running");
+  });
+
+  it("leaves isSyncing false after every early return, so it can't wedge", async () => {
+    const a = makeEngine();
+    await a.sync();
+    expect(a.isSyncing).toBe(false);
+
+    await acquireSyncLock(60_000);
+    const b = configured();
+    await b.sync();
+    expect(b.isSyncing).toBe(false);
+  });
+});
+
+describe("SyncEngine.restoreFromSnapshot — the follow-up sync must not be detached", () => {
+  // MV3 keeps the worker alive for a PENDING message response. `void this.sync(...)`
+  // let restoreFromSnapshot return first, so the worker could be suspended mid-upload:
+  // the user was told "restored N bookmarks" while the peers received nothing. The
+  // restore itself is covered by snapshots.test.ts; this pins the ordering.
+  type Seam = {
+    withBackend<T>(fn: (b: IBackend) => Promise<T>): Promise<T>;
+  };
+  const stubRestore = (engine: SyncEngine, restored: number): void => {
+    (engine as unknown as Seam).withBackend = <T>() => Promise.resolve(restored as unknown as T);
+  };
+
+  it("does not resolve until the sync has finished", async () => {
+    const engine = makeEngine();
+    stubRestore(engine, 3);
+    let syncFinished = false;
+    engine.sync = async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      syncFinished = true;
+      return "ran";
+    };
+
+    const restored = await engine.restoreFromSnapshot("konode_snap_bookmarks_1.json");
+
+    expect(restored).toBe(3);
+    expect(syncFinished).toBe(true); // detached, this was still false
+  });
+
+  it("skips the sync entirely when nothing was restored", async () => {
+    const engine = makeEngine();
+    stubRestore(engine, 0);
+    let called = false;
+    engine.sync = async () => { called = true; return "ran"; };
+
+    expect(await engine.restoreFromSnapshot("konode_snap_bookmarks_1.json")).toBe(0);
+    expect(called).toBe(false);
+  });
+
+  it("still reports the restored count when the sync couldn't run", async () => {
+    // e.g. a periodic sync holds the lock. The restore stands either way.
+    const engine = makeEngine();
+    stubRestore(engine, 7);
+    engine.sync = async () => "already-running";
+
+    expect(await engine.restoreFromSnapshot("konode_snap_bookmarks_1.json")).toBe(7);
+  });
+});
+
+describe("SyncEngine — the conflict packet is parked outside konode_state", () => {
+  // konode_state is rewritten in full by every setState() (several times per sync) and
+  // broadcast to the popup by every STATE_UPDATE. A pending conflict used to carry the
+  // whole local tree, the whole remote tree AND the raw packet inside it.
+  function manualEngine2(): SyncEngine {
+    return new SyncEngine({ ...DEFAULT_SETTINGS, device_id: "me", conflict_strategy: "manual" }, () => {});
+  }
+  const packetStore = async (): Promise<Record<string, SyncPacket>> =>
+    ((await chrome.storage.local.get(KEYS.CONFLICT_PACKETS)) as Record<string, Record<string, SyncPacket>>)[
+      KEYS.CONFLICT_PACKETS
+    ] ?? {};
+
+  it("keeps the tree out of the state but stores it under the conflict id", async () => {
+    const engine = manualEngine2();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    const conflicts = (await getState()).pending_conflicts;
+    expect(conflicts).toHaveLength(1);
+    // Nothing bulky in the broadcast object.
+    expect(JSON.stringify(conflicts)).not.toContain("https://b.com");
+    // ...but the packet is retrievable for "use remote".
+    const parked = await packetStore();
+    expect(Object.keys(parked)).toEqual([conflicts[0].id]);
+    expect(parked[conflicts[0].id].payload).toContain("https://b.com");
+  });
+
+  it("resolves 'use remote' from the parked packet and then drops it", async () => {
+    const engine = manualEngine2();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    const id = (await getState()).pending_conflicts[0].id;
+    await engine.resolveConflict(id, "remote");
+
+    expect(await localUrls()).toEqual(["https://a.com", "https://b.com"]); // peer applied
+    expect(await packetStore()).toEqual({}); // consumed → pruned
+  });
+
+  it("prunes the parked packet on 'keep local' too", async () => {
+    const engine = manualEngine2();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    await engine.resolveConflict((await getState()).pending_conflicts[0].id, "local");
+
+    expect(await localUrls()).toEqual(["https://a.com"]); // peer NOT applied
+    expect(await packetStore()).toEqual({});
+  });
+
+  it("still resolves a conflict queued inline by an older build", async () => {
+    const engine = manualEngine2();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    const legacyPeer = await peerPacket(makeEngine(), "peer1", payload([link("B", "https://b.com")]));
+    await setState({
+      pending_conflicts: [{
+        id: "legacy-1", data_type: "bookmarks", device_id: "peer1",
+        remote_packet: legacyPeer, // inline, the old shape — nothing is parked for it
+        timestamp: new Date().toISOString(), resolved: false,
+      }],
+    });
+
+    await engine.resolveConflict("legacy-1", "remote");
+
+    expect(await localUrls()).toEqual(["https://a.com", "https://b.com"]);
+  });
+
+  it("refuses to silently drop a conflict whose data is gone", async () => {
+    const engine = manualEngine2();
+    await setState({
+      pending_conflicts: [{
+        id: "orphan-1", data_type: "bookmarks", device_id: "peer1",
+        timestamp: new Date().toISOString(), resolved: false,
+      }],
+    });
+
+    await expect(engine.resolveConflict("orphan-1", "remote")).rejects.toThrow(/no longer available/i);
+    // Still pending — it must not look resolved when nothing was applied.
+    expect((await getState()).pending_conflicts).toHaveLength(1);
+  });
+});
+
+describe("SyncEngine.conflictDiff: what a conflict card is about (#35)", () => {
+  function manualEngine3(): SyncEngine {
+    return new SyncEngine({ ...DEFAULT_SETTINGS, device_id: "me", conflict_strategy: "manual" }, () => {});
+  }
+
+  it("lists both sides from the parked packet and applies nothing", async () => {
+    const engine = manualEngine3();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    const id = (await getState()).pending_conflicts[0].id;
+
+    const diff = await engine.conflictDiff(id);
+
+    expect(diff.only_remote).toEqual({ total: 1, sample: [{ title: "B", url: "https://b.com" }] });
+    expect(diff.only_local).toEqual({ total: 1, sample: [{ title: "A", url: "https://a.com" }] });
+    // Looking is not choosing: the card stays, the peer is not applied.
+    expect(await localUrls()).toEqual(["https://a.com"]);
+    expect((await getState()).pending_conflicts.map((c) => c.id)).toEqual([id]);
+  });
+
+  it("compares against this device as it is now, not as it was when the card was queued", async () => {
+    const engine = manualEngine3();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+    await chrome.bookmarks.create({ parentId: "1", title: "B", url: "https://b.com" });
+
+    const diff = await engine.conflictDiff((await getState()).pending_conflicts[0].id);
+
+    expect(diff.only_remote.total).toBe(0);
+    expect(diff.only_local.total).toBe(1);
+  });
+
+  it("says so when the conflict is gone or its data is", async () => {
+    const engine = manualEngine3();
+    await setState({
+      pending_conflicts: [{
+        id: "orphan-1", data_type: "bookmarks", device_id: "peer1",
+        timestamp: new Date().toISOString(), resolved: false,
+      }],
+    });
+
+    await expect(engine.conflictDiff("orphan-1")).rejects.toThrow(/no longer available/i);
+    await expect(engine.conflictDiff("nope")).rejects.toThrow(/no longer pending/i);
+  });
+});
+
+describe("statusAfterSync — a queued conflict must not read as 'Synced'", () => {
+  // sync() hard-coded `problems ? "error" : "success"`, overwriting the "conflict" status
+  // syncType had just set. The popup header said "Synced" and the toolbar showed nothing
+  // while unresolved conflicts waited for a decision.
+  it("reports conflict when one is pending and nothing else went wrong", () => {
+    expect(statusAfterSync(0, 1)).toBe("conflict");
+    expect(statusAfterSync(0, 3)).toBe("conflict");
+  });
+
+  it("reports success only when there is genuinely nothing to act on", () => {
+    expect(statusAfterSync(0, 0)).toBe("success");
+  });
+
+  it("lets an error outrank a conflict — it may mean nothing synced at all", () => {
+    expect(statusAfterSync(1, 0)).toBe("error");
+    expect(statusAfterSync(2, 5)).toBe("error");
+  });
+});
+
+describe("BADGE_TEXT — every status the user must act on is visible on the toolbar", () => {
+  it("gives a conflict its own badge", () => {
+    // This rendered as "" — no badge at all — while BADGE_COLORS.conflict went unused.
+    expect(BADGE_TEXT.conflict).not.toBe("");
+    expect(BADGE_TEXT.conflict).not.toBe(BADGE_TEXT.error);
+  });
+
+  it("keeps the two quiet states quiet", () => {
+    expect(BADGE_TEXT.idle).toBe("");
+    expect(BADGE_TEXT.success).toBe("");
+  });
+
+  it("covers every status, and every colour has matching text", () => {
+    for (const status of Object.keys(BADGE_COLORS) as Array<keyof typeof BADGE_COLORS>) {
+      expect(BADGE_TEXT[status]).toBeDefined();
+    }
+  });
+});
+
+describe("SyncEngine.finishSync — tear-down must not strand its own guards", () => {
+  // The finally block used to start with `await backend.disconnect()`, so a throw from it
+  // skipped everything after: isSyncing stayed on for the rest of the worker's lifetime
+  // (every later sync answering "already running") and the persisted lock sat until its
+  // TTL. No backend's disconnect() can throw today — this is hardening, and the previous
+  // ordering only looked safe by accident.
+  type Finish = { finishSync(backend: IBackend): Promise<void> };
+  const finish = (e: SyncEngine): Finish => e as unknown as Finish;
+
+  class HostileBackend extends FakeBackend {
+    disconnect(): Promise<void> { return Promise.reject(new Error("socket gone")); }
+  }
+
+  it("clears isSyncing and releases the lock even when disconnect throws", async () => {
+    const engine = makeEngine();
+    engine.isSyncing = true;
+    expect(await acquireSyncLock(60_000)).toBe(true);
+
+    await finish(engine).finishSync(new HostileBackend());
+
+    expect(engine.isSyncing).toBe(false);
+    // Released → the next sync can start immediately instead of waiting out the TTL.
+    expect(await acquireSyncLock(60_000)).toBe(true);
+  });
+
+  it("does not let the failure escape into sync()'s caller", async () => {
+    const engine = makeEngine();
+    await expect(finish(engine).finishSync(new HostileBackend())).resolves.toBeUndefined();
+  });
+
+  it("still disconnects normally when nothing is wrong", async () => {
+    const engine = makeEngine();
+    engine.isSyncing = true;
+    let disconnected = false;
+    class Watched extends FakeBackend {
+      disconnect(): Promise<void> { disconnected = true; return Promise.resolve(); }
+    }
+
+    await finish(engine).finishSync(new Watched());
+
+    expect(disconnected).toBe(true);
+    expect(engine.isSyncing).toBe(false);
+  });
+});
+
+describe("SyncEngine.syncType — manual strategy reports encryption disagreements too", () => {
+  // The manual branch never calls applyRemote, and BOTH detectable encryption
+  // disagreements were only checked in there. So a device on `manual` was never told it
+  // had dropped out of the encrypted group, and it queued conflicts for peers whose data
+  // it could not read — offering the user a choice it couldn't honour.
+  const manualPlain = (): SyncEngine =>
+    new SyncEngine({ ...DEFAULT_SETTINGS, device_id: "me", conflict_strategy: "manual" }, () => {});
+  const manualEnc = (pass: string): SyncEngine =>
+    new SyncEngine(
+      { ...DEFAULT_SETTINGS, device_id: "me", conflict_strategy: "manual",
+        encryption_enabled: true, encryption_passphrase: pass },
+      () => {}
+    );
+
+  it("nudges when a peer is encrypted and E2EE is off here — instead of saying nothing", async () => {
+    const engine = manualPlain();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    const encPeer = await priv(manualEnc("group-pass")).buildPacket("bookmarks", payload([link("B", "https://b.com")]));
+    encPeer.device_id = "peer1"; // buildPacket stamps OUR id; the fake would filter it as own
+    backend.files.set("bookmarks_peer1", encPeer);
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(priv(engine).encryptionWarnings.has("peer1")).toBe(true);
+    // No conflict: the user could not have applied that version anyway.
+    expect((await getState()).pending_conflicts).toHaveLength(0);
+    // ...and this device still publishes its own file (the manual-export fix).
+    expect(backend.uploads).toHaveLength(1);
+  });
+
+  it("SILENTLY skips a plaintext peer while E2EE is on here (a stale file must not nag)", async () => {
+    const engine = manualEnc("my-pass");
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(makeEngine(), "peer1", payload([link("B", "https://b.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(priv(engine).encryptionWarnings.size).toBe(0); // no warning, ever
+    expect((await getState()).pending_conflicts).toHaveLength(0); // no useless conflict
+    expect(backend.uploads[backend.uploads.length - 1].encrypted).toBe(true);
+  });
+
+  it("still queues a normal conflict when the encryption forms agree", async () => {
+    // The narrowing must not swallow the case manual exists for.
+    const engine = manualEnc("shared");
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    const peer = await priv(manualEnc("shared")).buildPacket("bookmarks", payload([link("B", "https://b.com")]));
+    peer.device_id = "peer1";
+    backend.files.set("bookmarks_peer1", peer);
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect((await getState()).pending_conflicts.map((c) => c.device_id)).toEqual(["peer1"]);
+    expect(priv(engine).encryptionWarnings.size).toBe(0);
+  });
+});
+
+describe("SyncEngine.syncType — an envelope change forces one re-upload", () => {
+  // The dedup checksum covers the PAYLOAD, so a new field on the envelope is invisible to
+  // it. Adding device_label therefore left every existing file on the backend without one,
+  // permanently, because nothing about the bookmark tree had changed — and the device list
+  // read "Unnamed device" for machines that were perfectly well named. Same class as the
+  // destination bug above, and fixed the same way: fold it into the tag.
+  function engine(): SyncEngine {
+    return new SyncEngine(
+      {
+        ...DEFAULT_SETTINGS,
+        device_id: "me",
+        device_label: "Brave WINX",
+        conflict_strategy: "lww",
+        active_backend: "github",
+        backends: [{ type: "github", label: "GitHub", enabled: true, github: { token: "t", repo: "owner/repo" } }],
+      },
+      () => {}
+    );
+  }
+
+  it("uploads again when the recorded tag came from an older envelope", async () => {
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    const backend = new FakeBackend();
+    await priv(engine()).syncType("bookmarks", backend, DEFAULT_STATE);
+    expect(backend.uploads).toHaveLength(1);
+
+    // Rewrite the stored tag as a previous envelope version would have left it: same
+    // destination, same payload checksum, different envelope.
+    const r = await chrome.storage.local.get(KEYS.UPLOAD_CHECKSUMS);
+    const map = r[KEYS.UPLOAD_CHECKSUMS] as Record<string, string>;
+    map.bookmarks = map.bookmarks.replace(/^env\d+\|/, "env1|");
+    await chrome.storage.local.set({ [KEYS.UPLOAD_CHECKSUMS]: map });
+
+    await priv(engine()).syncType("bookmarks", backend, DEFAULT_STATE);
+    expect(backend.uploads).toHaveLength(2);
+  });
+
+  it("carries the device name on the packet, so peers can name it", async () => {
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    const backend = new FakeBackend();
+
+    await priv(engine()).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect(backend.uploads[0].device_label).toBe("Brave WINX");
+  });
+});
+
+describe("SyncEngine — putting back our own file after it has gone from the folder", () => {
+  function engine(): SyncEngine {
+    return new SyncEngine(
+      {
+        ...DEFAULT_SETTINGS,
+        device_id: "me",
+        device_label: "Helium WINX",
+        conflict_strategy: "lww",
+        active_backend: "github",
+        backends: [{ type: "github", label: "GitHub", enabled: true, github: { token: "t", repo: "owner/repo" } }],
+      },
+      () => {}
+    );
+  }
+
+  /** How many times the log has announced a missing own file. */
+  async function announcements(): Promise<number> {
+    const r = await chrome.storage.local.get(KEYS.AUDIT_LOG);
+    const log = (r[KEYS.AUDIT_LOG] ?? []) as Array<{ detail?: string }>;
+    return log.filter((e) => /no longer on the backend/.test(e.detail ?? "")).length;
+  }
+
+  it("uploads it again, and says so once", async () => {
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    const backend = new FakeBackend();
+    await priv(engine()).syncAllTypes(["bookmarks"], backend, DEFAULT_STATE);
+    expect(backend.uploads).toHaveLength(1);
+    expect(await announcements()).toBe(0);
+
+    // Another device used Forget on us (or the user tidied the folder by hand).
+    backend.blobs.delete("konode_bookmarks_me.json");
+    backend.files.clear();
+    await priv(engine()).syncAllTypes(["bookmarks"], backend, DEFAULT_STATE);
+    expect(backend.uploads).toHaveLength(2); // even though the payload is unchanged
+    expect(await announcements()).toBe(1);
+
+    // And now that it is back, it stops both uploading and talking about it.
+    await priv(engine()).syncAllTypes(["bookmarks"], backend, DEFAULT_STATE);
+    expect(backend.uploads).toHaveLength(2);
+    expect(await announcements()).toBe(1);
+  });
+
+  it("stays silent about a type whose payload is empty, however many syncs run", async () => {
+    // The report: this line repeated once a minute, forever, for `sessions` only. A browser
+    // whose one open tab is the extension page has no syncable session, so isPayloadEmpty
+    // skips the upload — the file can never come back, so a check that clears the checksum
+    // and announces the re-upload up front announces it again on every single cycle. The
+    // audit log is the one place we cannot afford noise, so nothing may be said about an
+    // upload that is not going to happen.
+    await chrome.storage.local.set({ [KEYS.UPLOAD_CHECKSUMS]: { sessions: "env2|github:owner/repo@main/konode|plain:old" } });
+    const backend = new FakeBackend(); // no konode_sessions_me.json in it, and no open tabs
+
+    for (let i = 0; i < 3; i++) await priv(engine()).syncAllTypes(["sessions"], backend, DEFAULT_STATE);
+
+    expect(backend.uploads).toHaveLength(0);
+    expect(await announcements()).toBe(0);
+  });
+});
+
+describe("SyncEngine.syncType — a forgotten device must not linger on the other machines", () => {
+  // Issue #14. "Forget this device" deletes that device's files AND clears the two
+  // device-keyed caches — but only on the machine that clicked it, because those caches are
+  // local. On every other device applyRemote only ever UPSERTED them, so nothing removed an
+  // entry, ever: the forgotten machine went on offering its session to restore and went on
+  // counting its extensions in "missing on this device", with nothing left in the folder to
+  // justify either.
+
+  function session(deviceId: string): SyncSession {
+    return {
+      id: `s-${deviceId}`,
+      device_id: deviceId,
+      savedAt: new Date().toISOString(),
+      label: deviceId,
+      tabs: [{ url: `https://${deviceId}.example/`, pinned: false }],
+    };
+  }
+
+  /** What this device has cached about a peer — the state a Forget elsewhere leaves behind. */
+  async function cacheSessionOf(deviceId: string): Promise<void> {
+    const entry: RemoteSessionEntry = {
+      device_id: deviceId,
+      timestamp: new Date().toISOString(),
+      session: session(deviceId),
+    };
+    await chrome.storage.local.set({ [KEYS.REMOTE_SESSIONS]: { [deviceId]: entry } });
+  }
+
+  /** A peer's sessions file, in the folder and readable — the shape upload() writes. */
+  async function publishSessionOf(
+    engine: SyncEngine, backend: FakeBackend, deviceId: string
+  ): Promise<void> {
+    const packet = await priv(engine).buildPacket("sessions", session(deviceId));
+    packet.device_id = deviceId; // the checksum is over the payload, so it stays valid
+    backend.files.set(`sessions_${deviceId}`, packet);
+    backend.blobs.set(`konode_sessions_${deviceId}.json`, JSON.stringify(packet));
+  }
+
+  async function cachedSessionDevices(): Promise<string[]> {
+    return (await getRemoteSessions()).map((e) => e.device_id).sort();
+  }
+
+  it("drops the cached session of a device whose file has left the folder", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await cacheSessionOf("forgotten");
+    await publishSessionOf(engine, backend, "live"); // a second peer, still syncing
+
+    await priv(engine).syncType("sessions", backend, DEFAULT_STATE);
+
+    // The live peer is folded in as always; the forgotten one is gone from the popup.
+    expect(await cachedSessionDevices()).toEqual(["live"]);
+  });
+
+  it("drops it even when the forgotten device was the only other one", async () => {
+    // Zero peers takes its own branch in syncType, and it is the likeliest case of all:
+    // two devices, you retire one.
+    const engine = makeEngine();
+    const backend = new FakeBackend(); // an empty folder
+    await cacheSessionOf("forgotten");
+
+    await priv(engine).syncType("sessions", backend, DEFAULT_STATE);
+
+    expect(await cachedSessionDevices()).toEqual([]);
+  });
+
+  it("keeps a device whose file is still there but could not be read", async () => {
+    // THE TRAP, and the reason the prune reads the folder listing rather than the packets
+    // downloadAll returned. An unreadable file — HTTP error, corrupt JSON, an encryption
+    // disagreement — is absent from `peers` exactly like a file that is gone. Pruning on
+    // that signal would delete a live device's session over a transient 500, turning a
+    // cosmetic bug into a destructive one.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await cacheSessionOf("unreadable");
+    backend.blobs.set("konode_sessions_unreadable.json", "{ truncated"); // listed, unparseable
+
+    await priv(engine).syncType("sessions", backend, DEFAULT_STATE);
+
+    expect(await cachedSessionDevices()).toEqual(["unreadable"]);
+  });
+
+  it("drops nothing when the folder listing itself fails", async () => {
+    // Not knowing what the folder holds is not evidence that anything left it, and an
+    // emptied popup is the one outcome worth avoiding here.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await cacheSessionOf("maybe-gone");
+    backend.listFiles = () => Promise.reject(new Error("503 Service Unavailable"));
+
+    await priv(engine).syncType("sessions", backend, DEFAULT_STATE);
+
+    expect(await cachedSessionDevices()).toEqual(["maybe-gone"]);
+  });
+
+  it("leaves the extension cache alone when only the sessions file is missing", async () => {
+    // A missing konode_sessions_<id>.json says nothing about that device's extension list,
+    // which is a separate file with a separate cache. Clearing both on this evidence would
+    // be its own version of the same bug.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await cacheSessionOf("partial");
+    await chrome.storage.local.set({
+      [KEYS.REMOTE_EXTENSIONS]: {
+        partial: {
+          device_id: "partial",
+          timestamp: new Date().toISOString(),
+          extensions: [{ id: "ext-1", name: "Kept", version: "1", enabled: true, storeUrl: "" }],
+        },
+      },
+    });
+
+    await priv(engine).syncType("sessions", backend, DEFAULT_STATE);
+
+    expect(await cachedSessionDevices()).toEqual([]);
+    const raw = (await chrome.storage.local.get(KEYS.REMOTE_EXTENSIONS))[KEYS.REMOTE_EXTENSIONS];
+    expect(normalizeRemoteExtensions(raw).map((e) => e.id)).toEqual(["ext-1"]);
+  });
+
+  it("does not list the folder at all when every cached peer arrived", async () => {
+    // The steady state, which is every sync but the rare one: nothing is unexplained, so
+    // there is nothing to ask the folder about and the extra round trip never happens.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    await publishSessionOf(engine, backend, "live");
+    await cacheSessionOf("live");
+    let listings = 0;
+    const realListFiles = backend.listFiles.bind(backend);
+    backend.listFiles = (prefix: string) => { listings++; return realListFiles(prefix); };
+
+    await priv(engine).syncType("sessions", backend, DEFAULT_STATE);
+
+    expect(listings).toBe(0);
+    expect(await cachedSessionDevices()).toEqual(["live"]);
+  });
+});
+
+describe("SyncEngine.syncType: `manual` is about bookmarks and history, not the display caches", () => {
+  // Sessions and extensions are per-device caches keyed by device_id: one entry per peer,
+  // kept side by side, with nothing to choose between. They went through the manual gate
+  // anyway, and that gate skips the import, so on `manual` no peer's session was ever
+  // stored and "missing on this device" never moved, while every sync reported success.
+
+  function manualEngine(): SyncEngine {
+    return new SyncEngine({ ...DEFAULT_SETTINGS, device_id: "me", conflict_strategy: "manual" }, () => {});
+  }
+
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const realManagement = (globalThis as any).chrome.management;
+  afterEach(() => { (globalThis as any).chrome.management = realManagement; });
+
+  /** One extension installed HERE, so the local payload is non-empty and the gate is reached. */
+  function installLocally(id: string): void {
+    (globalThis as any).chrome.management = {
+      getAll: () => Promise.resolve([
+        { id, name: "Local", version: "1.0", enabled: true, type: "extension", installType: "normal" },
+      ]),
+    };
+  }
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+
+  async function peerPacketOf(
+    engine: SyncEngine, dataType: DataType, deviceId: string, payloadValue: unknown
+  ): Promise<SyncPacket> {
+    const packet = await priv(engine).buildPacket(dataType, payloadValue);
+    packet.device_id = deviceId; // the checksum is over the payload, so it stays valid
+    return packet;
+  }
+
+  it("stores a peer's session, and queues no conflict for it", async () => {
+    const engine = manualEngine();
+    const backend = new FakeBackend();
+    await chrome.tabs.create({ url: "https://local.example/" }); // local payload: non-empty
+    const peerSession: SyncSession = {
+      id: "s-peer1", device_id: "peer1", savedAt: new Date().toISOString(), label: "peer1",
+      tabs: [{ url: "https://peer.example/", pinned: false }],
+    };
+    backend.files.set("sessions_peer1", await peerPacketOf(engine, "sessions", "peer1", peerSession));
+
+    await priv(engine).syncType("sessions", backend, DEFAULT_STATE);
+
+    expect((await getRemoteSessions()).map((e) => e.device_id)).toEqual(["peer1"]);
+    expect((await getState()).pending_conflicts).toEqual([]);
+  });
+
+  it("stores a peer's extension list, so \"missing on this device\" can move", async () => {
+    const engine = manualEngine();
+    const backend = new FakeBackend();
+    installLocally("local-ext");
+    backend.files.set(
+      "extensions_peer1",
+      await peerPacketOf(engine, "extensions", "peer1", [
+        { id: "peer-ext", name: "Peer only", version: "2.0", enabled: true, storeUrl: "", type: "extension" },
+      ])
+    );
+
+    await priv(engine).syncType("extensions", backend, DEFAULT_STATE);
+
+    const raw = (await chrome.storage.local.get(KEYS.REMOTE_EXTENSIONS))[KEYS.REMOTE_EXTENSIONS];
+    expect(normalizeRemoteExtensions(raw).map((e) => e.id)).toEqual(["peer-ext"]);
+    expect((await getState()).pending_conflicts).toEqual([]);
+  });
+
+  it("still queues the bookmark conflict it is there for", async () => {
+    // The gate narrows `manual`; it must not switch it off.
+    const engine = manualEngine();
+    const backend = new FakeBackend();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com" });
+    backend.files.set("bookmarks_peer1", await peerPacket(engine, "peer1", payload([link("B", "https://b.com")])));
+
+    await priv(engine).syncType("bookmarks", backend, DEFAULT_STATE);
+
+    expect((await getState()).pending_conflicts.map((c) => c.device_id)).toEqual(["peer1"]);
+  });
+});
+
+describe("explainSyncFailure: a request that never left the browser", () => {
+  // Reported from Firefox, where every host toggle sits in about:addons under the data
+  // type ones. With the WebDAV host revoked, the popup said "NetworkError when attempting
+  // to fetch resource" and nothing else, while the History and Extensions rows on the same
+  // screen both said their permission was gone.
+  const webdav = {
+    type: "webdav" as const, label: "Koofr", enabled: true,
+    webdav: { url: "https://app.koofr.net/dav/Koofr", username: "u", password: "p" },
+  };
+
+  function permissionsHeld(held: boolean) {
+    (chrome as unknown as Record<string, unknown>).permissions = {
+      contains: () => Promise.resolve(held),
+      request: () => Promise.resolve(held),
+    };
+  }
+
+  it("names the host and the reason when the origin is not held", async () => {
+    permissionsHeld(false);
+    const msg = await explainSyncFailure(new TypeError("NetworkError when attempting to fetch resource"), webdav);
+
+    expect(msg).toContain("app.koofr.net");
+    expect(msg).toContain("permission");
+    // The original is kept: it is what gets pasted into a bug report.
+    expect(msg).toContain("NetworkError");
+  });
+
+  it("begins the way Settings recognises, so it adds no second piece of advice", async () => {
+    // The device list and the restore points followed this with "Check the connection in
+    // Storage and reopen this tab", the same instruction twice in two different voices.
+    // Settings leaves that line out for a message starting with the shared prefix, so the
+    // two only work together while this holds.
+    permissionsHeld(false);
+    const lost = await explainSyncFailure(new TypeError("NetworkError when attempting to fetch resource"), webdav);
+    expect(lost.startsWith(PERMISSION_LOST_PREFIX)).toBe(true);
+
+    permissionsHeld(true);
+    const network = await explainSyncFailure(new TypeError("NetworkError when attempting to fetch resource"), webdav);
+    expect(network.startsWith(PERMISSION_LOST_PREFIX)).toBe(false);
+  });
+
+  it("leaves the message alone when the permission IS held", async () => {
+    // Then the network really is the problem, and blaming a permission would send the user
+    // to the wrong screen.
+    permissionsHeld(true);
+    const msg = await explainSyncFailure(new TypeError("NetworkError when attempting to fetch resource"), webdav);
+
+    expect(msg).toBe("NetworkError when attempting to fetch resource");
+  });
+
+  it("leaves an HTTP failure alone, permission or not", async () => {
+    // A status code means the request DID leave, so the host permission is not the story.
+    permissionsHeld(false);
+    const msg = await explainSyncFailure(new HttpError(401, "WebDAV PUT failed: 401"), webdav);
+
+    expect(msg).toBe("WebDAV PUT failed: 401");
+  });
+
+  it("turns a 429 into the advice to raise the sync interval, naming the host", async () => {
+    permissionsHeld(true);
+    const msg = await explainSyncFailure(new HttpError(429, "WebDAV PUT failed: 429"), webdav);
+
+    // Cure first: the popup shows two lines of this.
+    expect(msg.startsWith("Too many requests: app.koofr.net")).toBe(true);
+    expect(msg).toContain("Sync interval");
+    expect(msg).toContain("HTTP 429");
+  });
+
+  it("knows which origins each backend needs", () => {
+    expect(backendOrigins(webdav)).toEqual(["https://app.koofr.net/*"]);
+    expect(backendOrigins({ type: "gdrive", label: "Google Drive", enabled: true })).toContain("https://www.googleapis.com/*");
+    expect(backendOrigins({ type: "github", label: "GitHub", enabled: true })).toEqual(["https://api.github.com/*"]);
+    expect(backendOrigins(undefined)).toEqual([]);
+  });
+});
+
+describe("conflictsThatCanExist: a leftover conflict about a peer's tab list", () => {
+  // An older build queued conflicts for sessions and extensions too, and after the gate
+  // narrowed nothing re-queues or clears them: the banner would ask forever which of two
+  // devices' open tabs to keep. sync() drops them on the first run after the upgrade.
+  const conflict = (data_type: DataType, id: string): ConflictItem => ({
+    id,
+    data_type,
+    device_id: "peer1",
+    timestamp: "2026-08-26T10:00:00.000Z",
+    resolved: false,
+  });
+
+  it("keeps bookmarks and history, drops sessions and extensions", () => {
+    const kept = conflictsThatCanExist([
+      conflict("bookmarks", "a"),
+      conflict("sessions", "b"),
+      conflict("history", "c"),
+      conflict("extensions", "d"),
+    ]);
+
+    expect(kept.map((c) => c.id)).toEqual(["a", "c"]);
+  });
+
+  it("leaves an ordinary list alone", () => {
+    const list = [conflict("bookmarks", "a"), conflict("history", "c")];
+    expect(conflictsThatCanExist(list)).toEqual(list);
+  });
+
+  // Switching the strategy away from Manual without answering the cards first: reported
+  // from a device on 2026-08-28, where four of them stayed on screen after the switch.
+  // The sync that follows merges those peers itself, so the cards are asking about
+  // something already decided, and nothing else would ever clear them.
+  it("drops every card once the strategy is no longer manual", () => {
+    const list = [conflict("bookmarks", "a"), conflict("history", "c")];
+    expect(conflictsStillOpen(list, "lww")).toEqual([]);
+    expect(conflictsStillOpen(list, "prefer-local")).toEqual([]);
+    expect(conflictsStillOpen(list, "prefer-remote")).toEqual([]);
+  });
+
+  it("keeps the answerable ones while manual is still the strategy", () => {
+    const list = [conflict("bookmarks", "a"), conflict("sessions", "b"), conflict("history", "c")];
+    expect(conflictsStillOpen(list, "manual").map((c) => c.id)).toEqual(["a", "c"]);
+  });
+});
+
+describe("SyncEngine.sync — a failure while setting up must give the lock back", () => {
+  // `finishSync` hardened the other end of this: a throw from disconnect() used to leave
+  // isSyncing on for the worker's whole lifetime, every later sync answering "already
+  // running", and the persisted lock sitting there until its TTL. The same hole was open
+  // at the start, because the setup between acquireSyncLock and the try block awaited
+  // storage, and only the try has the finally that releases the lock.
+
+  function configured(): SyncEngine {
+    return new SyncEngine(
+      {
+        ...DEFAULT_SETTINGS,
+        device_id: "me",
+        active_backend: "github",
+        backends: [{ type: "github", label: "GitHub", enabled: true, github: { token: "t", repo: "o/r" } }],
+      },
+      () => {}
+    );
+  }
+
+  /** Make one storage key's write fail, the way a quota or a dead worker would. */
+  function failWritesTo(key: string): () => void {
+    const store = chrome.storage.local as unknown as { set: (o: Record<string, unknown>) => Promise<void> };
+    const real = store.set.bind(store);
+    store.set = async (o) => {
+      if (key in o) throw new Error("storage write failed");
+      return real(o);
+    };
+    return () => { store.set = real; };
+  }
+
+  it("leaves nothing holding the lock when the state write fails", async () => {
+    const restore = failWritesTo(KEYS.STATE);
+    const engine = configured();
+    try {
+      await engine.sync().catch(() => { /* the outcome is not what this test is about */ });
+    } finally {
+      restore();
+    }
+
+    expect(engine.isSyncing).toBe(false);
+    // The real proof: the lock is free, so the NEXT sync is not turned away at the door
+    // for the two minutes of its TTL.
+    expect(await acquireSyncLock(60_000)).toBe(true);
+  });
+});
+
+describe("SyncEngine.syncType — the payload is rebuilt only where the merge can change it", () => {
+  // `syncType` reads the local payload twice: once before the fold, to decide the flow, and
+  // once after it, to publish what the fold produced. Bookmarks and history need that
+  // second read and the merge tests above prove it ("merges a peer's bookmarks into local
+  // and uploads the merged result" fails without it). Sessions and extensions do not:
+  // applyRemote files the peer's copy in a device-keyed cache for the popup, nothing local
+  // moves, and the rebuild spent another management.getAll() to produce a byte-identical
+  // payload. Audible on a device with `management` revoked, where the "extension list isn't
+  // published this sync" warning arrived TWICE per cycle and filled the 200-entry Activity
+  // log in about 100 minutes.
+
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const realManagement = (globalThis as any).chrome.management;
+  afterEach(() => { (globalThis as any).chrome.management = realManagement; });
+
+  /** One extension installed here, counting how often the engine asks for the list. */
+  function countingManagement(): () => number {
+    let calls = 0;
+    (globalThis as any).chrome.management = {
+      getAll: () => {
+        calls += 1;
+        return Promise.resolve([
+          { id: "local-ext", name: "Local", version: "1.0", enabled: true, type: "extension", installType: "normal" },
+        ]);
+      },
+    };
+    return () => calls;
+  }
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+
+  it("reads the extension list ONCE per sync, with a peer to fold in", async () => {
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    const packet = await priv(engine).buildPacket("extensions", [
+      { id: "peer-ext", name: "Peer only", version: "2.0", enabled: true, storeUrl: "", type: "extension" },
+    ]);
+    packet.device_id = "peer1";
+    backend.files.set("extensions_peer1", packet);
+    const calls = countingManagement();
+
+    await priv(engine).syncType("extensions", backend, DEFAULT_STATE);
+
+    expect(calls()).toBe(1);
+    // Not by skipping the work: the peer is still folded into the display cache, and this
+    // device still published its own list.
+    const raw = (await chrome.storage.local.get(KEYS.REMOTE_EXTENSIONS))[KEYS.REMOTE_EXTENSIONS];
+    expect(normalizeRemoteExtensions(raw).map((e) => e.id)).toEqual(["peer-ext"]);
+    expect(backend.uploads.map((u) => u.device_id)).toEqual(["me"]);
+  });
+
+  it("publishes the same list the single read produced", async () => {
+    // The reused payload has to be the one that gets uploaded, not an empty stand-in.
+    const engine = makeEngine();
+    const backend = new FakeBackend();
+    const packet = await priv(engine).buildPacket("extensions", [
+      { id: "peer-ext", name: "Peer only", version: "2.0", enabled: true, storeUrl: "", type: "extension" },
+    ]);
+    packet.device_id = "peer1";
+    backend.files.set("extensions_peer1", packet);
+    countingManagement();
+
+    await priv(engine).syncType("extensions", backend, DEFAULT_STATE);
+
+    const sent = JSON.parse(backend.uploads[backend.uploads.length - 1].payload) as Array<{ id: string }>;
+    expect(sent.map((e) => e.id)).toEqual(["local-ext"]);
+  });
+});
+

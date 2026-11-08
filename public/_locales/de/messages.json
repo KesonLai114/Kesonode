@@ -1,0 +1,1637 @@
+{
+  "locale_bcp47": {
+    "message": "de"
+  },
+  "extension_name": {
+    "message": "Kesonode | Privater Lesezeichen- und Tab-Sync"
+  },
+  "extension_description": {
+    "message": "Datenschutzfreundliche Browser-Synchronisierung in deinen eigenen Speicher: Google Drive, WebDAV, GitHub."
+  },
+  "datatype_bookmarks": {
+    "message": "Lesezeichen"
+  },
+  "datatype_history": {
+    "message": "Verlauf"
+  },
+  "datatype_sessions": {
+    "message": "Tabs"
+  },
+  "datatype_extensions": {
+    "message": "Erweiterungen"
+  },
+  "status_idle": {
+    "message": "Bereit"
+  },
+  "status_syncing": {
+    "message": "Synchronisiere…"
+  },
+  "status_success": {
+    "message": "Synchronisiert"
+  },
+  "status_error": {
+    "message": "Fehler"
+  },
+  "status_conflict": {
+    "message": "Konflikt"
+  },
+  "stream_off": {
+    "message": "aus"
+  },
+  "stream_syncing": {
+    "message": "synchronisiert…"
+  },
+  "stream_pending": {
+    "message": "wartet"
+  },
+  "stream_never": {
+    "message": "noch nicht synchronisiert"
+  },
+  "stream_stale": {
+    "message": "letzte Synchronisierung fehlgeschlagen"
+  },
+  "stream_synced": {
+    "message": "synchronisiert"
+  },
+  "popup_settings_aria": {
+    "message": "Einstellungen"
+  },
+  "popup_sync_now": {
+    "message": "Jetzt synchronisieren"
+  },
+  "popup_load_error": {
+    "message": "Kesonode war nicht erreichbar. Zum erneuten Versuch klicken."
+  },
+  "popup_recovery_notice": {
+    "message": "Ein ungewöhnlicher Löschvorgang ($COUNT$ Lesezeichen) wurde verhindert und ein Wiederherstellungspunkt gespeichert. Übernimm ihn oder behalte sie unter Einstellungen → Aktivität.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
+  "popup_no_backend": {
+    "message": "Kein Speicher eingerichtet"
+  },
+  "popup_setup_title": {
+    "message": "Einrichtung von Kesonode abschließen"
+  },
+  "popup_setup_body": {
+    "message": "Wähle, wo deine Daten gespeichert werden. Bis dahin wird nichts synchronisiert und nichts hochgeladen."
+  },
+  "popup_setup_cta": {
+    "message": "Einrichtung starten"
+  },
+  "popup_keep_local": {
+    "message": "Lokale behalten"
+  },
+  "popup_use_remote": {
+    "message": "Entfernte übernehmen"
+  },
+  "popup_conflict_resolve": {
+    "message": "Auflösen"
+  },
+  "popup_active_streams": {
+    "message": "Aktive Datenströme"
+  },
+  "popup_missing_extensions_one": {
+    "message": "$COUNT$ fehlende Erweiterung",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "popup_missing_extensions_other": {
+    "message": "$COUNT$ fehlende Erweiterungen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "7"
+      }
+    }
+  },
+  "popup_open_all": {
+    "message": "Alle öffnen"
+  },
+  "popup_sessions_head": {
+    "message": "Tabs anderer Geräte"
+  },
+  "popup_unknown_device": {
+    "message": "Unbekanntes Gerät"
+  },
+  "popup_tabs_one": {
+    "message": "$COUNT$ Tab",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "popup_tabs_other": {
+    "message": "$COUNT$ Tabs",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "23"
+      }
+    }
+  },
+  "popup_restore": {
+    "message": "Wiederherstellen"
+  },
+  "popup_rate_body": {
+    "message": "Kesonode synchronisiert deine Geräte jetzt schon eine Weile. Wenn es für dich funktioniert, hilft eine Bewertung im Store anderen, es zu finden."
+  },
+  "popup_rate_yes": {
+    "message": "Bewerten"
+  },
+  "popup_rate_no": {
+    "message": "Nein, danke"
+  },
+  "popup_restore_confirm_one": {
+    "message": "$COUNT$ Tab öffnen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "popup_restore_confirm_other": {
+    "message": "$COUNT$ Tabs öffnen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "142"
+      }
+    }
+  },
+  "popup_tabs_open_here_one": {
+    "message": "$COUNT$ hier offen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "popup_tabs_open_here_other": {
+    "message": "$COUNT$ hier offen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "10"
+      }
+    }
+  },
+  "popup_restore_all_open": {
+    "message": "Alle offen"
+  },
+  "popup_backend_label": {
+    "message": "Speicher"
+  },
+  "popup_backend_none": {
+    "message": "Keiner"
+  },
+  "popup_device_label": {
+    "message": "Gerät"
+  },
+  "popup_configure": {
+    "message": "Einrichten →"
+  },
+  "popup_activity_log": {
+    "message": "Aktivitätsprotokoll →"
+  },
+  "common_back": {
+    "message": "Zurück"
+  },
+  "common_continue": {
+    "message": "Weiter"
+  },
+  "common_open_settings": {
+    "message": "Einstellungen öffnen"
+  },
+  "common_close": {
+    "message": "Schließen"
+  },
+  "common_show": {
+    "message": "Anzeigen"
+  },
+  "common_hide": {
+    "message": "Verbergen"
+  },
+  "common_e2ee": {
+    "message": "Ende-zu-Ende-Verschlüsselung"
+  },
+  "common_generate_key": {
+    "message": "Starken Schlüssel erzeugen"
+  },
+  "provider_gdrive_desc": {
+    "message": "Synchronisiert direkt in dein eigenes Google Drive. Dank OAuth wird das Zugriffstoken nur auf diesem Gerät gespeichert."
+  },
+  "provider_nextcloud_desc": {
+    "message": "Dein eigener Nextcloud- oder ownCloud-Server."
+  },
+  "provider_nextcloud_note": {
+    "message": "Gib nur den Server-Host ein und verwende ein App-Passwort (Einstellungen → Sicherheit)."
+  },
+  "provider_pcloud_desc": {
+    "message": "pCloud-Speicher. Erfordert einen kostenpflichtigen pCloud-Tarif."
+  },
+  "provider_pcloud_note": {
+    "message": "Wähle die Region $REGION$, wenn dort dein pCloud-Konto liegt.",
+    "placeholders": {
+      "region": {
+        "content": "$1",
+        "example": "EU"
+      }
+    }
+  },
+  "provider_koofr_desc": {
+    "message": "Koofr-Cloud-Speicher."
+  },
+  "provider_koofr_note": {
+    "message": "Verwende deine Koofr-E-Mail-Adresse als Benutzernamen und ein Koofr-App-Passwort als Passwort."
+  },
+  "provider_fastmail_desc": {
+    "message": "Fastmail-Dateispeicher."
+  },
+  "provider_fastmail_note": {
+    "message": "Verwende deine vollständige Fastmail-Adresse als Benutzernamen und ein App-Passwort mit Files-(WebDAV-)Zugriff."
+  },
+  "provider_jianguoyun_desc": {
+    "message": "Nutstore-Cloud-Speicher, in Festlandchina weit verbreitet."
+  },
+  "provider_jianguoyun_note": {
+    "message": "Verwende deine Nutstore-E-Mail-Adresse als Benutzernamen und ein Anwendungspasswort für Drittanbieter als Passwort. Erhöhe bei einem kostenlosen Konto ab drei Geräten das Synchronisierungsintervall auf mindestens 120 Sekunden: Nutstore erlaubt 600 WebDAV-Anfragen pro 30 Minuten."
+  },
+  "provider_github_desc": {
+    "message": "Deine Sync-Daten liegen in einem privaten GitHub-Repository, auf das Kesonode mit einem Personal Access Token zugreift."
+  },
+  "provider_webdav_desc": {
+    "message": "Synology, kDrive oder ein beliebiger anderer WebDAV-Server."
+  },
+  "provider_syncing_to": {
+    "message": "Synchronisierung nach $URL$.",
+    "placeholders": {
+      "url": {
+        "example": "https://app.koofr.net/dav/Koofr",
+        "content": "$1"
+      }
+    }
+  },
+  "onb_welcome_title": {
+    "message": "Willkommen bei Kesonode"
+  },
+  "onb_welcome_subtitle": {
+    "message": "Browser-Synchronisierung, bei der deine Daten wirklich dir gehören. Deine Lesezeichen, Tabs und Erweiterungen gehen direkt in deinen eigenen Speicher. Kein Server dazwischen."
+  },
+  "onb_feature_storage": {
+    "message": "Deine Daten bleiben immer in deinem eigenen Speicher."
+  },
+  "onb_feature_instant": {
+    "message": "Synchronisiert jede Änderung sofort."
+  },
+  "onb_feature_browsers": {
+    "message": "Funktioniert in Chromium- und Firefox-basierten Browsern."
+  },
+  "onb_feature_providers": {
+    "message": "Du entscheidest, wo deine Daten liegen."
+  },
+  "onb_get_started": {
+    "message": "Los geht's"
+  },
+  "onb_backend_title": {
+    "message": "Wähle deinen Speicher"
+  },
+  "onb_backend_subtitle": {
+    "message": "Wo soll Kesonode deine Daten speichern?"
+  },
+  "onb_use_provider": {
+    "message": "$PROVIDER$ verwenden",
+    "placeholders": {
+      "provider": {
+        "example": "Koofr",
+        "content": "$1"
+      }
+    }
+  },
+  "opt_use_provider": {
+    "message": "$PROVIDER$ verwenden",
+    "placeholders": {
+      "provider": {
+        "example": "Koofr",
+        "content": "$1"
+      }
+    }
+  },
+  "opt_provider_active": {
+    "message": "aktiv"
+  },
+  "opt_drive_disconnect": {
+    "message": "Trennen"
+  },
+  "opt_drive_unavailable": {
+    "message": "Die Google-Anmeldung ist in diesem Browser nicht verfügbar. Wähle eine andere Option."
+  },
+  "provider_webdav_other": {
+    "message": "WebDAV (andere)"
+  },
+  "onb_drive_unavailable": {
+    "message": "Die Google-Anmeldung ist in diesem Browser nicht verfügbar. Wähle eine andere Option."
+  },
+  "onb_connecting": {
+    "message": "Verbinde…"
+  },
+  "onb_sign_in_google": {
+    "message": "Mit Google anmelden"
+  },
+  "onb_signin_failed": {
+    "message": "Anmeldung fehlgeschlagen."
+  },
+  "onb_webdav_user_placeholder": {
+    "message": "Benutzername"
+  },
+  "onb_webdav_pass_placeholder": {
+    "message": "Passwort / App-Token"
+  },
+  "onb_verifying": {
+    "message": "Prüfe…"
+  },
+  "onb_github_401": {
+    "message": "GitHub hat dieses Token abgelehnt. Prüfe, ob es abgelaufen ist und ob du es vollständig eingefügt hast."
+  },
+  "onb_github_http": {
+    "message": "GitHub konnte das Token nicht prüfen (HTTP $STATUS$).",
+    "placeholders": {
+      "status": {
+        "example": "500",
+        "content": "$1"
+      }
+    }
+  },
+  "onb_github_unreachable": {
+    "message": "GitHub war nicht erreichbar. Prüfe deine Verbindung und versuche es erneut."
+  },
+  "onb_github_branch_placeholder": {
+    "message": "Branch (Standard: main)"
+  },
+  "onb_github_token_link": {
+    "message": "Fine-grained Token erstellen (nur dieses Repository) →"
+  },
+  "onb_data_title": {
+    "message": "Was soll synchronisiert werden?"
+  },
+  "onb_data_subtitle": {
+    "message": "Du kannst das jederzeit in den Einstellungen ändern."
+  },
+  "onb_device_name_label": {
+    "message": "Diesem Gerät einen Namen geben"
+  },
+  "onb_device_name_desc": {
+    "message": "So erscheint es in der Tab-Liste deiner anderen Geräte."
+  },
+  "onb_device_name_placeholder": {
+    "message": "Arbeits-Laptop"
+  },
+  "onb_encrypt_title": {
+    "message": "Deine Daten verschlüsseln?"
+  },
+  "onb_encrypt_subtitle": {
+    "message": "Wenn du die Verschlüsselung aktivierst, werden deine Daten noch auf diesem Gerät verschlüsselt, bevor sie hochgeladen werden. Nicht einmal dein Speicheranbieter kann den Inhalt lesen."
+  },
+  "onb_e2ee_desc": {
+    "message": "AES-256-GCM. Empfohlen."
+  },
+  "onb_pass_placeholder": {
+    "message": "Wähle eine Passphrase oder erzeuge einen Verschlüsselungsschlüssel"
+  },
+  "onb_pass_missing": {
+    "message": "Gib eine Passphrase ein oder erzeuge einen Schlüssel."
+  },
+  "onb_pass_too_short": {
+    "message": "Mindestens $MIN$ Zeichen. Synchronisierte Daten lassen sich offline angreifen, kurze Passphrasen sind also erratbar.",
+    "placeholders": {
+      "min": {
+        "example": "12",
+        "content": "$1"
+      }
+    }
+  },
+  "onb_pass_confirm_placeholder": {
+    "message": "Passphrase bestätigen"
+  },
+  "onb_pass_confirm_missing": {
+    "message": "Bestätige deine Passphrase."
+  },
+  "onb_pass_mismatch": {
+    "message": "Die Passphrasen stimmen noch nicht überein."
+  },
+  "onb_save_passphrase_lead": {
+    "message": "Speichere diese Passphrase."
+  },
+  "onb_save_passphrase_rest": {
+    "message": "Sie verlässt dieses Gerät nie und kann nicht wiederhergestellt werden, wenn sie verloren geht. Auf jedem Gerät musst du dieselbe Passphrase eingeben. Später kannst du sie in den Einstellungen kopieren."
+  },
+  "onb_plaintext_note": {
+    "message": "Ohne Verschlüsselung landen deine Daten $WORD$ in deinem eigenen Speicher. Das kann die richtige Wahl sein, wenn du deinem Speicheranbieter voll vertraust. Du kannst die Verschlüsselung später jederzeit in den Einstellungen aktivieren.",
+    "placeholders": {
+      "word": {
+        "example": "unencrypted",
+        "content": "$1"
+      }
+    }
+  },
+  "onb_plaintext_word": {
+    "message": "in lesbarer Form"
+  },
+  "onb_setting_up": {
+    "message": "Wird eingerichtet…"
+  },
+  "onb_finish_sync": {
+    "message": "Fertigstellen & synchronisieren"
+  },
+  "onb_waiting_permission": {
+    "message": "Warte auf Berechtigung…"
+  },
+  "onb_perm_prompt_slow": {
+    "message": "Keine Berechtigungsabfrage zu sehen? Manche Browser zeigen keine an. Erteile Kesonode die Berechtigungen in den Erweiterungseinstellungen deines Browsers und tippe erneut auf „Fertigstellen & synchronisieren“, oder gehe zurück und schalte die Datentypen aus, die sie brauchen."
+  },
+  "onb_err_bad_webdav_url": {
+    "message": "Diese WebDAV-Adresse sieht nicht wie eine gültige URL aus."
+  },
+  "onb_err_perms_webdav": {
+    "message": "Kesonode braucht die Berechtigung für deinen WebDAV-Server und die gewählten Datentypen. Bitte erteile sie, um fortzufahren."
+  },
+  "onb_err_perms_no_prompt": {
+    "message": "Dieser Browser kann keine Berechtigungsdialoge anzeigen, deshalb konnte Kesonode den benötigten Zugriff nicht anfragen. Erteile ihn auf der Berechtigungsseite von Kesonode in den Erweiterungseinstellungen deines Browsers und drücke dann erneut auf Fertigstellen."
+  },
+  "onb_err_perms_types": {
+    "message": "Einige Berechtigungen wurden abgelehnt. Erteile sie oder deaktiviere diese Datentypen, um fortzufahren."
+  },
+  "onb_err_read_settings": {
+    "message": "Die aktuellen Einstellungen konnten nicht gelesen werden. Versuche es erneut."
+  },
+  "onb_err_save": {
+    "message": "Die Einrichtung konnte nicht gespeichert werden: $ERROR$",
+    "placeholders": {
+      "error": {
+        "example": "HTTP 403",
+        "content": "$1"
+      }
+    }
+  },
+  "onb_sync_title": {
+    "message": "Deine Daten werden synchronisiert…"
+  },
+  "onb_sync_subtitle": {
+    "message": "Kesonode führt die erste Synchronisierung aus. Das läuft auch im Hintergrund, du musst hier nicht warten."
+  },
+  "onb_sync_error_title": {
+    "message": "Die erste Synchronisierung konnte nicht abgeschlossen werden"
+  },
+  "onb_sync_error_subtitle": {
+    "message": "Deine Einstellungen sind gespeichert. Öffne die Einstellungen, um das zu beheben, oder schließe ab und lass Kesonode es im Hintergrund erneut versuchen."
+  },
+  "onb_sync_timeout": {
+    "message": "Das dauert länger als üblich. Ein großer Verlauf kann das verursachen. Die Synchronisierung läuft im Hintergrund weiter, du kannst jetzt abschließen."
+  },
+  "onb_finish": {
+    "message": "Fertigstellen"
+  },
+  "onb_finish_anyway": {
+    "message": "Trotzdem fertigstellen"
+  },
+  "onb_done_title": {
+    "message": "Alles bereit!"
+  },
+  "onb_done_subtitle": {
+    "message": "Kesonode synchronisiert deine Browser-Daten jetzt nach $BACKEND$. Die erste Synchronisierung läuft bereits im Hintergrund.",
+    "placeholders": {
+      "backend": {
+        "example": "Google Drive",
+        "content": "$1"
+      }
+    }
+  },
+  "onb_done_backend": {
+    "message": "Speicher erfolgreich verbunden"
+  },
+  "onb_done_autosync": {
+    "message": "Die Synchronisierung läuft automatisch im Hintergrund"
+  },
+  "onb_done_adjust": {
+    "message": "Du kannst die Einstellungen jederzeit ändern"
+  },
+  "datatype_bookmarks_desc": {
+    "message": "Der vollständige Lesezeichen-Baum mit Ordnern und Reihenfolge."
+  },
+  "datatype_sessions_desc": {
+    "message": "Benannte Tab-Sitzungen, die du überall wiederherstellen kannst."
+  },
+  "datatype_history_desc": {
+    "message": "Browser-Verlauf, begrenzt durch die Tage-Einstellung."
+  },
+  "datatype_extensions_desc": {
+    "message": "Liste der Erweiterungen, fehlende mit Installationslinks."
+  },
+  "opt_secret_copy": {
+    "message": "Kopieren"
+  },
+  "opt_secret_copied": {
+    "message": "Kopiert"
+  },
+  "opt_secret_replace": {
+    "message": "Ersetzen"
+  },
+  "opt_webdav_user_label": {
+    "message": "Benutzername"
+  },
+  "opt_webdav_user_placeholder": {
+    "message": "benutzername"
+  },
+  "opt_webdav_pass_label": {
+    "message": "Passwort / App-Token"
+  },
+  "opt_webdav_http_warn": {
+    "message": "Das ist eine $SCHEME$-Adresse, dein Passwort würde also unverschlüsselt übertragen.",
+    "placeholders": {
+      "scheme": {
+        "content": "$1",
+        "example": "http://"
+      }
+    }
+  },
+  "opt_webdav_http_use": {
+    "message": "Verwende $SCHEME$.",
+    "placeholders": {
+      "scheme": {
+        "content": "$1",
+        "example": "https://"
+      }
+    }
+  },
+  "opt_snap_saved": {
+    "message": "Wiederherstellungspunkt gespeichert."
+  },
+  "opt_snap_restored_one": {
+    "message": "$COUNT$ Lesezeichen wiederhergestellt. Wird mit deinen anderen Geräten synchronisiert…",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "opt_snap_restored_other": {
+    "message": "$COUNT$ Lesezeichen wiederhergestellt. Wird mit deinen anderen Geräten synchronisiert…",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
+  "opt_snap_deleted": {
+    "message": "Wiederherstellungspunkt gelöscht."
+  },
+  "opt_err_perms_no_prompt": {
+    "message": "Dieser Browser kann keine Berechtigungsdialoge anzeigen, daher konnte Kesonode nicht um Zugriff auf deinen WebDAV-Server bitten. Erteile ihn auf der Berechtigungsseite von Kesonode in den Erweiterungseinstellungen deines Browsers und versuche es dann erneut."
+  },
+  "opt_err_perms_bad_url": {
+    "message": "Kesonode hat keine verwendbare WebDAV-Adresse, für die es Zugriff anfragen könnte. Prüfe die Server-URL oben."
+  },
+  "opt_err_perms_denied": {
+    "message": "Die Berechtigung für den Zugriff auf den WebDAV-Server wurde nicht erteilt."
+  },
+  "opt_err_pass_too_short": {
+    "message": "Verwende mindestens $MIN$ Zeichen. Synchronisierte Daten lassen sich offline angreifen, eine kurze Passphrase ist also erratbar. Länger ist besser, oder generiere einen Schlüssel.",
+    "placeholders": {
+      "min": {
+        "content": "$1",
+        "example": "12"
+      }
+    }
+  },
+  "opt_err_pass_mismatch": {
+    "message": "Die beiden Passphrasen stimmen nicht überein. Gib sie zur Bestätigung erneut ein, bevor du speicherst."
+  },
+  "opt_saving": {
+    "message": "Wird gespeichert…"
+  },
+  "opt_saved": {
+    "message": "Gespeichert"
+  },
+  "opt_save_changes": {
+    "message": "Änderungen speichern"
+  },
+  "opt_nav_backend": {
+    "message": "Speicher"
+  },
+  "opt_nav_data": {
+    "message": "Datentypen"
+  },
+  "opt_nav_device": {
+    "message": "Gerät"
+  },
+  "opt_nav_activity": {
+    "message": "Aktivität"
+  },
+  "opt_nav_advanced": {
+    "message": "Erweitert"
+  },
+  "opt_setup_title": {
+    "message": "Kesonode-Einrichtung abschließen"
+  },
+  "opt_setup_step_storage": {
+    "message": "Wähle, wo deine Daten gespeichert werden"
+  },
+  "opt_setup_step_types": {
+    "message": "Wähle aus, was synchronisiert wird"
+  },
+  "opt_backend_head": {
+    "message": "Speicher"
+  },
+  "opt_backend_head_sub": {
+    "message": "Wähle, wo deine Synchronisierungsdaten gespeichert werden. Deine Daten berühren unsere Server nie."
+  },
+  "opt_gdrive_connect_failed": {
+    "message": "Verbindung fehlgeschlagen"
+  },
+  "opt_gdrive_scope_hint": {
+    "message": "Nur der Bereich $SCOPE$, Kesonode kann also ausschließlich auf selbst erstellte Dateien zugreifen.",
+    "placeholders": {
+      "scope": {
+        "content": "$1",
+        "example": "drive.file"
+      }
+    }
+  },
+  "opt_drive_folder_label": {
+    "message": "Drive-Ordner-ID"
+  },
+  "opt_optional": {
+    "message": "(optional)"
+  },
+  "opt_drive_folder_placeholder": {
+    "message": "Leer lassen, dann wird automatisch ein Ordner „Konode“ erstellt"
+  },
+  "opt_region_label": {
+    "message": "Region"
+  },
+  "opt_webdav_host_label": {
+    "message": "Server-Host"
+  },
+  "opt_webdav_url_label": {
+    "message": "Server-URL"
+  },
+  "opt_github_token_label": {
+    "message": "Persönlicher Zugriffstoken"
+  },
+  "opt_github_repo_label": {
+    "message": "Repository"
+  },
+  "opt_github_branch_label": {
+    "message": "Branch"
+  },
+  "opt_stat_never": {
+    "message": "Nie"
+  },
+  "opt_setup_sub": {
+    "message": "Kesonode synchronisiert deinen Browser mit einem Speicher, der dir gehört. Es gibt keinen Kesonode-Server. Zwei kurze Schritte und du bist fertig. (Falls der Einrichtungsassistent in deinem Browser nie geöffnet wurde, kannst du alles direkt hier erledigen.)"
+  },
+  "opt_data_head": {
+    "message": "Datentypen"
+  },
+  "opt_data_head_sub": {
+    "message": "Wähle aus, was zwischen deinen Geräten synchronisiert wird."
+  },
+  "opt_data_section": {
+    "message": "Zu synchronisierende Daten"
+  },
+  "opt_data_permission_lost": {
+    "message": "Kesonode hat die dafür nötige Berechtigung nicht mehr, deshalb wird nicht synchronisiert. Schalte es aus und wieder ein, um sie neu zu erteilen."
+  },
+  "opt_tab_groups_label": {
+    "message": "Namen und Farben der Tabgruppen"
+  },
+  "opt_tab_groups_desc": {
+    "message": "Geöffnete Tabs kommen in jedem Fall in ihren Gruppen zurück. Ist dies an, behalten die Gruppen auch ihre Namen und Farben."
+  },
+  "opt_tab_groups_denied": {
+    "message": "Dafür braucht Kesonode die Berechtigung „tabGroups“. Deine Gruppen kommen trotzdem zurück, nur ohne Namen."
+  },
+  "opt_history_days_label": {
+    "message": "Zu synchronisierende Tage"
+  },
+  "opt_history_days_desc": {
+    "message": "Empfohlen: 30 Tage."
+  },
+  "opt_history_days_value": {
+    "message": "$COUNT$ T",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "30"
+      }
+    }
+  },
+  "opt_history_hint": {
+    "message": "Seiten von deinen anderen Geräten werden mit dem Zeitpunkt ihrer Ankunft eingetragen, nicht mit dem Zeitpunkt deines ersten Besuchs. In Chromium-Browsern erscheinen sie deshalb unter heute und nicht an dem Tag, an dem du gesurft hast. Firefox behält das ursprüngliche Datum."
+  },
+  "opt_missing_ext_head": {
+    "message": "Fehlende Erweiterungen ($COUNT$)",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "6"
+      }
+    }
+  },
+  "opt_ext_from": {
+    "message": "· von $STORE$",
+    "placeholders": {
+      "store": {
+        "content": "$1",
+        "example": "Firefox"
+      }
+    }
+  },
+  "opt_ext_install": {
+    "message": "Installieren"
+  },
+  "opt_ext_find": {
+    "message": "Suchen"
+  },
+  "opt_no_password_title": {
+    "message": "Passwort-Synchronisierung ist nicht verfügbar."
+  },
+  "opt_no_password_body": {
+    "message": "Browser-Erweiterungen können nicht auf den nativen Passwortspeicher zugreifen."
+  },
+  "opt_no_password_use": {
+    "message": "Verwende für selbst gehostete Passwort-Synchronisierung $MANAGERS$.",
+    "placeholders": {
+      "managers": {
+        "content": "$1",
+        "example": "Bitwarden or Proton Pass"
+      }
+    }
+  },
+  "opt_or": {
+    "message": "oder"
+  },
+  "opt_device_head": {
+    "message": "Gerät"
+  },
+  "opt_device_head_sub": {
+    "message": "So identifizierst du dieses Gerät in der Synchronisierung."
+  },
+  "opt_identity_section": {
+    "message": "Identität"
+  },
+  "opt_device_name_label": {
+    "message": "Gerätename"
+  },
+  "opt_device_name_desc": {
+    "message": "So erscheint dieses Gerät in den Synchronisierungsprotokollen."
+  },
+  "opt_device_name_placeholder": {
+    "message": "Mein Laptop"
+  },
+  "opt_device_id_label": {
+    "message": "Geräte-ID"
+  },
+  "opt_device_id_desc": {
+    "message": "Automatisch erzeugt. Nicht ändern."
+  },
+  "opt_behavior_section": {
+    "message": "Synchronisierungsverhalten"
+  },
+  "opt_sync_on_change_label": {
+    "message": "Bei Änderung synchronisieren"
+  },
+  "opt_sync_on_change_desc": {
+    "message": "Synchronisiert Lesezeichen sofort, wenn sie sich ändern. Empfohlen."
+  },
+  "opt_auto_sync_label": {
+    "message": "Automatische Synchronisierung"
+  },
+  "opt_auto_sync_desc": {
+    "message": "Synchronisiert außerdem regelmäßig nach Zeitplan. Verlauf, offene Tabs und die Erweiterungsliste werden nur auf diesem Weg übertragen."
+  },
+  "opt_notifications_label": {
+    "message": "Benachrichtigungen"
+  },
+  "opt_notifications_desc": {
+    "message": "Synchronisierungsstatus und Konflikthinweise."
+  },
+  "opt_interval_label": {
+    "message": "Synchronisierungsintervall"
+  },
+  "opt_interval_desc": {
+    "message": "Wie oft dieses Gerät entfernte Änderungen abruft. 30 Sekunden sind das Minimum des Browsers für Hintergrundprüfungen. Deine eigenen Änderungen werden fast sofort hochgeladen."
+  },
+  "opt_interval_value": {
+    "message": "$COUNT$ s",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "30"
+      }
+    }
+  },
+  "opt_conflict_section": {
+    "message": "Konfliktlösung"
+  },
+  "opt_conflict_lww": {
+    "message": "Letzte Änderung gewinnt"
+  },
+  "opt_conflict_lww_desc": {
+    "message": "Die neueste Änderung gewinnt. Ein auf einem anderen Gerät gelöschtes Lesezeichen wird auch hier gelöscht, außer du hast es nach dem Löschen erneut hinzugefügt."
+  },
+  "opt_conflict_local": {
+    "message": "Lokal bevorzugen"
+  },
+  "opt_conflict_local_desc": {
+    "message": "Die Lesezeichen dieses Geräts gewinnen. Neue Lesezeichen von anderen Geräten kommen weiterhin an, aber deren Löschungen, Verschiebungen und Umbenennungen werden hier nie übernommen."
+  },
+  "opt_conflict_remote": {
+    "message": "Entfernt bevorzugen"
+  },
+  "opt_conflict_remote_desc": {
+    "message": "Verschiebungen und Umbenennungen anderer Geräte gewinnen gegen deine. Ihre Löschungen werden genauso übernommen wie bei „Letzte Änderung gewinnt“."
+  },
+  "opt_conflict_manual": {
+    "message": "Manuell"
+  },
+  "opt_conflict_manual_desc": {
+    "message": "Frag mich im Popup, wenn sich dieses Gerät und ein anderes unterscheiden. Bis du die Version des anderen Geräts wählst, wird keine seiner Lesezeichenänderungen hier übernommen, auch keine Löschung."
+  },
+  "opt_safety_section": {
+    "message": "Sicherheit"
+  },
+  "opt_bulk_delete_label": {
+    "message": "Maximale Massenlöschung von einem Gerät"
+  },
+  "opt_bulk_delete_desc": {
+    "message": "Ein Sicherheitsnetz: Würden die Löschungen eines anderen Geräts mehr als diesen Anteil deiner lokalen Lesezeichen entfernen, überspringt die Zusammenführung sie (das schützt deinen Baum vor einer fehlerhaften Synchronisierung). Erhöhe den Wert, wenn du regelmäßig in großen Mengen löschst."
+  },
+  "bm_exclude_label": {
+    "message": "Lesezeichen von der Synchronisierung ausschließen"
+  },
+  "bm_exclude_desc": {
+    "message": "Hake die Ordner und Lesezeichen an, die dieses Gerät für sich behält. Sie bleiben hier unverändert, und nichts, was deine anderen Geräte tun, ändert sie."
+  },
+  "bm_exclude_hint": {
+    "message": "Ausschließen löscht nichts: Kopien, die deine anderen Geräte schon haben, bleiben dort. Verschiebst du später ein Lesezeichen in einen ausgeschlossenen Ordner, verschwindet es von deinen anderen Geräten, als hättest du es gelöscht."
+  },
+  "bm_exclude_loading": {
+    "message": "Lesezeichen werden geladen…"
+  },
+  "bm_exclude_error": {
+    "message": "Deine Lesezeichen konnten nicht gelesen werden: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "Bookmarks API unavailable"
+      }
+    }
+  },
+  "bm_exclude_empty": {
+    "message": "Auf diesem Gerät gibt es noch keine Lesezeichen."
+  },
+  "bm_exclude_untitled": {
+    "message": "(ohne Namen)"
+  },
+  "bm_exclude_expand": {
+    "message": "$NAME$ öffnen",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "Reading list"
+      }
+    }
+  },
+  "bm_exclude_collapse": {
+    "message": "$NAME$ schließen",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "Reading list"
+      }
+    }
+  },
+  "bm_exclude_count_one": {
+    "message": "$COUNT$ Lesezeichen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "bm_exclude_count_other": {
+    "message": "$COUNT$ Lesezeichen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "4182"
+      }
+    }
+  },
+  "bm_exclude_more_one": {
+    "message": "$COUNT$ weiteres anzeigen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "bm_exclude_more_other": {
+    "message": "$COUNT$ weitere anzeigen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "200"
+      }
+    }
+  },
+  "bm_list_more_one": {
+    "message": "und $COUNT$ weiteres",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "bm_list_more_other": {
+    "message": "und $COUNT$ weitere",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "43"
+      }
+    }
+  },
+  "opt_conflicts_section": {
+    "message": "Konflikte"
+  },
+  "opt_conflicts_section_sub": {
+    "message": "Dieses Gerät und ein anderes haben unterschiedliche Versionen. Die Konfliktlösung steht auf Manuell, deshalb wartet Kesonode auf deine Wahl."
+  },
+  "opt_conflicts_explain": {
+    "message": "$KEEP$ lässt dieses Gerät, wie es ist. $REMOTE$ führt die Änderungen des anderen Geräts mit diesem zusammen.",
+    "placeholders": {
+      "keep": {
+        "content": "$1",
+        "example": "Keep local"
+      },
+      "remote": {
+        "content": "$2",
+        "example": "Use remote"
+      }
+    }
+  },
+  "opt_conflict_bookmarks": {
+    "message": "Lesezeichen: dieses Gerät und $DEVICE$",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
+  },
+  "opt_conflict_history": {
+    "message": "Verlauf: dieses Gerät und $DEVICE$",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
+  },
+  "opt_diff_loading": {
+    "message": "Die beiden Versionen werden verglichen…"
+  },
+  "opt_diff_failed": {
+    "message": "Die beiden Versionen konnten nicht verglichen werden."
+  },
+  "opt_diff_only_remote": {
+    "message": "Nur auf $DEVICE$ ($COUNT$)",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      },
+      "count": {
+        "content": "$2",
+        "example": "12"
+      }
+    }
+  },
+  "opt_diff_only_local": {
+    "message": "Nur auf diesem Gerät ($COUNT$)",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "opt_diff_changed_one": {
+    "message": "$COUNT$ Lesezeichen ist auf beiden, aber mit anderem Titel oder in einem anderen Ordner.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "opt_diff_changed_other": {
+    "message": "$COUNT$ Lesezeichen sind auf beiden, aber mit anderem Titel oder in einem anderen Ordner.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "opt_diff_none_bookmarks": {
+    "message": "Beide Geräte haben jetzt dieselben Lesezeichen."
+  },
+  "opt_diff_none_history": {
+    "message": "Beide Geräte haben dieselben Seiten besucht. Nur Zeitpunkt oder Anzahl der Besuche unterscheiden sich."
+  },
+  "bm_exclude_summary_one": {
+    "message": "$COUNT$ Eintrag wird nicht synchronisiert",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "bm_exclude_summary_other": {
+    "message": "$COUNT$ Einträge werden nicht synchronisiert",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "bm_exclude_none": {
+    "message": "Noch ist nichts ausgeschlossen."
+  },
+  "opt_activity_head": {
+    "message": "Aktivität"
+  },
+  "opt_activity_head_sub": {
+    "message": "Was Kesonode auf diesem Gerät getan hat und womit es arbeitet. Alles wird hier berechnet: die Zahlen, die Wiederherstellungspunkte und die letzten 200 Protokolleinträge sind lokal, und von dieser Seite wird nie etwas hochgeladen."
+  },
+  "opt_sync_activity_section": {
+    "message": "Synchronisierungsaktivität"
+  },
+  "opt_stat_transferred": {
+    "message": "Übertragene Daten"
+  },
+  "opt_stat_runs": {
+    "message": "Synchronisierungen"
+  },
+  "opt_stat_last_sync": {
+    "message": "Letzte Synchronisierung"
+  },
+  "opt_devices_section": {
+    "message": "Geräte"
+  },
+  "opt_devices_section_sub": {
+    "message": "Jedes Gerät mit Dateien in deinem Synchronisierungsordner und was es zuletzt hochgeladen hat. Ein Gerät zu vergessen löscht seine Dateien aus deinem Speicher. Es entfernt in keinem Browser Lesezeichen."
+  },
+  "opt_forget_result_one": {
+    "message": "Eine Datei von $LABEL$ gelöscht. Wenn dieser Browser noch läuft, lädt er sich innerhalb einer Minute erneut hoch und erscheint hier wieder. Das ist kein Fehler: Um ein Gerät draußen zu halten, schalte Kesonode dort zuerst aus und vergiss es dann hier.",
+    "placeholders": {
+      "label": {
+        "content": "$2",
+        "example": "Work laptop"
+      }
+    }
+  },
+  "opt_forget_result_other": {
+    "message": "$COUNT$ Dateien von $LABEL$ gelöscht. Wenn dieser Browser noch läuft, lädt er sich innerhalb einer Minute erneut hoch und erscheint hier wieder. Das ist kein Fehler: Um ein Gerät draußen zu halten, schalte Kesonode dort zuerst aus und vergiss es dann hier.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      },
+      "label": {
+        "content": "$2",
+        "example": "Work laptop"
+      }
+    }
+  },
+  "opt_dismiss": {
+    "message": "Ausblenden"
+  },
+  "opt_devices_error": {
+    "message": "Deine Geräte konnten nicht gelesen werden: $ERROR$. Das bedeutet nicht, dass du keine hast.",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "404 Not Found"
+      }
+    }
+  },
+  "opt_error_check_connection": {
+    "message": "Prüfe die Verbindung unter Speicher und öffne diesen Tab erneut."
+  },
+  "opt_devices_loading": {
+    "message": "Synchronisierungsordner wird gelesen…"
+  },
+  "opt_devices_empty": {
+    "message": "Noch nichts im Ordner. Führe eine Synchronisierung aus, dann erscheint dieses Gerät."
+  },
+  "opt_device_unnamed": {
+    "message": "Unbenanntes Gerät ($ID$)",
+    "placeholders": {
+      "id": {
+        "content": "$1",
+        "example": "a1b2c3d4"
+      }
+    }
+  },
+  "opt_this_device": {
+    "message": "DIESES GERÄT"
+  },
+  "opt_last_upload_ago": {
+    "message": "· letzter Upload $WHEN$",
+    "placeholders": {
+      "when": {
+        "content": "$1",
+        "example": "39 days ago"
+      }
+    }
+  },
+  "opt_device_browser": {
+    "message": "$BROWSER$ ($ENGINE$)",
+    "placeholders": {
+      "browser": {
+        "content": "$1",
+        "example": "Brave"
+      },
+      "engine": {
+        "content": "$2",
+        "example": "Chromium"
+      }
+    }
+  },
+  "opt_device_dormant": {
+    "message": "INAKTIV"
+  },
+  "opt_device_dormant_note_one": {
+    "message": "Seit über einem Tag nichts hochgeladen. Das kann heißen, dass sich dort nichts geändert hat, oder dass es diesen Browser nicht mehr gibt. Wenn es ihn nicht mehr gibt, kannst du ihn vergessen."
+  },
+  "opt_device_dormant_note_other": {
+    "message": "Seit über $COUNT$ Tagen nichts hochgeladen. Das kann heißen, dass sich dort nichts geändert hat, oder dass es diesen Browser nicht mehr gibt. Wenn es ihn nicht mehr gibt, kannst du ihn vergessen.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "30"
+      }
+    }
+  },
+  "opt_forget": {
+    "message": "Vergiss es"
+  },
+  "opt_forget_it": {
+    "message": "Vergiss es"
+  },
+  "opt_forget_confirm_one": {
+    "message": "Löscht die eine Datei, die dieses Gerät in deinem Speicher hat ($TYPES$). In keinem Browser werden Lesezeichen entfernt, weder hier noch dort. Wenn dieser Browser noch läuft, lädt er sich erneut hoch und erscheint wieder; um ihn draußen zu halten, schalte Kesonode dort zuerst aus.",
+    "placeholders": {
+      "types": {
+        "content": "$2",
+        "example": "Bookmarks, Sessions"
+      }
+    }
+  },
+  "opt_forget_confirm_other": {
+    "message": "Löscht die $COUNT$ Dateien, die dieses Gerät in deinem Speicher hat ($TYPES$). In keinem Browser werden Lesezeichen entfernt, weder hier noch dort. Wenn dieser Browser noch läuft, lädt er sich erneut hoch und erscheint wieder; um ihn draußen zu halten, schalte Kesonode dort zuerst aus.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "4"
+      },
+      "types": {
+        "content": "$2",
+        "example": "Bookmarks, Sessions"
+      }
+    }
+  },
+  "opt_that_device": {
+    "message": "dieses Gerät"
+  },
+  "opt_cancel": {
+    "message": "Abbrechen"
+  },
+  "opt_blocked_section": {
+    "message": "Verhinderter Löschvorgang"
+  },
+  "opt_blocked_section_sub": {
+    "message": "Ein anderes Gerät wollte ungewöhnlich viele deiner Lesezeichen entfernen, deshalb hat Kesonode das zurückgehalten. Übernimm es, wenn es so gewollt war, oder behalte sie."
+  },
+  "opt_blocked_headline_one": {
+    "message": "$COUNT$ von deinen $TOTAL$ Lesezeichen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      },
+      "total": {
+        "content": "$2",
+        "example": "49"
+      }
+    }
+  },
+  "opt_blocked_headline_other": {
+    "message": "$COUNT$ von deinen $TOTAL$ Lesezeichen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "48"
+      },
+      "total": {
+        "content": "$2",
+        "example": "49"
+      }
+    }
+  },
+  "opt_blocked_count_one": {
+    "message": "$COUNT$ Lesezeichen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "opt_blocked_count_other": {
+    "message": "$COUNT$ Lesezeichen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "48"
+      }
+    }
+  },
+  "opt_blocked_from": {
+    "message": "Angefordert von $DEVICE$.",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
+  },
+  "opt_blocked_from_unknown": {
+    "message": "Von einem anderen Gerät angefordert."
+  },
+  "opt_blocked_saved": {
+    "message": "Es wurde nichts entfernt, und vorher wurde ein Wiederherstellungspunkt gespeichert."
+  },
+  "opt_blocked_recent_one": {
+    "message": "Andere Geräte haben hier in den letzten 24 Stunden bereits $COUNT$ Lesezeichen entfernt, und zusammen damit würde diese Löschung dein Limit für Massenlöschungen überschreiten.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "opt_blocked_recent_other": {
+    "message": "Andere Geräte haben hier in den letzten 24 Stunden bereits $COUNT$ Lesezeichen entfernt, und zusammen damit würde diese Löschung dein Limit für Massenlöschungen überschreiten.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "30"
+      }
+    }
+  },
+  "opt_blocked_apply": {
+    "message": "Löschvorgang übernehmen"
+  },
+  "opt_blocked_confirm_apply": {
+    "message": "Übernehmen und löschen"
+  },
+  "opt_blocked_keep": {
+    "message": "Wenn du sie lieber behalten möchtest, stelle auf dem anfordernden Gerät einen Punkt von vor dem Aufräumen wieder her. Damit verschwindet dort der Löschvermerk, und er wird nicht mehr hierher geschickt."
+  },
+  "opt_snapshots_section": {
+    "message": "Wiederherstellungspunkte"
+  },
+  "opt_snapshots_section_sub": {
+    "message": "Mit Zeitstempel versehene Kopien deiner Lesezeichen im Speicher, die alle deine Geräte teilen. Eine Wiederherstellung fügt auf diesem Gerät fehlende Lesezeichen wieder hinzu (sie löscht nie). Die neuesten 10 bleiben erhalten, ältere werden automatisch entfernt, und du kannst hier jeden davon löschen."
+  },
+  "opt_snap_now_label": {
+    "message": "Jetzt einen Wiederherstellungspunkt speichern"
+  },
+  "opt_snap_now_desc": {
+    "message": "Ein Wiederherstellungspunkt deines aktuellen Lesezeichenbaums."
+  },
+  "opt_snap_create": {
+    "message": "Erstellen"
+  },
+  "opt_snap_loading": {
+    "message": "Wiederherstellungspunkte werden geladen…"
+  },
+  "opt_snap_error": {
+    "message": "Deine Wiederherstellungspunkte konnten nicht gelesen werden: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "404 Not Found"
+      }
+    }
+  },
+  "opt_snap_error_desc": {
+    "message": "Das bedeutet nicht, dass du keine hast. Sie liegen in deinem Speicher und konnten gerade nicht aufgelistet werden."
+  },
+  "opt_snap_empty": {
+    "message": "Noch keine Wiederherstellungspunkte. Erstelle oben einen, oder es wird automatisch einer gespeichert, falls jemals eine ungewöhnliche Löschung blockiert wird."
+  },
+  "opt_snap_count_one": {
+    "message": "$COUNT$ Lesezeichen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "opt_snap_count_other": {
+    "message": "$COUNT$ Lesezeichen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
+  "opt_snap_unknown": {
+    "message": "Lesezeichen-Wiederherstellungspunkt"
+  },
+  "opt_snap_confirm_restore": {
+    "message": "Wiederherstellen bestätigen"
+  },
+  "opt_snap_confirm_delete": {
+    "message": "Löschen bestätigen"
+  },
+  "opt_snap_delete_aria": {
+    "message": "Diesen Wiederherstellungspunkt löschen"
+  },
+  "opt_log_section": {
+    "message": "Protokoll"
+  },
+  "opt_log_empty_sub": {
+    "message": "Noch keine Einträge."
+  },
+  "opt_log_count_one": {
+    "message": "$COUNT$ Eintrag",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "opt_log_count_other": {
+    "message": "$COUNT$ Einträge",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "200"
+      }
+    }
+  },
+  "opt_log_errors": {
+    "message": " · $COUNT$ mit Fehlern",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "opt_log_skipped": {
+    "message": " · $COUNT$ übersprungen",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
+  "opt_log_errors_only_label": {
+    "message": "Nur Fehler anzeigen"
+  },
+  "opt_log_errors_only_desc": {
+    "message": "Erfolgreiche Einträge ausblenden."
+  },
+  "opt_log_clear": {
+    "message": "Protokoll löschen"
+  },
+  "opt_log_copy_label": {
+    "message": "Für einen Fehlerbericht kopieren"
+  },
+  "opt_log_copy_desc": {
+    "message": "Wortgetreu, älteste zuerst, mit der Kesonode-Version und deinem Browser. Das schließt die Adresse deines Speicherservers ein und die von Seiten, die Kesonode nicht synchronisieren konnte. Lies es also durch, bevor du es irgendwo öffentlich postest."
+  },
+  "opt_log_copy": {
+    "message": "Protokoll kopieren"
+  },
+  "opt_log_copy_failed": {
+    "message": "Dieser Browser hat Kesonode das Kopieren des Protokolls nicht erlaubt. Markiere die Einträge unten und kopiere sie von Hand."
+  },
+  "opt_log_nothing": {
+    "message": "Noch nichts protokolliert. Führe eine Synchronisierung aus, dann erscheint sie hier."
+  },
+  "opt_log_no_errors": {
+    "message": "Keine Fehler protokolliert. Sehr gut."
+  },
+  "opt_encryption_section": {
+    "message": "Verschlüsselung"
+  },
+  "opt_e2ee_desc": {
+    "message": "AES-256-GCM. Daten werden mit deiner Passphrase verschlüsselt, bevor sie dieses Gerät verlassen, der Speicheranbieter kann sie also nie lesen. Bewahre die Passphrase sicher auf: ohne sie sind verschlüsselte Daten nicht wiederherstellbar, und jedes Gerät muss dieselbe verwenden."
+  },
+  "opt_e2ee_disable_confirm": {
+    "message": "Verschlüsselung ausschalten? Deine synchronisierten Daten werden ab der nächsten Synchronisierung $UNENCRYPTED$ in deinem Speicher abgelegt. Jedes Gerät muss sie dann ebenfalls ausschalten.",
+    "placeholders": {
+      "unencrypted": {
+        "content": "$1",
+        "example": "unencrypted"
+      }
+    }
+  },
+  "opt_unencrypted": {
+    "message": "unverschlüsselt"
+  },
+  "opt_e2ee_turn_off": {
+    "message": "Ausschalten"
+  },
+  "opt_passphrase_label": {
+    "message": "Passphrase"
+  },
+  "opt_passphrase_desc": {
+    "message": "Daraus wird der Verschlüsselungsschlüssel abgeleitet. Wird nur auf diesem Gerät gespeichert und nie hochgeladen."
+  },
+  "opt_passphrase_placeholder": {
+    "message": "Wähle eine starke Passphrase"
+  },
+  "opt_passphrase_confirm_placeholder": {
+    "message": "Passphrase bestätigen"
+  },
+  "opt_passphrase_match": {
+    "message": "Die Passphrasen stimmen überein."
+  },
+  "opt_genkey_saved_warning": {
+    "message": "Speichere das jetzt. Es ist der einzige Weg, deine Daten wiederherzustellen, wenn du sie vergisst. Gib denselben Schlüssel auf deinen anderen Geräten ein."
+  },
+  "opt_e2ee_no_passphrase": {
+    "message": "Die Verschlüsselung ist aktiv, aber es ist keine Passphrase gesetzt, daher lädt die Synchronisierung weiterhin Klartext hoch, bis du eine hinzufügst."
+  },
+  "opt_e2ee_off_warning": {
+    "message": "Die Verschlüsselung ist aus, deine synchronisierten Daten (Lesezeichen, Verlauf, Sitzungen, Erweiterungen) liegen also $UNENCRYPTED$ in deinem Speicher. Schalte sie ein, um alles zu verschlüsseln, bevor es dieses Gerät verlässt.",
+    "placeholders": {
+      "unencrypted": {
+        "content": "$1",
+        "example": "unencrypted"
+      }
+    }
+  },
+  "opt_advanced_head": {
+    "message": "Erweitert"
+  },
+  "opt_advanced_head_sub": {
+    "message": "Backups, Feedback und Entwickleroptionen."
+  },
+  "opt_impexp_section": {
+    "message": "Import / Export"
+  },
+  "opt_export_label": {
+    "message": "Backup exportieren"
+  },
+  "opt_export_desc": {
+    "message": "Lade Lesezeichen, Verlauf und Erweiterungen als JSON-Datei herunter. Ohne Cloud."
+  },
+  "opt_export": {
+    "message": "Exportieren"
+  },
+  "opt_exported": {
+    "message": "Exportiert"
+  },
+  "opt_export_failed": {
+    "message": "Fehlgeschlagen"
+  },
+  "opt_import_label": {
+    "message": "Backup importieren"
+  },
+  "opt_import_desc": {
+    "message": "Aus einem Kesonode-JSON-Backup wiederherstellen. Lesezeichen landen in einem neuen Ordner."
+  },
+  "opt_import_bad_file": {
+    "message": "Ungültiges oder nicht unterstütztes Dateiformat."
+  },
+  "opt_import_ok_one": {
+    "message": "✓ $COUNT$ Lesezeichen in den Ordner $FOLDER$ importiert.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      },
+      "folder": {
+        "content": "$2",
+        "example": "Kesonode Import"
+      }
+    }
+  },
+  "opt_import_ok_other": {
+    "message": "✓ $COUNT$ Lesezeichen in den Ordner $FOLDER$ importiert.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      },
+      "folder": {
+        "content": "$2",
+        "example": "Kesonode Import"
+      }
+    }
+  },
+  "opt_import": {
+    "message": "Importieren"
+  },
+  "opt_import_done": {
+    "message": "Fertig"
+  },
+  "opt_import_error": {
+    "message": "Fehler"
+  },
+  "opt_feedback_section": {
+    "message": "Feedback"
+  },
+  "opt_feedback_section_sub": {
+    "message": "Es wird nichts automatisch gesendet. Diese öffnen sich nur, wenn du sie anklickst."
+  },
+  "opt_report_label": {
+    "message": "Fehler melden oder Funktion vorschlagen"
+  },
+  "opt_report_desc": {
+    "message": "Öffnet die GitHub-Issues des Projekts (öffentlich, mit deinem GitHub-Konto verknüpft)."
+  },
+  "opt_open_issues": {
+    "message": "Issues öffnen"
+  },
+  "opt_email_label": {
+    "message": "Schreib uns"
+  },
+  "opt_email_desc": {
+    "message": "Für alles, was du nicht öffentlich posten möchtest."
+  },
+  "opt_rate_label": {
+    "message": "Im Store bewerten"
+  },
+  "opt_rate_desc": {
+    "message": "Wenn Kesonode für dich funktioniert, hilft eine Bewertung anderen, es zu finden (öffentlich, mit deinem Store-Konto verknüpft)."
+  },
+  "opt_developer_section": {
+    "message": "Entwickler"
+  },
+  "opt_debug_label": {
+    "message": "Debug-Modus"
+  },
+  "opt_debug_desc": {
+    "message": "Ausführliche Protokollierung in die Browser-Konsole und in Aktivität, damit du sie teilen kannst. Schalte ihn aus, wenn du fertig bist."
+  },
+  "opt_about_section": {
+    "message": "Über"
+  },
+  "opt_version_label": {
+    "message": "Version"
+  },
+  "opt_source_label": {
+    "message": "Quellcode"
+  },
+  "opt_source_desc": {
+    "message": "Keine Telemetrie. Keine externen Server."
+  },
+  "opt_devices_bad_reply": {
+    "message": "Die Geräteliste konnte nicht gelesen werden."
+  }
+}

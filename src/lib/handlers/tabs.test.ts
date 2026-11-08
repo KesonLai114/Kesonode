@@ -1,0 +1,337 @@
+import { describe, it, expect, vi } from "vitest";
+import { importSession, exportCurrentTabs } from "@/lib/handlers/tabs-handler";
+import { RESTORE_PENDING_MS } from "@/lib/session-restore";
+import { getSingleTabOpenLimit, setSingleTabOpenLimit } from "@/lib/utils/storage";
+import { resetCapabilityCache } from "@/lib/utils/capabilities";
+import type { SyncSession } from "@/lib/types";
+
+// Uses the in-memory chrome.tabs / chrome.windows fakes from test/setup.ts.
+
+function session(urls: string[]): SyncSession {
+  return {
+    id: "s1",
+    device_id: "peer",
+    savedAt: "2026-07-21T00:00:00.000Z",
+    label: "Peer session",
+    tabs: urls.map((url) => ({ url, pinned: false })),
+  };
+}
+
+describe("importSession", () => {
+  it("opens EVERY tab of a multi-tab session (regression: only the 1st opened on WebKit/Orion)", async () => {
+    await importSession(session([
+      "https://a.com/",
+      "https://b.com/",
+      "https://c.com/",
+    ]));
+    const urls = (await chrome.tabs.query({})).map((t) => t.url as string).sort();
+    expect(urls).toEqual(["https://a.com/", "https://b.com/", "https://c.com/"]);
+  });
+
+  it("skips unsafe tab URLs but still opens the safe ones", async () => {
+    await importSession(session([
+      "https://ok.com/",
+      "javascript:alert(1)",
+      "https://fine.com/",
+    ]));
+    const urls = (await chrome.tabs.query({})).map((t) => t.url as string).sort();
+    expect(urls).toEqual(["https://fine.com/", "https://ok.com/"]);
+  });
+
+  it("opens nothing for an empty session", async () => {
+    await importSession(session([]));
+    expect((await chrome.tabs.query({})).length).toBe(0);
+  });
+});
+
+describe("exportCurrentTabs — only plain, non-secret web pages leave the device", () => {
+  const open = async (url: string): Promise<void> => { await chrome.tabs.create({ url }); };
+
+  it("publishes http(s) tabs", async () => {
+    await open("https://a.com/");
+    await open("http://b.com/");
+    expect((await exportCurrentTabs()).map((t) => t.url)).toEqual(["https://a.com/", "http://b.com/"]);
+  });
+
+  it("never publishes a local file:// path", async () => {
+    await open("file:///C:/Users/someone/Documents/tax-return.pdf");
+    await open("https://ok.com/");
+    expect((await exportCurrentTabs()).map((t) => t.url)).toEqual(["https://ok.com/"]);
+  });
+
+  it("never publishes browser-internal pages on any engine", async () => {
+    for (const u of [
+      "chrome://settings",
+      "chrome-extension://abc/page.html",
+      "about:config",             // Firefox — used to be uploaded
+      "moz-extension://abc/x.html", // Firefox — used to be uploaded
+      "brave://settings",          // used to be uploaded
+      "edge://flags",              // used to be uploaded
+    ]) await open(u);
+    await open("https://ok.com/");
+
+    expect((await exportCurrentTabs()).map((t) => t.url)).toEqual(["https://ok.com/"]);
+  });
+
+  it("never publishes a tab holding an auth secret", async () => {
+    // An OAuth provider returns the token in the fragment; the tab is often still open.
+    await open("https://app.example.com/callback#access_token=ya29.SECRET&expires_in=3599");
+    await open("https://site.example.com/reset?token=abc123");
+    await open("https://ok.com/");
+
+    expect((await exportCurrentTabs()).map((t) => t.url)).toEqual(["https://ok.com/"]);
+  });
+
+  it("does not drop a URL that merely mentions a sensitive word in a value", async () => {
+    // The guard matches param KEYS (`name=`), so this must survive.
+    await open("https://blog.example.com/how-to-store-a-token");
+    await open("https://search.example.com/?q=password%20manager");
+
+    expect((await exportCurrentTabs()).map((t) => t.url)).toHaveLength(2);
+  });
+});
+
+// chrome.tabs/windows real typings have none of these; they are the fake's popup-blocker
+// switch and its record of created windows. See test/setup.ts.
+const tabsFake = chrome.tabs as unknown as { __popupBlocked: boolean };
+const windowsFake = chrome.windows as unknown as {
+  __created: () => Array<{ urls: string[]; focused: boolean; blocked: boolean }>;
+};
+
+describe("restoring a session lands in the window you're already in", () => {
+  // 1.0.2 swapped the per-tab loop for one windows.create to get past WebKit/Orion's
+  // popup blocker. It worked, but it was applied to every engine: the session started
+  // arriving in a NEW window, and `pinned` was silently dropped, for everyone. Reported
+  // from the field as "it used to open in the current window".
+  const withPinned = (urls: string[], pinnedIdx: number[]): SyncSession => ({
+    id: "s1", device_id: "peer", savedAt: "2026-07-21T00:00:00.000Z", label: "Peer session",
+    tabs: urls.map((url, i) => ({ url, title: `t${i}`, pinned: pinnedIdx.includes(i) })),
+  });
+
+  it("uses the current window and opens no new one", async () => {
+    await importSession(withPinned(["https://a.com/", "https://b.com/", "https://c.com/"], []));
+
+    expect((await chrome.tabs.query({})).map((t) => t.url)).toEqual([
+      "https://a.com/", "https://b.com/", "https://c.com/",
+    ]);
+    expect(windowsFake.__created()).toEqual([]); // the assertion the old test was missing
+  });
+
+  it("brings pinned tabs back pinned", async () => {
+    // The url-array form of windows.create has no way to carry this, so it was lost.
+    await importSession(withPinned(["https://a.com/", "https://b.com/"], [1]));
+
+    const tabs = await chrome.tabs.query({});
+    expect(tabs.map((t) => t.pinned)).toEqual([false, true]);
+  });
+
+  it("doesn't open a window for a single-tab session on a blocking engine", async () => {
+    // The first tab is the one every engine allows, so there is nothing to fall back to.
+    tabsFake.__popupBlocked = true;
+
+    await importSession(withPinned(["https://only.com/"], []));
+
+    expect(windowsFake.__created()).toEqual([]);
+    expect((await chrome.tabs.query({})).map((t) => t.url)).toEqual(["https://only.com/"]);
+  });
+
+  it("remembers that this engine is fine, so later restores skip the measurement", async () => {
+    await importSession(withPinned(["https://a.com/", "https://b.com/"], []));
+    expect(await getSingleTabOpenLimit()).toBe(false);
+  });
+});
+
+// WebKit's allowance is one open per USER GESTURE, not one per method: spending it on the
+// first tab leaves nothing for a windows.create rescue, which is then swallowed exactly
+// like the tab was. Measuring after the fact therefore cannot work, and the field proved
+// it — a 10-tab session restored as 1 tab on Orion while this suite was green, because the
+// fake used to exempt windows.create from the blocker.
+describe("a session restore on an engine that allows one open per click", () => {
+  const many = (n: number): SyncSession => ({
+    id: "s1", device_id: "peer", savedAt: "2026-07-21T00:00:00.000Z", label: "Peer session",
+    tabs: Array.from({ length: n }, (_, i) => ({ url: `https://s${i}.com/`, pinned: false })),
+  });
+
+  it("opens all of them in ONE window once the limit is known", async () => {
+    await setSingleTabOpenLimit(true);
+    tabsFake.__popupBlocked = true;
+
+    await importSession(many(10));
+
+    const wins = windowsFake.__created();
+    expect(wins).toHaveLength(1);
+    expect(wins[0].urls).toHaveLength(10); // the whole session, not just the tail
+    expect(wins[0].blocked).toBe(false); // the allowance went to the call that carries them all
+    expect(await chrome.tabs.query({})).toHaveLength(10);
+  });
+
+  it("takes the iOS hint before it has ever measured, so the FIRST restore works", async () => {
+    const runtime = chrome.runtime as unknown as { getPlatformInfo: () => Promise<{ os: string }> };
+    const realPlatform = runtime.getPlatformInfo;
+    runtime.getPlatformInfo = () => Promise.resolve({ os: "ios" });
+    resetCapabilityCache();
+    tabsFake.__popupBlocked = true;
+
+    try {
+      await importSession(many(10));
+      expect(await chrome.tabs.query({})).toHaveLength(10);
+      expect(windowsFake.__created()[0].urls).toHaveLength(10);
+    } finally {
+      runtime.getPlatformInfo = realPlatform;
+      resetCapabilityCache();
+    }
+  });
+
+  it("degrades on an unrecognised blocking engine, but records it so the next one is right", async () => {
+    // Nothing stored and the platform doesn't admit to being WebKit: the only way to learn
+    // is to spend the gesture, so this restore really does lose tabs. What must NOT happen
+    // is losing them again every time.
+    tabsFake.__popupBlocked = true;
+
+    await importSession(many(10));
+
+    expect(await chrome.tabs.query({})).toHaveLength(1); // the honest, measured outcome
+    expect(windowsFake.__created()[0].blocked).toBe(true); // the rescue was swallowed too
+    expect(await getSingleTabOpenLimit()).toBe(true); // and that is why the next one works
+  });
+});
+
+describe("a session restore is bounded by what Kesonode will open", () => {
+  it("opens at most 200 tabs, however many the packet claims", async () => {
+    // A session is a peer's packet, and nothing else here bounds the list: with E2EE off,
+    // anyone who can write to the sync folder can put ten thousand URLs in one and the
+    // whole list used to be handed to the browser. The popup shows the count before the
+    // click, so this is not the main defence — but the number shown should be the number
+    // opened whether or not the packet is honest.
+    await setSingleTabOpenLimit(false); // per-tab restore, so each open is countable
+    const before = (await chrome.tabs.query({})).length;
+    const many = Array.from({ length: 260 }, (_, i) => `https://flood${i}.example/`);
+
+    await importSession(session(many));
+
+    const opened = (await chrome.tabs.query({})).length - before;
+    expect(opened).toBe(200);
+  });
+});
+
+// Reported on #51: restore a peer's 10 tabs, let the peer open an 11th, restore again, and
+// this browser had 21 tabs, because every restore opened the whole session.
+describe("a session restore opens only what is not open here yet", () => {
+  const openUrls = async (): Promise<string[]> => (await chrome.tabs.query({})).map((t) => t.url as string);
+
+  it("a second restore of a session that grew by one tab opens that one tab", async () => {
+    const ten = Array.from({ length: 10 }, (_, i) => `https://t${i}.com/`);
+    await importSession(session(ten));
+    expect(await openUrls()).toHaveLength(10);
+
+    await importSession(session([...ten, "https://new.com/"]));
+
+    const urls = await openUrls();
+    expect(urls).toHaveLength(11);
+    expect(urls.filter((u) => u === "https://new.com/")).toHaveLength(1);
+  });
+
+  it("opens nothing when every tab is already open", async () => {
+    await chrome.tabs.create({ url: "https://a.com/" });
+    await chrome.tabs.create({ url: "https://b.com/" });
+
+    await importSession(session(["https://b.com/", "https://a.com/"]));
+
+    expect(await openUrls()).toEqual(["https://a.com/", "https://b.com/"]);
+    expect(windowsFake.__created()).toEqual([]);
+  });
+
+  it("counts copies: two of the same page in the session and one open here opens the second", async () => {
+    await chrome.tabs.create({ url: "https://a.com/" });
+
+    await importSession(session(["https://a.com/", "https://a.com/", "https://b.com/"]));
+
+    expect((await openUrls()).sort()).toEqual(["https://a.com/", "https://a.com/", "https://b.com/"]);
+  });
+
+  it("treats a bare origin with and without its trailing slash as the same page", async () => {
+    // WebKit reports `https://a.com`, Chromium `https://a.com/`.
+    await chrome.tabs.create({ url: "https://a.com/" });
+
+    await importSession(session(["https://a.com"]));
+
+    expect(await openUrls()).toEqual(["https://a.com/"]);
+  });
+
+  it("counts a tab that is still loading as open", async () => {
+    // Chromium reports url "" while a tab loads, with the address in pendingUrl. A restore
+    // pressed again right after the first used to open the still-loading tabs a second time.
+    await chrome.tabs.create({ url: "https://a.com/" });
+    const realQuery = chrome.tabs.query;
+    (chrome.tabs as unknown as { query: () => Promise<unknown[]> }).query = async () =>
+      (await realQuery.call(chrome.tabs, {})).map((tab) => ({ ...tab, url: "", pendingUrl: tab.url }));
+    try {
+      await importSession(session(["https://a.com/"]));
+    } finally {
+      (chrome.tabs as unknown as { query: typeof realQuery }).query = realQuery;
+    }
+
+    expect(await openUrls()).toEqual(["https://a.com/"]);
+  });
+
+  /** Show every open tab the way Firefox shows one still waiting for its page. */
+  async function whileLoadingOnFirefox(run: () => Promise<void>): Promise<void> {
+    const realQuery = chrome.tabs.query;
+    (chrome.tabs as unknown as { query: () => Promise<unknown[]> }).query = async () =>
+      (await realQuery.call(chrome.tabs, {})).map((tab) => ({ ...tab, url: "about:blank", status: "loading" }));
+    try {
+      await run();
+    } finally {
+      (chrome.tabs as unknown as { query: typeof realQuery }).query = realQuery;
+    }
+  }
+
+  it("counts a tab a restore opened as open while Firefox still shows it as about:blank (QA AU 4)", async () => {
+    // Firefox has no pendingUrl: until its page arrives a tab reads about:blank. Found headless
+    // on Firefox 158: the popup opened again mid-load offered Restore again, and the press
+    // opened the page a second time.
+    await importSession(session(["https://a.com/", "https://b.com/"]));
+    await whileLoadingOnFirefox(() => importSession(session(["https://a.com/", "https://b.com/"])));
+
+    expect((await openUrls()).sort()).toEqual(["https://a.com/", "https://b.com/"]);
+  });
+
+  it("remembers the tabs of a restore that opened them in one window, too", async () => {
+    await setSingleTabOpenLimit(true); // the one-open-per-click engines take that path
+    await importSession(session(["https://a.com/", "https://b.com/"]));
+    await whileLoadingOnFirefox(() => importSession(session(["https://a.com/", "https://b.com/"])));
+
+    expect((await openUrls()).sort()).toEqual(["https://a.com/", "https://b.com/"]);
+    expect(windowsFake.__created()).toHaveLength(1);
+  });
+
+  it("stops counting a restored tab by its note once two minutes have passed", async () => {
+    // By then the page has had every chance to arrive, and the tab id may be another tab's.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      await importSession(session(["https://a.com/"]));
+      vi.setSystemTime(Date.now() + RESTORE_PENDING_MS + 1000);
+      await whileLoadingOnFirefox(() => importSession(session(["https://a.com/"])));
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(await openUrls()).toEqual(["https://a.com/", "https://a.com/"]);
+  });
+
+  it("still opens everything when this browser withholds the open tabs' URLs", async () => {
+    // Without the `tabs` permission, query() returns tabs with no url: nothing can be
+    // matched, so the restore behaves as it always did rather than skipping blindly.
+    await chrome.tabs.create({ url: "https://a.com/" });
+    const realQuery = chrome.tabs.query;
+    (chrome.tabs as unknown as { query: () => Promise<unknown[]> }).query = async () =>
+      (await realQuery.call(chrome.tabs, {})).map(({ url: _url, ...rest }) => rest);
+    try {
+      await importSession(session(["https://a.com/"]));
+    } finally {
+      (chrome.tabs as unknown as { query: typeof realQuery }).query = realQuery;
+    }
+
+    expect(await openUrls()).toEqual(["https://a.com/", "https://a.com/"]);
+  });
+});

@@ -1,0 +1,385 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  apiPresent, eventPresent, dataTypeApiPresent, dataTypeAvailability, allDataTypeAvailability,
+  assertDataTypeApi, ensurePermission, ensurePermissionWatched, hasPermission, isAndroid, permissionState,
+  resetCapabilityCache,
+} from "@/lib/utils/capabilities";
+import { registerBookmarkListeners, exportBookmarks } from "@/lib/handlers/bookmarks-handler";
+import { notifyConflict } from "@/lib/sync/conflict-resolver";
+
+/**
+ * These tests exist because of one field report, and every case below is a line from it.
+ *
+ * A user set Kesonode up on Fennec (Firefox for Android). The wizard told them their WebDAV
+ * server had refused permission — it hadn't; the browser cannot show a permission prompt
+ * at all. The History toggle would not move, and said nothing. Bookmarks failed with
+ * "getTree", because that browser ships no bookmarks API.
+ *
+ * The shared cause is a browser whose manifest permissions and whose actual API surface
+ * disagree, so the fake browser is edited per test to model exactly that. Everything is
+ * restored afterwards: `test/setup.ts` rebuilds the bookmark/history/tab stores between
+ * tests, but a namespace deleted off `chrome` would stay deleted for the whole file.
+ */
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const api = chrome as any;
+
+let saved: Record<string, unknown> = {};
+function replace(ns: string, value: unknown): void {
+  if (!(ns in saved)) saved[ns] = api[ns];
+  if (value === undefined) delete api[ns];
+  else api[ns] = value;
+}
+
+beforeEach(() => {
+  saved = {};
+  resetCapabilityCache();
+});
+
+afterEach(() => {
+  for (const [ns, value] of Object.entries(saved)) api[ns] = value;
+  saved = {};
+  resetCapabilityCache();
+});
+
+/** Model a browser that grants everything / nothing, and record what was asked for. */
+function permissions(opts: { held?: boolean; request?: () => Promise<boolean> } = {}) {
+  const requests: unknown[] = [];
+  replace("permissions", {
+    contains: () => Promise.resolve(opts.held ?? false),
+    request: (req: unknown) => {
+      requests.push(req);
+      return (opts.request ?? (() => Promise.resolve(false)))();
+    },
+  });
+  return requests;
+}
+
+/**
+ * Firefox for Android as the emulator showed it (Firefox 158): no bookmarks or history API,
+ * and a permission schema without those names, so `contains()` rejects them the way the
+ * device did instead of answering. `tabs` and `management` are known and held only when
+ * granted on the add-on's Permissions screen.
+ */
+function firefoxForAndroid(opts: { held?: string[] } = {}) {
+  const known = new Set(["tabs", "management", "notifications", "storage", "alarms", "unlimitedStorage"]);
+  const held = new Set(opts.held ?? []);
+  replace("bookmarks", undefined);
+  replace("history", undefined);
+  replace("permissions", {
+    contains: (req: { permissions?: string[] }) => {
+      const unknown = (req.permissions ?? []).find((p) => !known.has(p));
+      if (unknown) {
+        return Promise.reject(new Error(`Type error for parameter permissions (Error processing permissions.0: Value "${unknown}" must either: …) for permissions.contains.`));
+      }
+      return Promise.resolve((req.permissions ?? []).every((p) => held.has(p)));
+    },
+    request: () => Promise.resolve(false),
+  });
+}
+
+describe("reading the API surface", () => {
+  it("says no to a namespace the browser doesn't have at all", () => {
+    replace("bookmarks", undefined);
+    expect(apiPresent("bookmarks", "getTree")).toBe(false);
+    expect(dataTypeApiPresent("bookmarks")).toBe(false);
+  });
+
+  it("says no to a namespace that exists but is missing the method", () => {
+    // A stub object is exactly as unusable as no object, and reporting it as present is
+    // how a call gets made that can only throw.
+    replace("history", { search: undefined, addUrl: () => Promise.resolve() });
+    expect(dataTypeApiPresent("history")).toBe(false);
+  });
+
+  it("says no to Chrome's restricted management namespace", () => {
+    // The exact shape behind a reported blank Settings page. Chrome does NOT hide
+    // `chrome.management` when the optional permission isn't granted: it hands back an
+    // object carrying only getSelf/uninstallSelf. So `management.getAll` is not a
+    // function, and calling it throws synchronously, before there is any promise for a
+    // `.catch()` to catch. Inside a React effect that unmounts the tree and the page
+    // renders blank. A namespace-level check would have answered "present" here.
+    replace("management", { getSelf: () => Promise.resolve({}), uninstallSelf: () => Promise.resolve() });
+    expect(dataTypeApiPresent("extensions")).toBe(false);
+  });
+
+  it("says yes when the method is really there", () => {
+    expect(dataTypeApiPresent("bookmarks")).toBe(true);
+    expect(dataTypeApiPresent("sessions")).toBe(true);
+  });
+
+  it("recognises an event, which is an object rather than a function", () => {
+    // The distinction is load-bearing: checking an event with the function test answers
+    // "missing" for every event that exists, which would silently unregister listeners
+    // on a perfectly capable browser.
+    expect(apiPresent("bookmarks", "onCreated")).toBe(false);
+    expect(eventPresent("bookmarks", "onCreated")).toBe(true);
+    expect(eventPresent("bookmarks", "onNothingLikeThis")).toBe(false);
+  });
+});
+
+describe("whether a data type can sync here", () => {
+  it("is ready when the API is present", async () => {
+    expect(await dataTypeAvailability("bookmarks")).toEqual({ state: "ready" });
+  });
+
+  it("is unsupported — not 'ask for a permission' — when bookmarks are missing", async () => {
+    // `bookmarks` is a REQUIRED manifest permission, so it is already held and there is
+    // nothing left to request. Firefox for Android accepts the permission and ships no
+    // API behind it (mozilla-mobile/fenix#21830).
+    replace("bookmarks", undefined);
+    expect(await dataTypeAvailability("bookmarks")).toEqual({ state: "unsupported" });
+  });
+
+  it("is unsupported when the permission IS held and the API still isn't there", async () => {
+    replace("history", undefined);
+    permissions({ held: true });
+    expect(await dataTypeAvailability("history")).toEqual({ state: "unsupported" });
+  });
+
+  it("is a missing permission when the permission is what's missing", async () => {
+    // Same missing `browser.history`, opposite meaning: on Chrome an optional-permission
+    // API is undefined until it is granted, so only the permission check tells the two
+    // apart — and they need opposite treatment in the UI.
+    replace("history", undefined);
+    permissions({ held: false });
+    expect(await dataTypeAvailability("history")).toEqual({ state: "needs-permission", permission: "history" });
+  });
+
+  it("reports a revoked permission even when the API survives it (Sessions)", async () => {
+    // Firefox, from the device: revoking `tabs` in about:addons leaves browser.tabs.query
+    // callable, it just returns tabs with no url. An API-presence check therefore called
+    // Sessions ready while nothing it produced was usable, and the row said nothing while
+    // History and Extensions both reported the same revocation on the same screen. The
+    // data was never at risk, `isPayloadEmpty` refuses to publish a tab-less session; what
+    // was missing is that anyone was told.
+    permissions({ held: false });
+    expect(await dataTypeAvailability("sessions")).toEqual({ state: "needs-permission", permission: "tabs" });
+  });
+
+  it("is ready for Sessions once that permission is held", async () => {
+    permissions({ held: true });
+    expect(await dataTypeAvailability("sessions")).toEqual({ state: "ready" });
+  });
+
+  it("answers for all four types at once", async () => {
+    replace("bookmarks", undefined);
+    replace("management", undefined);
+    permissions({ held: true });
+    const all = await allDataTypeAvailability();
+    expect(all.bookmarks.state).toBe("unsupported");
+    expect(all.extensions.state).toBe("unsupported");
+    expect(all.history.state).toBe("ready");
+    expect(all.sessions.state).toBe("ready");
+  });
+
+  it("is unsupported when the browser does not know the permission at all", async () => {
+    // Firefox for Android, from the device (Firefox 158): no history API, and no `history`
+    // in its permission schema either, so contains() throws instead of answering. Read as
+    // "not granted", History was offered as a switch, Finish asked for it, and the
+    // browser's own permissions screen had nothing to grant: setup could not finish.
+    firefoxForAndroid();
+    expect(await dataTypeAvailability("history")).toEqual({ state: "unsupported" });
+  });
+
+  it("still asks for a permission whose contains() throws while the API is there", async () => {
+    // The API check is what keeps this narrow: a browser that HAS history and fails the
+    // question for some other reason gets the old answer, a permission to ask for.
+    replace("permissions", { contains: () => Promise.reject(new Error("nope")), request: () => Promise.resolve(false) });
+    expect(await dataTypeAvailability("history")).toEqual({ state: "needs-permission", permission: "history" });
+  });
+
+  it("answers for Firefox for Android the way its settings screen does", async () => {
+    // Its Permissions screen lists tabs and management as switches and nothing for
+    // history, so those two stay one grant away and the other two are never coming.
+    firefoxForAndroid();
+    const all = await allDataTypeAvailability();
+    expect(all.bookmarks).toEqual({ state: "unsupported" });
+    expect(all.history).toEqual({ state: "unsupported" });
+    expect(all.sessions).toEqual({ state: "needs-permission", permission: "tabs" });
+    expect(all.extensions).toEqual({ state: "needs-permission", permission: "management" });
+  });
+
+  it("is ready on Firefox for Android once tabs and management are granted by hand", async () => {
+    firefoxForAndroid({ held: ["tabs", "management"] });
+    const all = await allDataTypeAvailability();
+    expect(all.sessions.state).toBe("ready");
+    expect(all.extensions.state).toBe("ready");
+    expect(all.history.state).toBe("unsupported");
+  });
+});
+
+describe("reading one permission", () => {
+  it("tells a held permission, a missing one and an unknown one apart", async () => {
+    firefoxForAndroid({ held: ["tabs"] });
+    expect(await permissionState("tabs")).toBe("held");
+    expect(await permissionState("management")).toBe("not-held");
+    expect(await permissionState("history")).toBe("unknown");
+  });
+
+  it("leaves hasPermission's plain no alone", async () => {
+    firefoxForAndroid();
+    expect(await hasPermission({ permissions: ["history"] })).toBe(false);
+  });
+});
+
+describe("what a handler throws when the API isn't there", () => {
+  it("names the browser instead of surfacing a TypeError", async () => {
+    replace("bookmarks", undefined);
+    // The old failure was "Cannot read properties of undefined (reading 'getTree')",
+    // which reads as a crash in Kesonode rather than a limit of the browser.
+    await expect(exportBookmarks()).rejects.toThrow(/Firefox for Android/);
+    expect(() => assertDataTypeApi("bookmarks")).toThrow(/bookmarks can't sync here/);
+  });
+
+  it("stays quiet when the API is present", () => {
+    expect(() => assertDataTypeApi("bookmarks")).not.toThrow();
+  });
+});
+
+describe("carrying on without an API", () => {
+  it("registers no bookmark listeners on a browser with no bookmarks API", () => {
+    // The background script calls this at the top level, so a throw here took out the
+    // rest of the module and left the extension half-built — working enough to look fine.
+    replace("bookmarks", undefined);
+    expect(() => registerBookmarkListeners(() => {})).not.toThrow();
+  });
+
+  it("skips the conflict notification rather than failing the sync", () => {
+    // notifyConflict is called from inside a sync. The conflict is recorded and
+    // resolvable in the UI either way, so a browser without notifications should lose
+    // the toast and nothing else. Orion implements roughly 70% of the extension APIs,
+    // which makes "this engine hasn't got that one" ordinary rather than exotic.
+    replace("notifications", undefined);
+    expect(() => notifyConflict("bookmarks")).not.toThrow();
+  });
+});
+
+describe("obtaining a permission", () => {
+  it("still says granted for a permission the user granted by hand", async () => {
+    // THE Fennec fix. Firefox for Android has no prompt, but it does let the user grant
+    // permissions by hand in the add-on's own settings, and the reporter had done exactly
+    // that. request() answers false there whatever is held, so believing it would send
+    // them round the same dead end again.
+    //
+    // This used to be answered by a contains() check ahead of request(), asserting here
+    // that nothing was asked for. That check cost Firefox the click's user gesture (see
+    // ensurePermission), so the order is reversed and what proves the fix is the outcome:
+    // asked, told no, and granted anyway because we hold it.
+    permissions({ held: true, request: () => Promise.resolve(false) });
+    expect(await ensurePermission({ origins: ["https://cloud.example.com/*"] })).toBe("granted");
+  });
+
+  it("asks before it awaits anything else, or Firefox will not show the prompt", async () => {
+    // The 1.2.1 regression, in the shape Firefox actually enforces: request() has to run
+    // in the task the click is still being handled in. Any other extension API answers on
+    // a new one, and from there the call throws instead of prompting. Kesonode awaited
+    // contains() first, so from 1.2.1 no Firefox user was shown a permission prompt at
+    // all: WebDAV setup ended in "Kesonode needs permission to reach your WebDAV server"
+    // with nothing on screen to allow, and the data type toggles in Settings sprang back.
+    //
+    // Chrome's gesture is a time window rather than a task, which is why it never showed
+    // this and why the fake below has to model the rule rather than the API.
+    let spent = false;
+    replace("permissions", {
+      contains: () => { spent = true; return Promise.resolve(false); },
+      request: () => spent
+        ? Promise.reject(new Error("permissions.request may only be called from a user input handler"))
+        : Promise.resolve(true),
+    });
+    expect(await ensurePermission({ origins: ["https://cloud.example.com/*"] })).toBe("granted");
+  });
+
+  it("grants when the prompt is accepted", async () => {
+    permissions({ held: false, request: () => Promise.resolve(true) });
+    expect(await ensurePermission({ permissions: ["history"] })).toBe("granted");
+  });
+
+  it("reports a refusal as a refusal on a browser that can prompt", async () => {
+    permissions({ held: false, request: () => Promise.resolve(false) });
+    expect(await ensurePermission({ permissions: ["history"] })).toBe("denied");
+  });
+
+  it("reports 'cannot-prompt' on Android rather than blaming the user", async () => {
+    // permissions.request() is unimplemented on GeckoView (bugzilla 1601420): it resolves
+    // false whatever the user would have said. Calling that a refusal is what produced
+    // "Kesonode needs permission to reach your WebDAV server" with no prompt in sight.
+    replace("runtime", { ...api.runtime, getPlatformInfo: () => Promise.resolve({ os: "android" }) });
+    permissions({ held: false, request: () => Promise.resolve(false) });
+    expect(await ensurePermission({ origins: ["https://cloud.example.com/*"] })).toBe("cannot-prompt");
+  });
+
+  it("treats a THROWING request the same as a false one", async () => {
+    replace("runtime", { ...api.runtime, getPlatformInfo: () => Promise.resolve({ os: "android" }) });
+    permissions({ held: false, request: () => Promise.reject(new Error("not implemented")) });
+    expect(await ensurePermission({ permissions: ["tabs"] })).toBe("cannot-prompt");
+  });
+
+  it("believes what we HOLD over what request() answered", async () => {
+    // A browser that grants the permission and then reports false about it is not
+    // hypothetical enough to ignore, and the second check costs one call on the only
+    // path that already failed.
+    let granted = false;
+    replace("permissions", {
+      contains: () => Promise.resolve(granted),
+      request: () => { granted = true; return Promise.resolve(false); },
+    });
+    expect(await ensurePermission({ permissions: ["history"] })).toBe("granted");
+  });
+
+  it("treats an unanswerable contains() as a no rather than an exception", async () => {
+    replace("permissions", { contains: () => Promise.reject(new Error("nope")), request: () => Promise.resolve(false) });
+    expect(await hasPermission({ permissions: ["history"] })).toBe(false);
+  });
+});
+
+describe("identifying the platform", () => {
+  it("asks the browser, not the user agent", async () => {
+    const getPlatformInfo = vi.fn(() => Promise.resolve({ os: "android" }));
+    replace("runtime", { ...api.runtime, getPlatformInfo });
+    expect(await isAndroid()).toBe(true);
+    // Cached — the answer cannot change within a page's lifetime, and the callers are
+    // click handlers that must not spend an extra round trip before request().
+    expect(await isAndroid()).toBe(true);
+    expect(getPlatformInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the user agent when the browser won't say", async () => {
+    replace("runtime", { ...api.runtime, getPlatformInfo: () => Promise.reject(new Error("unsupported")) });
+    const ua = globalThis.navigator.userAgent;
+    Object.defineProperty(globalThis.navigator, "userAgent", { value: "Mozilla/5.0 (Android 14; Mobile)", configurable: true });
+    try {
+      expect(await isAndroid()).toBe(true);
+    } finally {
+      Object.defineProperty(globalThis.navigator, "userAgent", { value: ua, configurable: true });
+    }
+  });
+});
+
+describe("a permission prompt that never answers", () => {
+  // Vivaldi 8.2 on Android showed no prompt and never settled the request, so the setup's
+  // Finish & Sync waited forever with nothing on screen: a dead button, as reported.
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("says so once the request has gone unanswered, without abandoning it", async () => {
+    vi.useFakeTimers();
+    permissions({ held: false, request: () => new Promise<boolean>(() => {}) });
+    const onSlow = vi.fn();
+
+    void ensurePermissionWatched({ permissions: ["history"] }, onSlow, 8000);
+    await vi.advanceTimersByTimeAsync(7999);
+    expect(onSlow).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onSlow).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays quiet when the prompt is answered in time", async () => {
+    vi.useFakeTimers();
+    permissions({ held: false, request: () => Promise.resolve(true) });
+    const onSlow = vi.fn();
+
+    expect(await ensurePermissionWatched({ permissions: ["history"] }, onSlow, 8000)).toBe("granted");
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(onSlow).not.toHaveBeenCalled();
+  });
+});

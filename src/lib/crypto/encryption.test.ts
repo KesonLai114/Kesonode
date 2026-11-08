@@ -1,0 +1,67 @@
+import { describe, it, expect } from "vitest";
+import {
+  encrypt,
+  decrypt,
+  sha256,
+  generateSalt,
+  createKeyVerifier,
+  verifyPassphrase,
+} from "@/lib/crypto/encryption";
+
+describe("encryption", () => {
+  it("round-trips a plaintext payload", async () => {
+    const pass = "correct horse battery staple";
+    const enc = await encrypt("hello konode", pass);
+    expect(enc).not.toContain("hello"); // ciphertext, not plaintext
+    expect(await decrypt(enc, pass)).toBe("hello konode");
+  });
+
+  it("fails to decrypt with the wrong passphrase", async () => {
+    const enc = await encrypt("secret", "right-passphrase");
+    await expect(decrypt(enc, "wrong-passphrase")).rejects.toThrow();
+  });
+
+  it("handles large payloads (chunked base64, no RangeError)", async () => {
+    const big = "x".repeat(300_000);
+    const enc = await encrypt(big, "pw");
+    expect(await decrypt(enc, "pw")).toBe(big);
+  });
+
+  it("sha256 matches the known vector for 'abc'", async () => {
+    expect(await sha256("abc")).toBe(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+  });
+
+  it("generateSalt returns 16 distinct random bytes", () => {
+    const a = generateSalt();
+    const b = generateSalt();
+    expect(a.length).toBe(16);
+    expect(Array.from(a)).not.toEqual(Array.from(b));
+  });
+
+  it("verifies a passphrase via the verifier token", async () => {
+    const v = await createKeyVerifier("hunter2");
+    expect(await verifyPassphrase("hunter2", v)).toBe(true);
+    expect(await verifyPassphrase("not-it", v)).toBe(false);
+  });
+});
+
+describe("a corrupt blob says what a user can act on", () => {
+  it("answers a non-base64 blob with the same sentence as a wrong passphrase", async () => {
+    // `atob` throws its own InvalidCharacterError, and the decode used to sit OUTSIDE the
+    // try that produces the friendly message — so a truncated file surfaced as "Failed to
+    // execute 'atob' on 'Window': The string to be decoded is not correctly encoded",
+    // which names neither the problem nor anything to do about it.
+    await expect(decrypt("this is not base64 !!!", "correct horse battery")).rejects.toThrow(
+      /wrong passphrase or corrupted data/i
+    );
+  });
+
+  it("answers a truncated ciphertext the same way", async () => {
+    const full = await encrypt("hello", "correct horse battery");
+    await expect(decrypt(full.slice(0, 20), "correct horse battery")).rejects.toThrow(
+      /wrong passphrase or corrupted data/i
+    );
+  });
+});

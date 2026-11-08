@@ -1,0 +1,360 @@
+import type { IBackend, BackendConfig, DataType, SyncPacket } from "@/lib/types";
+import { withRetry, HttpError, defaultShouldRetry, rateLimitMessage } from "@/lib/utils/retry";
+import { logger } from "@/lib/utils/logger";
+import { utf8ToBase64 } from "@/lib/utils/base64";
+
+const GITHUB_API = "https://api.github.com";
+
+/**
+ * Coerce whatever the user pasted into the Repository field to an `owner/repo`
+ * slug. Accepts `owner/repo`, an `https://github.com/owner/repo` URL (with or
+ * without a `.git` suffix or trailing slash), and the `git@github.com:owner/repo`
+ * SSH form. The GitHub API 404s on a trailing slash or a full URL, so this keeps
+ * the field forgiving instead of failing with a confusing "not found".
+ */
+export function normalizeRepoSlug(input: string | undefined): string {
+  return (input ?? "")
+    .trim()
+    .replace(/^git@github\.com:/i, "")
+    .replace(/^https?:\/\/(www\.)?github\.com\//i, "")
+    .replace(/\.git$/i, "")
+    .replace(/^\/+|\/+$/g, "");
+}
+
+export class GitHubBackend implements IBackend {
+  readonly type = "github" as const;
+
+  constructor(private config: BackendConfig) {}
+
+  isConfigured(): boolean {
+    const gh = this.config.github;
+    return !!(gh?.token && gh?.repo);
+  }
+
+  private get gh() {
+    if (!this.config.github?.token) throw new Error("GitHub token not configured");
+    return this.config.github;
+  }
+
+  private get branch(): string { return this.gh.branch ?? "main"; }
+  private get path(): string { return this.gh.path ?? "konode"; }
+  /** `owner/repo`, tolerant of a pasted URL / `.git` suffix / trailing slash. */
+  private get repoSlug(): string { return normalizeRepoSlug(this.gh.repo); }
+
+  private headers(): HeadersInit {
+    return {
+      Authorization: `Bearer ${this.gh.token}`,
+      "Content-Type": "application/json",
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    };
+  }
+
+  async connect(): Promise<void> {
+    if (!this.gh.token) throw new Error("No token configured");
+    if (!this.gh.repo) throw new Error("No repository configured");
+    logger.info("GitHub connected", this.gh.repo ?? "");
+  }
+
+  async disconnect(): Promise<void> {}
+
+  async upload(packet: SyncPacket): Promise<void> {
+    // Ensure repo is initialized before first upload
+    await this.ensureRepoInitialized();
+
+    const branch = this.gh.branch ?? "main";
+    const filename = `${this.path}/konode_${packet.data_type}_${packet.device_id}.json`;
+    // Same UTF-8-then-base64 as before, via the shared helper — the old
+    // btoa(unescape(encodeURIComponent(…))) idiom is byte-identical but leans on
+    // deprecated `unescape` and was duplicated per call site.
+    const content = utf8ToBase64(JSON.stringify(packet, null, 2));
+
+    await withRetry(
+      async () => {
+        // Re-read the SHA on every attempt. GitHub's Contents API is eventually
+        // consistent, so right after a write a stale SHA can come back and cause a
+        // 409 ("…does not match <sha>"); backing off and re-reading lets it settle.
+        const sha = await this.getFileSHA(filename, branch);
+        const body: Record<string, unknown> = {
+          message: `sync: ${packet.data_type} [${packet.device_id.slice(0, 8)}]`,
+          content,
+          branch,
+        };
+        if (sha) body.sha = sha;
+
+        const res = await fetch(
+          `${GITHUB_API}/repos/${this.repoSlug}/contents/${filename}`,
+          { method: "PUT", headers: this.headers(), body: JSON.stringify(body) }
+        );
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new HttpError(res.status, `GitHub upload failed: ${res.status}. ${err.message ?? ""}`);
+        }
+
+        logger.info("GitHub.upload", `${packet.data_type} → ${filename}`);
+      },
+      {
+        // A 409 here is a stale-SHA conflict on our *own* file — retry it (with
+        // backoff, re-reading the SHA) on top of the default transient set.
+        maxAttempts: 5,
+        shouldRetry: (e) =>
+          defaultShouldRetry(e) || (e instanceof HttpError && e.status === 409),
+      }
+    );
+  }
+
+  private repoInitialized = false;
+
+  private async ensureRepoInitialized(): Promise<void> {
+    if (this.repoInitialized) return;
+
+    const repoRes = await fetch(
+      `${GITHUB_API}/repos/${this.repoSlug}`,
+      { headers: this.headers() }
+    );
+
+    if (!repoRes.ok) {
+      throw new Error(
+        repoRes.status === 404
+          ? `Repository '${this.repoSlug}' not found. Create it on GitHub first.`
+          : `GitHub repo check failed: ${repoRes.status}`
+      );
+    }
+
+    const repoData = await repoRes.json();
+
+    // Refuse to sync browser data to a public repo — with E2EE off (the default)
+    // it would publish bookmarks/history to the open internet.
+    if (repoData.private === false) {
+      throw new Error(
+        `Repository '${this.repoSlug}' is public. Refusing to sync your browser data to a public repo. Make it private and retry.`
+      );
+    }
+
+    // If repo is empty (no commits), initialize it
+    if (!repoData.default_branch) {
+      const initRes = await fetch(`${GITHUB_API}/repos/${this.repoSlug}/contents/README.md`, {
+        method: "PUT",
+        headers: this.headers(),
+        body: JSON.stringify({
+          message: "chore: initialize Kesonode sync repository",
+          content: btoa("# Kesonode Sync\n\nThis repository is used by the Kesonode browser extension to sync browser data.\n"),
+          // The CONFIGURED branch, not a hardcoded "main". Every other request here uses
+          // `this.branch`, so pinning the first commit to main meant a user who had set
+          // any other branch got their initial commit on a branch nothing else ever
+          // touches — and then every single upload failed against a branch that did not
+          // exist. On an empty repo this call is what creates the branch.
+          branch: this.branch,
+        }),
+      });
+      // The result was thrown away, and `repoInitialized` was set regardless. A token
+      // without Contents: write fails HERE, where we know exactly what went wrong — but
+      // the error surfaced later as an unexplained upload failure instead, once per data
+      // type, with nothing pointing at the real cause.
+      if (!initRes.ok) {
+        throw new HttpError(
+          initRes.status,
+          `Couldn't initialize '${this.repoSlug}': writing the first commit failed (HTTP ${initRes.status}). The token likely doesn't have Contents: write on this repository.`
+        );
+      }
+    }
+
+    this.repoInitialized = true;
+  }
+
+  private async getFileSHA(path: string, branch: string): Promise<string | null> {
+    const res = await fetch(
+      `${GITHUB_API}/repos/${this.repoSlug}/contents/${path}?ref=${branch}`,
+      // GitHub sends `Cache-Control: max-age=60` on contents reads, so the browser
+      // HTTP cache can hand back a stale SHA right after a write — which then makes
+      // the next PUT 409 ("does not match"). `no-store` forces a fresh read.
+      { headers: this.headers(), cache: "no-store" }
+    );
+    // 404 = the file doesn't exist yet → create it (no sha). Any OTHER non-ok
+    // (500, 403 rate-limit, network blip) is NOT "no file" — throw so the upload's
+    // withRetry can back off and re-read, instead of silently omitting the sha and
+    // turning a transient read failure into a spurious 409/422 create attempt.
+    if (res.status === 404) return null;
+    if (!res.ok) throw new HttpError(res.status, `GitHub SHA read failed: ${res.status}`);
+    return (await res.json()).sha ?? null;
+  }
+
+  async downloadAll(data_type: DataType, excludeDeviceId?: string): Promise<SyncPacket[]> {
+    return withRetry(async () => {
+      const res = await fetch(
+        `${GITHUB_API}/repos/${this.repoSlug}/contents/${this.path}?ref=${this.branch}`,
+        { headers: this.headers(), cache: "no-store" }
+      );
+      // 404 = the sync folder doesn't exist yet (no peers). Any other non-OK is a
+      // transient/real error — throw so withRetry retries it and a persistent failure
+      // surfaces, instead of silently masquerading as "no peers" (which would hide the
+      // peers' data and let this device overwrite the group with its own).
+      if (res.status === 404) return [];
+      if (!res.ok) throw new HttpError(res.status, `GitHub list failed: ${res.status}`);
+      const files: Array<{ name: string }> = await res.json();
+      const own = excludeDeviceId ? `konode_${data_type}_${excludeDeviceId}.json` : null;
+      const matches = files.filter(
+        f => f.name.includes(`konode_${data_type}_`) && f.name.endsWith(".json") && f.name !== own
+      );
+      // Fetch each via the authenticated Contents API (Accept: raw); the public
+      // download_url is unauthenticated and 404s/HTMLs on private repos.
+      const packets: SyncPacket[] = [];
+      for (const m of matches) {
+        const r = await fetch(
+          `${GITHUB_API}/repos/${this.repoSlug}/contents/${this.path}/${m.name}?ref=${this.branch}`,
+          { headers: { ...this.headers(), Accept: "application/vnd.github.raw+json" }, cache: "no-store" }
+        );
+        if (!r.ok) {
+          // See the note in webdav-backend: a peer we can't fetch silently vanished from
+          // the sync while it still reported success.
+          logger.warn(
+            "GitHub.downloadAll",
+            `Couldn't download ${m.name} (HTTP ${r.status}) — that device is left out of this sync`
+          );
+          continue;
+        }
+        try {
+          packets.push(JSON.parse(await r.text()) as SyncPacket);
+        } catch {
+          logger.warn("GitHub.downloadAll", `Skipping unreadable sync file: ${m.name}`);
+        }
+      }
+      return packets;
+    });
+  }
+
+  async putFile(name: string, content: string): Promise<void> {
+    await this.ensureRepoInitialized();
+    const filename = `${this.path}/${name}`;
+    const encoded = utf8ToBase64(content);
+    await withRetry(
+      async () => {
+        const sha = await this.getFileSHA(filename, this.branch);
+        const body: Record<string, unknown> = { message: `snapshot: ${name}`, content: encoded, branch: this.branch };
+        if (sha) body.sha = sha;
+        const res = await fetch(`${GITHUB_API}/repos/${this.repoSlug}/contents/${filename}`, {
+          method: "PUT", headers: this.headers(), body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new HttpError(res.status, `GitHub putFile failed: ${res.status}. ${err.message ?? ""}`);
+        }
+      },
+      { maxAttempts: 5, shouldRetry: (e) => defaultShouldRetry(e) || (e instanceof HttpError && e.status === 409) }
+    );
+  }
+
+  async getFile(name: string): Promise<string | null> {
+    return withRetry(async () => {
+      const res = await fetch(
+        `${GITHUB_API}/repos/${this.repoSlug}/contents/${this.path}/${name}?ref=${this.branch}`,
+        { headers: { ...this.headers(), Accept: "application/vnd.github.raw+json" }, cache: "no-store" }
+      );
+      if (res.status === 404) return null;
+      if (!res.ok) throw new HttpError(res.status, `GitHub getFile failed: ${res.status}`);
+      return res.text();
+    });
+  }
+
+  async listFiles(prefix: string): Promise<string[]> {
+    return withRetry(async () => {
+      const res = await fetch(
+        `${GITHUB_API}/repos/${this.repoSlug}/contents/${this.path}?ref=${this.branch}`,
+        { headers: this.headers(), cache: "no-store" }
+      );
+      if (res.status === 404) return [];
+      if (!res.ok) throw new HttpError(res.status, `GitHub list failed: ${res.status}`);
+      const files: Array<{ name: string }> = await res.json();
+      return files.map(f => f.name).filter(n => n.startsWith(prefix));
+    });
+  }
+
+  async deleteFile(name: string): Promise<void> {
+    const filename = `${this.path}/${name}`;
+    await withRetry(async () => {
+      const sha = await this.getFileSHA(filename, this.branch);
+      if (!sha) return; // already gone
+      const res = await fetch(`${GITHUB_API}/repos/${this.repoSlug}/contents/${filename}`, {
+        method: "DELETE", headers: this.headers(),
+        body: JSON.stringify({ message: `snapshot: delete ${name}`, sha, branch: this.branch }),
+      });
+      if (!res.ok && res.status !== 404) throw new HttpError(res.status, `GitHub DELETE failed: ${res.status}`);
+    });
+  }
+
+
+  async testConnection(): Promise<{ ok: boolean; message: string }> {
+    try {
+      if (!this.gh.token) return { ok: false, message: "No token. Paste a Personal Access Token or Fine-grained token" };
+
+      // Verify token works
+      const userRes = await fetch(`${GITHUB_API}/user`, { headers: this.headers() });
+      if (userRes.status === 429) return { ok: false, message: rateLimitMessage("GitHub") };
+      if (!userRes.ok) {
+        return {
+          ok: false,
+          message: userRes.status === 401
+            ? "Invalid token. Check it hasn't expired"
+            : `Token check failed (HTTP ${userRes.status})`,
+        };
+      }
+      const user = await userRes.json();
+
+      if (!this.gh.repo) return { ok: true, message: `Signed in as @${user.login}. Set a repository below` };
+
+      // Check repo access
+      const repoRes = await fetch(`${GITHUB_API}/repos/${this.repoSlug}`, { headers: this.headers() });
+
+      if (repoRes.status === 404) {
+        return {
+          ok: false,
+          message: `Repository '${this.repoSlug}' not found. Create it on GitHub (private) then retry.`,
+        };
+      }
+      if (repoRes.status === 403) {
+        return {
+          ok: false,
+          message: `No access to '${this.repoSlug}'. For Fine-grained tokens: ensure Contents → Read & Write is enabled.`,
+        };
+      }
+      if (!repoRes.ok) {
+        return { ok: false, message: `Repo check failed (HTTP ${repoRes.status})` };
+      }
+
+      const repo = await repoRes.json();
+      if (repo.private === false) {
+        return {
+          ok: false,
+          message: `'${repo.full_name}' is a public repository. Your synced data would be visible to everyone. Use a private repo.`,
+        };
+      }
+      const isEmpty = !repo.default_branch;
+
+      // Verify the BRANCH as well. A typo here passed this test and then 404'd on every
+      // upload — and 404 isn't retried, so the sync failed permanently while the test
+      // still said everything was fine. Skipped for an empty repo: it has no branches
+      // yet, the first upload creates one.
+      if (!isEmpty) {
+        const branch = this.branch;
+        const brRes = await fetch(
+          `${GITHUB_API}/repos/${this.repoSlug}/branches/${encodeURIComponent(branch)}`,
+          { headers: this.headers() }
+        );
+        if (brRes.status === 404) {
+          return {
+            ok: false,
+            message: `Branch '${branch}' doesn't exist in ${repo.full_name}. Its default branch is '${repo.default_branch}'.`,
+          };
+        }
+        if (!brRes.ok) return { ok: false, message: `Branch check failed (HTTP ${brRes.status})` };
+      }
+
+      return {
+        ok: true,
+        message: `@${user.login} → ${repo.full_name}${isEmpty ? " (empty repo, will initialize on first sync)" : ` (${this.branch})`}`,
+      };
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : "Connection failed" };
+    }
+  }
+}

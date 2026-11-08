@@ -1,0 +1,635 @@
+import type { RootKind } from "@/lib/utils/bookmark-roots";
+
+// ─── Core Types ────────────────────────────────────────────────────────────
+
+export type DataType = "bookmarks" | "history" | "sessions" | "extensions";
+export type BackendType = "gdrive" | "webdav" | "github";
+export type SyncStatus = "idle" | "syncing" | "success" | "error" | "conflict";
+export type ConflictStrategy = "lww" | "prefer-local" | "prefer-remote" | "manual";
+
+// ─── Sync Packet ───────────────────────────────────────────────────────────
+
+export interface SyncPacket {
+  version: "1.0";
+  device_id: string;
+  /**
+   * The human-readable name of the device that wrote this, so a peer can list devices by
+   * something other than a UUID.
+   *
+   * Optional: a packet from an older build carries none, and the reader falls back to a
+   * shortened id. Nothing keys off it — the file name and every identity check use
+   * device_id — so a rename never orphans a file. It travelled only inside the sessions
+   * payload before, which meant a device with Sessions turned off was nameless to its peers.
+   */
+  device_label?: string;
+  /**
+   * What the writing device runs: the browser's name and its engine, so a device list can
+   * tell the Chrome build and the Firefox build on one machine apart (#10).
+   *
+   * Optional, and absent from every packet written before it existed: a reader shows
+   * nothing then. Deliberately nothing more than these two: no version, no OS, no hardware
+   * or install id, since anything finer than "Brave on Chromium" starts to fingerprint.
+   * Display only, like `device_label`; nothing keys off it.
+   */
+  device_browser?: DeviceBrowser;
+  timestamp: string; // ISO-8601
+  data_type: DataType;
+  checksum: string; // SHA-256 hex of the plaintext payload
+  encrypted: boolean;
+  payload: string; // JSON string, optionally encrypted
+  // LEGACY (read-only): packets from older builds carry a passphrase verifier
+  // (createKeyVerifier) that peers check for a clearer mismatch error. It is no
+  // longer WRITTEN — a known-plaintext verifier on third-party storage is an
+  // offline brute-force oracle on the passphrase; a mismatch now surfaces via the
+  // payload's GCM decrypt failure instead. Absent on plaintext + current packets.
+  verifier?: string;
+}
+
+// ─── Bookmark ──────────────────────────────────────────────────────────────
+
+export interface SyncBookmark {
+  id: string;
+  parentId: string | null;
+  title: string;
+  url?: string;
+  dateAdded: number;
+  children?: SyncBookmark[];
+  _deleted?: boolean;
+  // Top-level roots only, and optional for back-compat with packets written before
+  // root-kind sync: the sender's own answer to "which root is this?" (bar/other/…), so
+  // the receiver doesn't have to guess from an id that is only meaningful on the sender's
+  // profile. Edge 142 renumbered every bookmark id, which is what made the guess fail.
+  rootKind?: RootKind;
+}
+
+// A deletion marker so a removed bookmark propagates (and doesn't resurrect from
+// a peer that still has it). Keyed by URL since merge is URL-based.
+export interface Tombstone {
+  url: string;
+  deletedAt: number; // epoch ms
+  // Did THIS device record the deletion? Local-only bookkeeping: it is stripped by
+  // exportBookmarkPayload and never reaches the wire.
+  //
+  // A merge folds every peer's log into ours, which is load-bearing (it is what keeps a
+  // deletion applied when a stale peer still advertises the bookmark). Publishing the
+  // result was not: every device reads every peer's file, so nothing needs relaying, and
+  // relaying turned one refused deletion into a request every device kept making of every
+  // other one, forever, for bookmarks all of them still had.
+  //
+  // `undefined` means own. Records written before 1.3.2 carry no flag, and a device
+  // cannot tell in hindsight which of them it recorded itself — reading them as foreign
+  // would silently drop deletions that have not reached every peer yet. The poisoned ones
+  // among them are caught on the way out instead, by the rule that we never publish a
+  // tombstone for a URL we still hold.
+  own?: boolean;
+}
+
+// A move marker: a URL was last (re)placed into its folder at `at`. Lets bookmark
+// MOVES propagate with last-write-wins (folders have no stable identity, and a
+// move keeps the URL but changes its parent — which the URL-keyed merge ignores).
+export interface MoveRecord {
+  url: string;
+  at: number; // epoch ms
+}
+
+// A folder-reposition marker. Folders carry no URL, so the URL-keyed MoveRecord
+// can't describe a folder that was reordered among its siblings. `path` is the
+// browser-agnostic identity — `[rootKind, ...ancestorTitles, folderTitle]` (e.g.
+// ["bar","Work","Docs"]). Propagated with LWW like MoveRecord. Only pure reorders
+// (same parent) are recorded; a cross-parent folder move relocates its bookmarks
+// via the URL move-log and the emptied shell is cleaned up on the receiver.
+//
+// Placement is ANCHOR-based, not absolute: `prev`/`next` are the keys of the
+// siblings immediately before/after the folder at move time (a bookmark → `u:<url>`,
+// a folder → `f:<title>`), so the receiver positions the folder relative to a shared
+// sibling — an absolute index doesn't translate when the two devices have different
+// (device-local) siblings. `index` is kept only as a last-resort fallback when
+// neither anchor exists locally.
+/**
+ * LWW record of a bookmark's TITLE, keyed by URL — the same identity the rest of the
+ * bookmark sync uses. The tree already carries titles; what was missing was any way to
+ * decide WHOSE title is newer, so the merge had no basis to overwrite one and simply
+ * never did.
+ */
+export interface TitleRecord {
+  url: string;
+  title: string;
+  at: number; // epoch ms
+}
+
+/**
+ * A folder rename, recorded as an OPERATION (from → to) rather than as a state.
+ *
+ * A folder has no cross-device id: its identity IS its path, i.e. its title and its
+ * ancestors' titles. So a rename changes the very key a state record would be filed
+ * under, and the receiver would see an unrelated folder appear rather than a rename.
+ * Recording the operation keeps both ends of the change, so the receiver can find the
+ * folder it already has and rename it in place.
+ */
+export interface FolderRenameRecord {
+  path: string[]; // the PARENT's path: [rootKind, …ancestorTitles]
+  from: string;
+  to: string;
+  at: number; // epoch ms
+  /** A bookmark the folder holds (canonical url), when same-named siblings make the path
+   *  name more than one folder (#51). Peers on an older build neither send nor read it. */
+  holds?: string;
+}
+
+export interface FolderMoveRecord {
+  path: string[];
+  index: number;   // fallback only (absolute position on the source device)
+  at: number;      // epoch ms
+  prev?: string;   // sibling key immediately before the folder (undefined = it's first)
+  next?: string;   // sibling key immediately after the folder (undefined = it's last)
+  holds?: string;  // as FolderRenameRecord.holds
+}
+
+/**
+ * When a bookmark appeared on THIS device, for the case where `dateAdded` says otherwise (#27).
+ *
+ * The merge decides "is this bookmark newer than that deletion" from `dateAdded`, which is
+ * right until an import sets it: a browser restoring a bookmark export honours the saved
+ * ADD_DATE, so the restored bookmark reads as months old and an older deletion undid the
+ * restore. Local-only; what peers need of it travels as the exported `dateAdded`.
+ */
+export interface AppearedRecord {
+  url: string;
+  at: number; // epoch ms
+}
+
+/**
+ * A folder was deleted on the device that published this (#26).
+ *
+ * A tombstone is URL-keyed, so it can say that a folder's bookmarks went but never that the
+ * folder did, and every device that applied the tombstones kept the folder as an empty shell.
+ * A folder has no cross-device id, so this is keyed the way FolderMoveRecord is:
+ * `path` = `[rootKind, …ancestorTitles, folderTitle]`.
+ */
+export interface FolderDeleteRecord {
+  path: string[];
+  at: number; // epoch ms
+  // Local bookkeeping, as on Tombstone: set on a deletion this device made, stripped before
+  // publishing. Only a device's own folder deletions ever leave it.
+  own?: boolean;
+}
+
+/**
+ * A folder that a merge emptied on THIS device and had to leave standing (#26).
+ *
+ * Emptying a folder is not deleting it, so when a peer's deletions empty a folder here and
+ * the peer has not recorded deleting the folder, it stays. If the peer deletes it later,
+ * nothing empties it here a second time, so the merge remembers which empty folders are its
+ * own doing: only those may be taken by a deletion record that arrives afterwards. An empty
+ * folder made here was never synced (empty folders never are), and a peer's record for the
+ * same path says nothing about it. Local-only, by local id; an entry goes when its folder
+ * does, or once something has been put back in it.
+ */
+export interface KeptShellRecord {
+  id: string;
+  at: number; // epoch ms, when a merge left it standing; for diagnosis, nothing expires by it
+}
+
+/**
+ * A bookmark a merge created on THIS device, for the case where the browser did not keep it
+ * as given (#41).
+ *
+ * The merge decides "do we have this already" by URL, so a browser that stores a different
+ * URL than it was handed never matches the peer's bookmark, and every merge added another
+ * copy. Norton Neo appears to keep a peer's `chrome://newtab/` as `neo://newtab/`, and one
+ * bookmark became thousands, one per sync.
+ *
+ * `kept` says what became of it. Absent: created as given, not yet confirmed by a later
+ * merge. A string: the browser keeps it under that URL, and the merge treats the two as one
+ * bookmark. `null`: it was gone by the next merge although nobody deleted it, so creating it
+ * again would only repeat that. Local-only, keyed by the peer's URL.
+ */
+export interface CreatedRecord {
+  url: string;
+  at: number; // epoch ms, when the merge created it
+  kept?: string | null;
+}
+
+/**
+ * A bookmark a PEER's deletion removed here, for the mass-delete guard's window (#41).
+ *
+ * The guard used to judge each merge on its own, so a deletion that arrived in several
+ * smaller pieces passed piece by piece, every one of them under the cap, and the tree
+ * emptied just the same. The merge now remembers what peers removed here recently and holds
+ * the next piece against the total. Keyed by canonical URL, the unit the guard counts in.
+ * Local-only; an entry leaves when it ages out of the window, and the whole list goes when
+ * the user approves a blocked deletion, which settles everything the card showed.
+ */
+export interface PeerRemovalRecord {
+  url: string;
+  at: number; // epoch ms, when the merge removed it
+}
+
+/**
+ * A folder or a single bookmark this device keeps out of sync (#54).
+ *
+ * An extension that maintains a huge bookmark folder of its own made every sync crawl and
+ * froze the browser while Kesonode pushed thousands of bookmarks it had no business with.
+ * Excluded nodes stay here untouched: they are never published, and nothing a peer sends
+ * creates, moves, renames or deletes anything inside them.
+ *
+ * Keyed the way folders are everywhere else, by path, because the peer's copy of the same
+ * folder has to be recognised too. `path` is `[rootKind, …ancestorTitles, folderTitle]` for
+ * a folder, and the PARENT folder's path for a bookmark, which also carries `url`. `id` is
+ * the local id when it was excluded: it keeps a folder excluded here after a rename or a
+ * move, which a path alone would lose. Local-only, like the rest of the settings.
+ */
+export interface BookmarkExclusion {
+  path: string[];
+  url?: string;
+  id?: string;
+}
+
+// Bookmark sync payload: the live tree plus the device's deletion log.
+// (Older packets are a bare SyncBookmark[] — handled for backward compatibility.)
+export interface BookmarkPayload {
+  tree: SyncBookmark[];
+  tombstones: Tombstone[];
+  moves?: MoveRecord[]; // optional for back-compat with packets written before move-sync
+  folderMoves?: FolderMoveRecord[]; // optional for back-compat (added with folder-reorder sync)
+  titles?: TitleRecord[]; // optional for back-compat (added with rename sync)
+  folderDeletes?: FolderDeleteRecord[]; // optional for back-compat (added with folder-deletion sync)
+  folderRenames?: FolderRenameRecord[]; // optional for back-compat (added with rename sync)
+}
+
+// ─── History ───────────────────────────────────────────────────────────────
+
+export interface SyncHistoryItem {
+  url: string;
+  title?: string;
+  lastVisitTime: number;
+  visitCount: number;
+  _deleted?: boolean;
+}
+
+// ─── Session ───────────────────────────────────────────────────────────────
+
+export interface SyncSession {
+  id: string;
+  device_id: string;
+  savedAt: string;
+  label?: string;
+  tabs: Array<{
+    url: string;
+    title?: string;
+    pinned: boolean;
+    favIconUrl?: string;
+    /** Index into `groups`. Absent for a tab in no group. */
+    group?: number;
+  }>;
+  /**
+   * The tab groups the tabs point into, in the order their first tab appears (#11).
+   * Absent when no tab is grouped, so a session without groups is byte for byte what it
+   * was before groups existed, and nobody's checksum moves on the upgrade. Older builds
+   * ignore both fields. Not the browser's own group id: that is a per-run integer and
+   * would change the checksum on every browser restart.
+   */
+  groups?: SyncTabGroup[];
+}
+
+/** The nine tab group colours Chrome and Firefox share, so a colour crosses engines as is. */
+export const TAB_GROUP_COLORS = [
+  "grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange",
+] as const;
+export type TabGroupColor = (typeof TAB_GROUP_COLORS)[number];
+
+/**
+ * One group of a session. Both fields need the `tabGroups` permission on the device that
+ * publishes them, so a device without it sends `{}`: the tabs still come back together,
+ * unnamed, in a colour the browser picks. `collapsed` is deliberately not here: it is
+ * per-screen view state, like the active tab, and a restore shows what it brought back.
+ */
+export interface SyncTabGroup {
+  title?: string;
+  color?: TabGroupColor;
+}
+
+/** A peer device's stored session, keyed by device_id in `konode_remote_sessions`. */
+export interface RemoteSessionEntry {
+  device_id: string;
+  timestamp: string; // ISO-8601, from SyncPacket.timestamp
+  session: SyncSession;
+}
+
+// ─── Extension ─────────────────────────────────────────────────────────────
+
+export interface SyncExtension {
+  id: string;
+  name: string;
+  version: string;
+  enabled: boolean;
+  homepageUrl?: string;
+  storeUrl: string; // a host-pinned store link: CWS listing (chrome) or AMO search (firefox)
+  description?: string;
+  // The browser's own ExtensionType string, carried verbatim. Chrome emits
+  // "extension" | "hosted_app" | "packaged_app" | "legacy_packaged_app" | "theme" |
+  // "login_screen_extension" and Firefox adds more; it never emits "app". This was
+  // declared as "extension" | "theme" | "app" and CAST to, which made every app-typed
+  // entry fail an === "extension" test at the display end after surviving the whole
+  // sync. Consumers ask what this is NOT (see missingLocally), never what it is.
+  type: string;
+  // Source browser/store. Extension ids don't cross stores, so this + the name/
+  // homepage drive cross-browser matching. Optional for legacy packets (inferred).
+  store?: "chrome" | "firefox";
+}
+
+/** A peer device's stored extension list, keyed by device_id in `konode_remote_extensions`. */
+export interface RemoteExtensionEntry {
+  device_id: string;
+  timestamp: string; // ISO-8601, from SyncPacket.timestamp
+  extensions: SyncExtension[];
+}
+
+export interface BackendConfig {
+  type: BackendType;
+  label: string;
+  enabled: boolean;
+  // Google Drive
+  gdrive?: {
+    folderId?: string;
+  };
+  // WebDAV (Nextcloud, pCloud, Synology, etc.)
+  webdav?: {
+    url: string;
+    username: string;
+    password: string;
+    path?: string; // subfolder, default "konode"
+  };
+  // GitHub
+  github?: {
+    token?: string;
+    repo?: string; // "owner/repo"
+    branch?: string;
+    path?: string; // subfolder in repo, default "konode"
+  };
+}
+
+// ─── Extension Settings ────────────────────────────────────────────────────
+
+export interface SyncSettings {
+  device_id: string;
+  device_label: string;
+  enabled_types: DataType[];
+  backends: BackendConfig[];
+  active_backend: BackendType | null;
+  sync_interval_seconds: number; // default: 60
+  conflict_strategy: ConflictStrategy;
+  history_days_limit: number; // default: 30
+  // Safety net: the bookmark merge refuses a peer deletion that would remove more
+  // than this % of local bookmarks (guards against a corrupt/oversized tombstone
+  // log wiping the tree). Default 60; raise it if you routinely delete in bulk.
+  bulk_delete_percent: number;
+  // Bookmarks this device keeps to itself (#54). Optional: settings stored by an older
+  // build have none, which means nothing is excluded.
+  excluded_bookmarks?: BookmarkExclusion[];
+  auto_sync: boolean;
+  sync_on_change: boolean;       // trigger sync immediately on bookmark change
+  notifications_enabled: boolean;
+  debug_mode: boolean;
+  // E2EE (opt-in) — wired into the sync engine; see src/lib/crypto/encryption.ts
+  encryption_enabled: boolean;
+  encryption_passphrase?: string; // device-local only: never uploaded, never leaves chrome.storage.local
+  // True once the user has finished first-run setup (onboarding wizard, or a first
+  // working config in Options). Gates the "Finish setting up Kesonode" card so it never
+  // reappears while the user browses provider cards after they're already set up.
+  onboarding_completed?: boolean;
+}
+
+// ─── Sync State ────────────────────────────────────────────────────────────
+
+export interface SyncState {
+  status: SyncStatus;
+  last_sync: string | null; // ISO-8601
+  last_error: string | null;
+  /**
+   * Which data types are behind `last_error`, when that can be said at all.
+   *
+   * A missing `management` permission is one type's problem; the other three sync in the
+   * same cycle and are perfectly current. Without this the popup had only the global
+   * status to colour by, so one revoked permission painted all four Active Streams red and
+   * called them stale. Absent or empty means NOT attributable (the backend is unreachable,
+   * the setup is incomplete), which really is every type's problem, and the popup falls
+   * back to reddening all of them. Optional because a state written by an older build does
+   * not carry it.
+   */
+  failed_types?: DataType[];
+  pending_conflicts: ConflictItem[];
+  sync_counts: Record<DataType, number>;
+  bytes_transferred: number;
+  // Set when the mass-delete guard blocked an unusual peer deletion on the last sync
+  // (and an auto-snapshot was saved). Cleared at the start of each sync. `blocked` is
+  // how many local bookmarks the guard refused to remove, out of `local_total`.
+  //
+  // Everything past `blocked` is optional because a notice written by an older build
+  // does not carry it, and this object is read back from storage. The device is the
+  // useful half: a bare count says 48 bookmarks without saying 48 of what, or which
+  // machine asked, and both are needed before anyone can decide to approve it (#18).
+  // `recent` is what other devices' deletions already removed here within the guard's
+  // window: when it is not 0, that is why a deletion smaller than the cap was held back.
+  // `sample` is the first few of the `blocked` bookmarks themselves (#23), already capped
+  // in count and length by the merge; `blocked` minus its length is the "and N more".
+  recovery_notice?: {
+    at: string;
+    blocked: number;
+    cap?: number;
+    local_total?: number;
+    recent?: number;
+    sample?: BlockedBookmark[];
+    device_id?: string;
+    device_label?: string | null;
+  } | null;
+}
+
+/**
+ * One bookmark a blocked deletion would remove, as the Activity card lists it (#23). Its
+ * fields are cut to a fixed length before they are stored: see `blockedSample`.
+ */
+export interface BlockedBookmark {
+  title: string;
+  url: string;
+}
+
+/**
+ * A queued manual conflict. Deliberately METADATA ONLY — it lives in `konode_state`,
+ * which every setState() rewrites in full and every STATE_UPDATE broadcasts to the
+ * popup. The peer's raw packet is parked in `konode_conflict_packets` instead (see
+ * getConflictPacket), keyed by `id`.
+ *
+ * The three payload fields below are LEGACY, read-only: older builds inlined the full
+ * local tree, the full remote tree AND the raw packet here — the same data up to three
+ * times, per conflict, in the object rewritten on every status change. `local_version`
+ * was never read by anything at all. They're still accepted so a conflict queued by an
+ * older build can still be resolved; nothing writes them.
+ */
+export interface ConflictItem {
+  id: string;
+  data_type: DataType;
+  device_id: string; // the peer this conflict is against (dedupe key; correct map key on apply)
+  /**
+   * That peer's name, copied off its packet when the conflict is queued.
+   *
+   * The card asks you to choose between local and remote, and without this there is
+   * nothing on it that says WHICH remote. With one peer you can infer it; with three the
+   * question cannot be answered as asked. `device_label` rides outside the encrypted
+   * payload, so it is readable here even when everything else about the peer is not.
+   * Optional because a peer on a build older than 1.2.0 sends no name at all.
+   */
+  device_label?: string;
+  local_version?: unknown;
+  remote_version?: unknown;
+  remote_packet?: SyncPacket;
+  /**
+   * What the peer's bookmarks held when this was queued, as a hash of `bookmarkContent`
+   * (#34). Resolving remembers it rather than the peer's checksum, which moves with every
+   * date and log entry the peer writes, so the same question stops coming back while the
+   * peer's bookmarks stay the same. Absent for history, and for a peer this device could
+   * not read.
+   */
+  content_key?: string;
+  timestamp: string;
+  resolved: boolean;
+}
+
+/**
+ * What differs between this device and the peer on one Manual conflict card (#35), as the
+ * Settings → Activity screen lists it. Worked out when the screen asks, from the parked
+ * peer packet and this device's data as it is right then, and never stored.
+ */
+export interface ConflictDiff {
+  /** What the peer has and this device does not. */
+  only_remote: DiffSide;
+  /** What this device has and the peer does not. */
+  only_local: DiffSide;
+  /** Bookmarks both have, under a different title or in a different folder. 0 for history. */
+  changed: number;
+}
+
+/** One side of a ConflictDiff: how many, and the first few to list. */
+export interface DiffSide {
+  total: number;
+  sample: BlockedBookmark[];
+}
+
+// ─── Backend Interface ─────────────────────────────────────────────────────
+
+export interface IBackend {
+  type: BackendType;
+  isConfigured(): boolean;
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  upload(packet: SyncPacket): Promise<void>;
+  // All peer packets, excluding the caller's own file — so the engine can merge
+  // across every device, not just one. Order is not significant: the engine sorts
+  // newest-first by packet timestamp (`orderPeersByTime`), so backends may return
+  // files in any order (e.g. directory-listing order).
+  downloadAll(data_type: DataType, excludeDeviceId?: string): Promise<SyncPacket[]>;
+  // `listVersions` used to sit here, returning [] from all three backends because none of
+  // them can answer it: Drive, GitHub and WebDAV expose file history in three unrelated
+  // ways and we never called it. Restore points are ordinary files we write ourselves
+  // (sync/snapshots.ts), which is what version history is actually built on here.
+  testConnection(): Promise<{ ok: boolean; message: string }>;
+  // ── Generic named-file ops on the Konode folder ──────────────────────────
+  // Used by snapshots (restore points) — files that live alongside the per-device
+  // sync files but are invisible to downloadAll (they don't match its
+  // `konode_<type>_` prefix). `name` is the basename in the folder; getFile returns
+  // null when absent; listFiles returns basenames that start with `prefix`.
+  putFile(name: string, content: string): Promise<void>;
+  getFile(name: string): Promise<string | null>;
+  listFiles(prefix: string): Promise<string[]>;
+  // The same listing with each file's modification time, where the backend's listing
+  // already carries one: Drive's `modifiedTime`, WebDAV's `getlastmodified`. The GitHub
+  // contents API has no such field, and one commits query per file is not "for free", so
+  // that backend leaves this out and callers fall back to what they did before (#30).
+  listFilesWithTimes?(prefix: string): Promise<ListedFile[]>;
+  deleteFile(name: string): Promise<void>;
+}
+
+export interface ListedFile {
+  name: string;
+  /** epoch ms, or null when the listing gave no parseable time for this file */
+  modified: number | null;
+}
+
+// ─── Snapshots (bookmark restore points) ────────────────────────────────────
+
+export interface SnapshotMeta {
+  name: string;      // backend filename: konode_snap_bookmarks_<epochms>.json
+  timestamp: number; // epoch ms (parsed from the filename)
+  count?: number;    // bookmark count, from the shared index; absent if unreadable
+}
+
+// ─── Message Types (background ↔ popup) ───────────────────────────────────
+
+export type ExtensionMessage =
+  | { type: "SYNC_NOW"; payload?: { data_type?: DataType } }
+  | { type: "GET_STATE" }
+  | { type: "GET_SETTINGS" }
+  | { type: "SAVE_SETTINGS"; payload: Partial<SyncSettings> }
+  | { type: "RESOLVE_CONFLICT"; payload: { id: string; resolution: "local" | "remote" } }
+  // What differs on one pending conflict (#35). Read-only: opens the parked packet, applies nothing.
+  | { type: "GET_CONFLICT_DIFF"; payload: { id: string } }
+  | { type: "CLEAR_AUDIT_LOG" }
+  | { type: "RESTORE_SESSION"; payload?: { id?: string } }
+  | { type: "TEST_BACKEND"; payload: { backend: BackendType } }
+  | { type: "CREATE_SNAPSHOT" }
+  | { type: "LIST_SNAPSHOTS" }
+  | { type: "RESTORE_SNAPSHOT"; payload: { name: string } }
+  | { type: "DELETE_SNAPSHOT"; payload: { name: string } }
+  | { type: "LIST_DEVICES" }
+  | { type: "FORGET_DEVICE"; payload: { device_id: string } }
+  // "Yes, apply the deletion the guard blocked." One-shot: consumed by the next merge.
+  // `blocked` is the count the UI actually showed, not a number re-read in the worker:
+  // sync() clears recovery_notice as it starts, so a click landing mid-sync would have
+  // found nothing pending and refused. It also pins the approval to what the user saw.
+  | { type: "APPROVE_BULK_DELETE"; payload: { blocked: number } };
+
+/**
+ * One device with files in the sync folder.
+ *
+ * Built from the file NAMES plus one small packet per device, never from the payloads: a
+ * history packet can be well over a megabyte, and listing devices has no business
+ * downloading it. `device_label` and `timestamp` sit outside the encrypted payload, so both
+ * are readable even with E2EE on and without the passphrase.
+ */
+/** The rendering engine a browser is built on. Three cover every browser Kesonode runs in. */
+export type BrowserEngine = "chromium" | "gecko" | "webkit";
+
+/** What a device runs, as its own packets say. See `SyncPacket.device_browser`. */
+export interface DeviceBrowser {
+  engine: BrowserEngine;
+  /** "Brave", "Firefox", "Zen". Absent where the browser does not name itself to an extension, the usual case on WebKit. */
+  name?: string;
+}
+
+export interface DeviceInfo {
+  device_id: string;
+  /** null when every packet we could read came from a build that didn't carry a name. */
+  label: string | null;
+  /**
+   * ISO-8601 of this device's last upload: the newest modification time among its files when
+   * the backend's listing reports them, else the timestamp of the one packet we read for its
+   * name. null if neither was available.
+   */
+  lastSeen: string | null;
+  /** null when the packet read for the name came from a build that did not record it. */
+  browser: DeviceBrowser | null;
+  types: DataType[];
+  isSelf: boolean;
+}
+
+export type ExtensionResponse =
+  | { type: "STATE"; payload: SyncState }
+  | { type: "SETTINGS"; payload: SyncSettings }
+  | { type: "OK" }
+  | { type: "ERROR"; payload: string }
+  | { type: "TEST_RESULT"; payload: { ok: boolean; message: string } }
+  | { type: "SNAPSHOTS"; payload: SnapshotMeta[] }
+  | { type: "SNAPSHOT_RESTORED"; payload: { restored: number } }
+  | { type: "DEVICES"; payload: DeviceInfo[] }
+  | { type: "DEVICE_FORGOTTEN"; payload: { removed: number } }
+  | { type: "CONFLICT_DIFF"; payload: ConflictDiff };
