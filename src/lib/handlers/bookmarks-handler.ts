@@ -19,7 +19,7 @@ import {
   asRootKind, defaultOtherRootId, findLocalRootByKind, matchLocalRoot, matchLocalRootEx,
   rootKindOf,
 } from "@/lib/utils/bookmark-roots";
-import { canonicalUrlKey } from "@/lib/utils/url";
+import { canonicalUrlKey, isSafeBookmarkUrl } from "@/lib/utils/url";
 import {
   excludedByOwnRule, excludedInSubtree, folderPathExcluded, mayHaveOwnRule, partitionExcluded, peerRules,
   rootKey, type Partition,
@@ -1160,6 +1160,8 @@ async function restoreNode(
 ): Promise<void> {
   try {
     if (node.url) {
+      // 丢弃携带危险 scheme 的远端书签（javascript:/data:/file: 等），与数据备份导入守卫保持一致。
+      if (!isSafeBookmarkUrl(node.url)) return;
       await browser.bookmarks.create({
         parentId,
         title: node.title,
@@ -1658,6 +1660,8 @@ async function mergeBookmarks(
         }
         return;
       }
+      // 丢弃携带危险 scheme 的远端书签（javascript:/data:/file: 等），不写入本地浏览器。
+      if (!isSafeBookmarkUrl(node.url)) return;
       try {
         const parentId = await ensureParent();
         // Resolve the position against the LOCAL parent (same anchor-then-clamp rule
@@ -2191,6 +2195,8 @@ export async function restoreBookmarks(snapshot: SyncBookmark[]): Promise<number
       node: SyncBookmark, ensureParent: () => Promise<string>, siblings: SyncBookmark[], i: number,
     ): Promise<void> => {
       if (node.url) {
+        // 丢弃携带危险 scheme 的远端书签（javascript:/data:/file: 等）。
+        if (!isSafeBookmarkUrl(node.url)) return;
         const key = canonicalUrlKey(node.url);
         if (isPresent(key)) return;
         try {

@@ -407,6 +407,20 @@ export interface SyncSettings {
    * Every device in a sync group must pick the same mode. See src/lib/compat/protocol.ts.
    */
   compat_mode?: "upstream" | "isolated" | "standalone";
+  /**
+   * Local change guard (lib/sync/change-guard.ts). When on, a bookmark tree that keeps
+   * changing by a large amount across consecutive cycles has its upload held until it
+   * settles, so a runaway rewrite or a browser's own sync looping with Kesonode is not
+   * broadcast to every peer. Default on. Optional so a blob written by an older build
+   * (which had no such field) simply keeps the default.
+   */
+  guard_enabled?: boolean;
+  /**
+   * The absolute floor (bookmark entries) that counts as a "large" change between two
+   * cycles, before the 30%-of-the-tree check. Exposed so users who routinely import or
+   * reorganize big folders can raise it. Optional: older builds have none → default.
+   */
+  guard_cap?: number;
 }
 
 /**
@@ -420,12 +434,29 @@ export interface SyncSettings {
  *
  * `keys.*` keep the exact values found in chrome.storage.local. They are not parsed here
  * so a future session shape needs no change to the backup format. See utils/storage.ts.
+ *
+ * Compatibility rule: add settings as OPTIONAL fields with a default and keep the format
+ * version where it is. Only a change an old reader cannot understand warrants a new
+ * version, and that version needs a migration in utils/storage.ts.
  */
 export interface SettingsBackup {
   format: "kesonode-settings";
-  version: 1;
+  /**
+   * The FORMAT version, not the extension version. `exportSettingsBackup` always writes
+   * SETTINGS_BACKUP_VERSION; `importSettingsBackup` reads every version in
+   * SUPPORTED_BACKUP_VERSIONS and walks BACKUP_MIGRATIONS up to the current one. See
+   * utils/storage.ts before changing any of them.
+   */
+  version: number;
   exportedAt: string;
   extensionVersion: string;
+  /**
+   * Optional SHA-256 over the whole envelope except this field. Optional on purpose: a
+   * file written before checksums existed has none and must stay readable. It detects
+   * accidental damage only — there is no secret, so it is not an authentication code.
+   * See utils/checksum.ts.
+   */
+  checksum?: string;
   keys: {
     settings: SyncSettings;
     gdriveSession?: unknown;
@@ -475,6 +506,21 @@ export interface SyncState {
     sample?: BlockedBookmark[];
     device_id?: string;
     device_label?: string | null;
+  } | null;
+  /**
+   * Set when the local change guard held THIS device's bookmark upload on the last sync
+   * (lib/sync/change-guard.ts). Nothing was deleted or reverted: the tree changed by
+   * more than the cap between two syncs, so publishing it was paused until it settles.
+   * Cleared at the start of each sync. Optional because a state written by an older
+   * build does not carry it.
+   */
+  guard_notice?: {
+    at: string;
+    /** Entries differing from the previous cycle's tree. */
+    changed: number;
+    cap: number;
+    /** Consecutive large-change cycles that led to the hold. */
+    unstableRounds: number;
   } | null;
 }
 
@@ -591,9 +637,18 @@ export interface ListedFile {
 // ─── Snapshots (bookmark restore points) ────────────────────────────────────
 
 export interface SnapshotMeta {
-  name: string;      // backend filename: konode_snap_bookmarks_<epochms>.json
+  /** backend filename. `konode_snap_kept_<epochms>.json` is a point kept forever (Kesonode). */
+  name: string;
   timestamp: number; // epoch ms (parsed from the filename)
   count?: number;    // bookmark count, from the shared index; absent if unreadable
+  /** The device that saved it, as `SyncSettings.device_label`. Absent on older index entries. */
+  device_label?: string;
+  /** The name the user gave this restore point. Absent or empty means unnamed. */
+  label?: string;
+  /** Kept forever: outside the rolling 10-point retention. Derived from the filename. */
+  pinned?: boolean;
+  /** "manual" = the button in Settings; "auto" = the bulk-delete guard. Absent = older build. */
+  origin?: "manual" | "auto";
 }
 
 // ─── Message Types (background ↔ popup) ───────────────────────────────────
@@ -606,17 +661,19 @@ export type ExtensionMessage =
   // Carry configuration across an extension-ID change. EXPORT answers SETTINGS_BACKUP;
   // IMPORT takes a parsed (untrusted) JSON value and validates it in utils/storage.ts.
   | { type: "EXPORT_SETTINGS" }
-  | { type: "IMPORT_SETTINGS"; payload: unknown }
+  | { type: "IMPORT_SETTINGS"; payload: unknown; confirmImport?: boolean }
   | { type: "RESOLVE_CONFLICT"; payload: { id: string; resolution: "local" | "remote" } }
   // What differs on one pending conflict (#35). Read-only: opens the parked packet, applies nothing.
   | { type: "GET_CONFLICT_DIFF"; payload: { id: string } }
   | { type: "CLEAR_AUDIT_LOG" }
   | { type: "RESTORE_SESSION"; payload?: { id?: string } }
   | { type: "TEST_BACKEND"; payload: { backend: BackendType } }
-  | { type: "CREATE_SNAPSHOT" }
+  | { type: "CREATE_SNAPSHOT"; payload?: { pinned?: boolean } }
   | { type: "LIST_SNAPSHOTS" }
   | { type: "RESTORE_SNAPSHOT"; payload: { name: string } }
   | { type: "DELETE_SNAPSHOT"; payload: { name: string } }
+  | { type: "RENAME_SNAPSHOT"; payload: { name: string; label: string } }
+  | { type: "PIN_SNAPSHOT"; payload: { name: string; pinned: boolean } }
   | { type: "LIST_DEVICES" }
   | { type: "FORGET_DEVICE"; payload: { device_id: string } }
   // "Yes, apply the deletion the guard blocked." One-shot: consumed by the next merge.

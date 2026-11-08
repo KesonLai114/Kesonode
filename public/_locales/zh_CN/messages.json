@@ -87,6 +87,15 @@
       }
     }
   },
+  "popup_guard_notice": {
+    "message": "本机书签持续大幅变动（本轮 $COUNT$ 处），已暂停向其它设备发布。未删除任何内容，已保存还原点，书签稳定后会自动恢复。详见 设置 → 活动。",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
   "popup_no_backend": {
     "message": "未配置后端"
   },
@@ -1355,7 +1364,7 @@
     "message": "还原点"
   },
   "opt_snapshots_section_sub": {
-    "message": "在后端保存了带时间戳的书签副本，所有设备共享。恢复时会把该设备缺失的书签补回（永不删除）。仅保留最新的 10 条，较旧的会自动移除，你也可以在此删除任意一条。"
+    "message": "在后端保存了带时间戳的书签副本，所有设备共享。恢复时会把该设备缺失的书签补回（永不删除）。普通还原点仅保留最新的 10 条，较旧的会自动移除；标记为「永久保留」的还原点不会被自动清理，只能手动删除。在此可重命名、永久保留、恢复或删除任意一条。"
   },
   "opt_snap_now_label": {
     "message": "立即保存还原点"
@@ -1413,6 +1422,27 @@
   },
   "opt_snap_delete_aria": {
     "message": "删除此还原点"
+  },
+  "opt_snap_create_kept": {
+    "message": "创建永久保留的还原点"
+  },
+  "opt_snap_rename": {
+    "message": "重命名此还原点"
+  },
+  "opt_snap_rename_placeholder": {
+    "message": "输入名称"
+  },
+  "opt_snap_rename_save": {
+    "message": "保存名称"
+  },
+  "opt_snap_pin": {
+    "message": "永久保留"
+  },
+  "opt_snap_unpin": {
+    "message": "取消永久保留"
+  },
+  "opt_snap_auto": {
+    "message": "自动保存"
   },
   "opt_log_section": {
     "message": "日志"
@@ -1673,5 +1703,40 @@
   },
   "popup_setup_cta": {
     "message": "开始设置"
+  },
+  "popup_guard_detail": {
+    "message": "本轮变动 $COUNT$ 处 · 上限 $CAP$ · 已连续 $ROUNDS$ 轮",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "cap": {
+        "content": "$2"
+      },
+      "rounds": {
+        "content": "$3"
+      }
+    }
+  },
+  "popup_guard_coexist": {
+    "message": "这通常意味着 Kesonode 正与浏览器自带的同步一起运行。书签请只用一套同步；或在「设置 → 数据类型」里把书签排除出同步，让另一套工具拥有的文件夹不进入 Kesonode。"
+  },
+  "popup_guard_dismiss": {
+    "message": "不再提示"
+  },
+  "opt_guard_section": {
+    "message": "本机变更护栏"
+  },
+  "opt_guard_label": {
+    "message": "书签异常剧变时暂停发布"
+  },
+  "opt_guard_desc": {
+    "message": "当本机书签在连续多轮里大幅变动时，暂缓上传，直到书签树稳定。可防止失控的同步或扩展把半成品重写广播给所有设备。一次性的批量整理仍会立即发布。"
+  },
+  "opt_guard_cap_label": {
+    "message": "变动阈值（条目/轮）"
+  },
+  "opt_guard_cap_desc": {
+    "message": "单轮变动超过此条目数，或超过整树的 30%（取较大者）即视为大幅变动。若你经常导入或整理大型文件夹，可调高。"
   }
 }

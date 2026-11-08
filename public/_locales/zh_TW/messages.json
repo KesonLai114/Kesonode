@@ -87,6 +87,15 @@
       }
     }
   },
+  "popup_guard_notice": {
+    "message": "本機書籤持續大幅變動（本輪 $COUNT$ 處），已暫停發佈到其它裝置。未刪除任何內容，已儲存還原點，書籤穩定後會自動恢復。詳見「設定 → 活動」。",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
   "popup_no_backend": {
     "message": "尚未設定後端"
   },
@@ -1423,6 +1432,27 @@
   "opt_snap_delete_aria": {
     "message": "刪除這個還原點"
   },
+  "opt_snap_create_kept": {
+    "message": "建立永久保留的還原點"
+  },
+  "opt_snap_rename": {
+    "message": "重新命名此還原點"
+  },
+  "opt_snap_rename_placeholder": {
+    "message": "輸入名稱"
+  },
+  "opt_snap_rename_save": {
+    "message": "儲存名稱"
+  },
+  "opt_snap_pin": {
+    "message": "永久保留"
+  },
+  "opt_snap_unpin": {
+    "message": "取消永久保留"
+  },
+  "opt_snap_auto": {
+    "message": "自動儲存"
+  },
   "opt_log_section": {
     "message": "紀錄"
   },
@@ -1673,5 +1703,40 @@
   },
   "opt_devices_bad_reply": {
     "message": "無法讀取裝置清單。"
+  },
+  "popup_guard_detail": {
+    "message": "本輪變動 $COUNT$ 處 · 上限 $CAP$ · 已連續 $ROUNDS$ 輪",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "cap": {
+        "content": "$2"
+      },
+      "rounds": {
+        "content": "$3"
+      }
+    }
+  },
+  "popup_guard_coexist": {
+    "message": "這通常表示 Kesonode 正與瀏覽器自帶的同步一起執行。書籤請只用一套同步；或在「設定 → 資料類型」中把書籤排除出同步，讓另一套工具擁有的資料夾不進入 Kesonode。"
+  },
+  "popup_guard_dismiss": {
+    "message": "不再提示"
+  },
+  "opt_guard_section": {
+    "message": "本機變更護欄"
+  },
+  "opt_guard_label": {
+    "message": "書籤異常劇變時暫停發佈"
+  },
+  "opt_guard_desc": {
+    "message": "當本機書籤在連續多輪裡大幅變動時，暫緩上傳，直到書籤樹穩定。可防止失控的同步或擴充套件把半成品重寫廣播給所有裝置。一次性的批次整理仍會立即發佈。"
+  },
+  "opt_guard_cap_label": {
+    "message": "變動閾值（條目/輪）"
+  },
+  "opt_guard_cap_desc": {
+    "message": "單輪變動超過此條目數，或超過整樹的 30%（取較大者）即視為大幅變動。若你常匯入或整理大型資料夾，可調高。"
   }
 }

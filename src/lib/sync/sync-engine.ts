@@ -1,9 +1,9 @@
 import type { SyncSettings, SyncState, DataType, SyncPacket, SyncSession, SyncExtension, ConflictItem, BackendConfig,
-  DeviceInfo, DeviceBrowser, ConflictDiff, ListedFile,
+  DeviceInfo, DeviceBrowser, ConflictDiff, ListedFile, BookmarkPayload,
 } from "@/lib/types";
 import { createBackend } from "@/lib/backends/abstract-backend";
 import { normalizeRepoSlug } from "@/lib/backends/github-backend";
-import { createSnapshot as writeSnapshot, listSnapshots as readSnapshots, restoreSnapshot as applySnapshot, deleteSnapshot as dropSnapshot, type SnapshotMeta } from "@/lib/sync/snapshots";
+import { createSnapshot as writeSnapshot, listSnapshots as readSnapshots, restoreSnapshot as applySnapshot, deleteSnapshot as dropSnapshot, renameSnapshot as renameSnapshotFile, setSnapshotPinned as pinSnapshotFile, type SnapshotMeta, type CreateSnapshotOptions } from "@/lib/sync/snapshots";
 import {
   bookmarkContent, exportBookmarkPayload, importBookmarks, peerTreeAsMerged, type BulkDeleteBlock,
 } from "@/lib/handlers/bookmarks-handler";
@@ -35,6 +35,8 @@ import {
   setBulkDeleteApproval,
   getListFailureNoted,
   setListFailureNoted,
+  getGuardSnapshotTaken,
+  setGuardSnapshotTaken,
   acquireSyncLock,
   releaseSyncLock,
   dropRemoteDevice,
@@ -58,6 +60,7 @@ import {
   setCompatMode,
 } from "@/lib/compat/protocol";
 import { ConflictResolver, notifyConflict, orderPeersByTime } from "./conflict-resolver";
+import { evaluateLocalDrift, GUARD_ABSOLUTE_FLOOR } from "./change-guard";
 
 // How long the persisted sync lock stays valid before it's treated as stale, so a
 // crashed/suspended sync self-heals. Only governs cross-instance recovery speed:
@@ -321,6 +324,13 @@ export class SyncEngine {
   private bulkBlockedThisSync:
     | (BulkDeleteBlock & { device_id?: string; device_label?: string | null })
     | null = null;
+  /** Local change guard: true → this cycle must NOT publish our bookmark file. Reset at
+   * the top of sync(), read by uploadIfChanged, the one gate every upload path uses. */
+  private guardHoldThisSync = false;
+  /** The banner the popup shows while that hold is in effect. */
+  private guardNoticeThisSync: SyncState["guard_notice"] = null;
+  /** Set when a held drift streak ended this cycle, so a one-time "resumed" log line fires. */
+  private guardClearedThisSync = false;
   /**
    * The user's approval for a blocked deletion, read once per sync and cleared as it is
    * read, then handed to every bookmark merge this sync runs.
@@ -492,6 +502,9 @@ export class SyncEngine {
     this.peersThisSync.clear();
     this.bulkBlockedThisSync = null;
     this.historyIndexThisSync = null;
+    this.guardHoldThisSync = false;
+    this.guardNoticeThisSync = null;
+    this.guardClearedThisSync = false;
     const backend = createBackend(backendConfig);
 
     try {
@@ -501,7 +514,7 @@ export class SyncEngine {
       // failure rather than holding it for the full TTL.
       this.bulkApprovedThisSync = await getBulkDeleteApproval();
       if (this.bulkApprovedThisSync > 0) await setBulkDeleteApproval(0);
-      const state = await setState({ status: "syncing", last_error: null, recovery_notice: null });
+      const state = await setState({ status: "syncing", last_error: null, recovery_notice: null, guard_notice: null });
       this.onStateChange(state);
 
       await backend.connect();
@@ -516,6 +529,11 @@ export class SyncEngine {
       const recovery = await this.recordBlockedDeletion(
         this.bulkBlockedThisSync,
         typesToSync.includes("bookmarks"),
+      );
+      const guardNotice = await this.recordGuardIncident(
+        this.guardNoticeThisSync,
+        typesToSync.includes("bookmarks"),
+        this.guardClearedThisSync,
       );
 
       // Encryption disagreements and per-type failures share one surface: both mean
@@ -554,12 +572,13 @@ export class SyncEngine {
         failed_types: [...this.failedTypes],
         bytes_transferred: prevState.bytes_transferred + this.bytesThisSync,
         recovery_notice: recovery,
+        guard_notice: guardNotice,
         ...(stale > 0 ? { pending_conflicts: conflicts } : {}),
       });
       this.onStateChange(newState);
       logger.info("SyncEngine", problems.length ? `Sync complete with ${problems.length} problem(s)` : "Sync complete");
       // `noteCleanSync` never throws, so it cannot turn this sync into a failed one.
-      if (!this.rateCountDone && newState.status === "success" && !recovery && this.peersThisSync.size > 0) {
+      if (!this.rateCountDone && newState.status === "success" && !recovery && !guardNotice && this.peersThisSync.size > 0) {
         this.rateCountDone = await noteCleanSync();
       }
 
@@ -806,7 +825,7 @@ export class SyncEngine {
           "restore point was saved. Apply it or keep them in Settings → Activity."
       );
       try {
-        await this.snapshotNow();
+        await this.snapshotNow({ origin: "auto" });
         await setRecoverySnapshotTaken(true);
       } catch (e) {
         // Leave the latch clear so the next cycle retries the write — a failed
@@ -826,6 +845,51 @@ export class SyncEngine {
       device_id: blocked.device_id,
       device_label: blocked.device_label ?? null,
     };
+  }
+
+  /**
+   * One restore point and one retained warning per held-drift incident.
+   *
+   * A tree that keeps drifting is re-evaluated every cycle, so without the latch this
+   * would evict the 10-slot snapshot ring in minutes — exactly why the mass-delete
+   * guard's latch exists. The guard never changes the tree, so the restore point is a
+   * precaution, not a repair: it is there in case the source of the drift is hostile.
+   */
+  private async recordGuardIncident(
+    notice: SyncState["guard_notice"],
+    syncedBookmarks: boolean,
+    cleared = false
+  ): Promise<SyncState["guard_notice"]> {
+    if (!notice) {
+      if (syncedBookmarks && (await getGuardSnapshotTaken())) {
+        await setGuardSnapshotTaken(false);
+      }
+      // The hold just lifted on its own: one quiet cycle cleared the streak. A short, ok-level
+      // line so the user can see in Settings → Activity that publishing is flowing again — not
+      // a warning, because nothing was wrong that needed action.
+      if (cleared) {
+        logger.event("changeGuard", "Publishing resumed: this device's bookmark tree settled after the local change guard held it. Nothing was lost.");
+      }
+      return null;
+    }
+    if (!(await getGuardSnapshotTaken())) {
+      logger.warn(
+        "changeGuard",
+        `Paused publishing this device's bookmarks: ${notice.changed} entries changed since ` +
+          `the last cycle (cap ${notice.cap}, ${notice.unstableRounds} cycles in a row). ` +
+          "Nothing was removed or reverted, and a restore point was saved. " +
+          "Publishing resumes on its own once the tree stops changing. " +
+          "If you did not make this change, check whether your browser's own bookmark " +
+          "sync is running alongside Kesonode. See Settings → Activity."
+      );
+      try {
+        await this.snapshotNow();
+        await setGuardSnapshotTaken(true);
+      } catch (e) {
+        logger.warn("SyncEngine", `Guard recovery snapshot failed: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+    return notice;
   }
 
   // ─── Snapshots (restore points) ───────────────────────────────────────
@@ -987,8 +1051,18 @@ export class SyncEngine {
   }
 
   /** Write a snapshot of the current bookmark tree to the backend. */
-  async snapshotNow(): Promise<SnapshotMeta> {
-    return this.withBackend((b) => writeSnapshot(b, this.settings));
+  async snapshotNow(opts: CreateSnapshotOptions = {}): Promise<SnapshotMeta> {
+    return this.withBackend((b) => writeSnapshot(b, this.settings, opts));
+  }
+
+  /** Name (or un-name) one restore point, in the shared index. */
+  async renameSnapshot(name: string, label: string): Promise<void> {
+    await this.withBackend((b) => renameSnapshotFile(b, this.settings, name, label));
+  }
+
+  /** Keep one restore point forever, or put it back into the rolling ten. */
+  async pinSnapshot(name: string, pinned: boolean): Promise<void> {
+    await this.withBackend((b) => pinSnapshotFile(b, this.settings, name, pinned));
   }
 
   /** List the backend's bookmark restore points, newest first. */
@@ -1124,6 +1198,35 @@ export class SyncEngine {
       // 2. Build local payload
       const localPayload = await this.buildPayload(dataType);
       const isEmpty = await this.isPayloadEmpty(dataType, localPayload);
+
+      // 2b. Local change guard. Measured on the PRE-MERGE payload: peer changes folded
+      // in below are already arbitrated by LWW and must never count as local churn.
+      // Fail-open on any error here — a broken guard must not be able to stop syncing.
+      if (dataType === "bookmarks") {
+        try {
+          const drift = await evaluateLocalDrift((localPayload as BookmarkPayload).tree, {
+            enabled: this.settings.guard_enabled ?? true,
+            floor: this.settings.guard_cap ?? GUARD_ABSOLUTE_FLOOR,
+          });
+          if (drift.cleared) this.guardClearedThisSync = true;
+          if (drift.hold) {
+            this.guardHoldThisSync = true;
+            this.guardNoticeThisSync = {
+              at: new Date().toISOString(),
+              changed: drift.changed,
+              cap: drift.cap,
+              unstableRounds: drift.unstableRounds,
+            };
+            logger.warn(
+              "changeGuard",
+              `Holding this device's bookmark upload: ${drift.changed} entries changed since ` +
+                `the last cycle (cap ${drift.cap}, ${drift.unstableRounds} consecutive cycles)`
+            );
+          }
+        } catch (err) {
+          logger.warn("changeGuard", `Skipped the local change guard this cycle: ${err instanceof Error ? err.message : err}`);
+        }
+      }
 
       // Verbose troubleshooting line (only emitted when Debug mode is on).
       logger.debug("SyncEngine", `${dataType}: ${peers.length} peer(s), local ${isEmpty ? "empty" : "non-empty"}, strategy ${this.settings.conflict_strategy}`);
@@ -1486,6 +1589,14 @@ export class SyncEngine {
     dataType: DataType,
     payload: unknown
   ): Promise<void> {
+    // The local change guard gates PUBLISHING only. Pulling and merging peers still ran
+    // this cycle: receiving another device's changes is never dangerous, while
+    // broadcasting a half-finished rewrite of our own tree is. This is the one gate
+    // all three upload paths (no peers / manual / auto) go through.
+    if (dataType === "bookmarks" && this.guardHoldThisSync) {
+      logger.info("changeGuard", "bookmarks: publishing held by the local change guard this cycle");
+      return;
+    }
     // Compute the (cheap) plaintext checksum BEFORE building the full packet, so an
     // unchanged encrypted sync doesn't pay the expensive PBKDF2 for encrypt+verifier
     // on every idle interval — only when there's actually something to upload.
@@ -1576,6 +1687,10 @@ export class SyncEngine {
     // Version first: a packet written under rules we don't know must not be interpreted
     // under the v1.0 ones, checksum or no checksum. Legacy packets with no version pass.
     assertSupportedPacketVersion(packet);
+    // 畸形包防御：device_id 必须是非空字符串，否则后续 slice/比较抛错并使整轮同步失败。
+    if (typeof packet.device_id !== "string" || packet.device_id.length === 0) {
+      throw new Error("Malformed SyncPacket: device_id is missing or not a string.");
+    }
     const localE2ee = this.e2eeActive;
     // Refuse to import a plaintext peer while E2EE is active here. The auto-merge
     // path already skips plaintext peers before calling applyRemote (they're stale/

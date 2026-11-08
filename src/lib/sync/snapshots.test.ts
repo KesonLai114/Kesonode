@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createSnapshot, listSnapshots, restoreSnapshot, pruneSnapshots, deleteSnapshot } from "@/lib/sync/snapshots";
+import { createSnapshot, listSnapshots, restoreSnapshot, pruneSnapshots, deleteSnapshot, renameSnapshot, setSnapshotPinned } from "@/lib/sync/snapshots";
 import { DEFAULT_SETTINGS, KEYS } from "@/lib/utils/storage";
 import type { IBackend, SyncSettings } from "@/lib/types";
 
@@ -389,5 +389,132 @@ describe("restoreSnapshot only accepts one of our own filenames", () => {
     await chrome.bookmarks.removeTree("1");
 
     expect(await restoreSnapshot(asBackend(backend), meta.name, settings())).toBeGreaterThan(0);
+  });
+
+  it("accepts a kept-forever name too", async () => {
+    const backend = new FileFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const meta = await createSnapshot(asBackend(backend), settings(), { pinned: true });
+    await chrome.bookmarks.removeTree("1");
+
+    expect(await restoreSnapshot(asBackend(backend), meta.name, settings())).toBeGreaterThan(0);
+  });
+});
+
+describe("snapshots — device, name and keeping forever", () => {
+  const mine = () => settings({ device_label: "Macmini M4pro" });
+
+  it("records which device saved a point and the name the user gave it", async () => {
+    const backend = new FileFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const created = await createSnapshot(asBackend(backend), mine(), { origin: "manual" });
+    expect(created.device_label).toBe("Macmini M4pro");
+    expect(created.origin).toBe("manual");
+
+    await renameSnapshot(asBackend(backend), mine(), created.name, "  改版前  ");
+    await otherDevice();
+
+    const list = await listSnapshots(asBackend(backend), mine());
+    expect(list).toHaveLength(1);
+    expect(list[0].label).toBe("改版前"); // trimmed
+    expect(list[0].device_label).toBe("Macmini M4pro");
+    expect(list[0].count).toBe(1); // the annotation survived the rename
+  });
+
+  it("keeps a name when another device writes a point of its own", async () => {
+    const backend = new FileFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const first = await createSnapshot(asBackend(backend), mine());
+    await renameSnapshot(asBackend(backend), mine(), first.name, "Before cleanup");
+
+    await otherDevice();
+    const second = await createSnapshot(asBackend(backend), settings({ device_label: "Laptop" }), { origin: "auto" });
+
+    const byName = new Map((await listSnapshots(asBackend(backend), mine())).map((m) => [m.name, m]));
+    expect(byName.get(first.name)?.label).toBe("Before cleanup");
+    expect(byName.get(second.name)?.origin).toBe("auto");
+    expect(byName.get(second.name)?.device_label).toBe("Laptop");
+  });
+
+  it("a kept-forever point is outside the rolling ten and survives pruning", async () => {
+    const backend = new FileFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const kept = await createSnapshot(asBackend(backend), mine(), { pinned: true });
+    expect(kept.name).toMatch(/^konode_snap_kept_/);
+
+    seedFiles(backend, 12); // twelve ordinary points, all older
+    await pruneSnapshots(asBackend(backend));
+
+    expect(backend.blobs.has(kept.name)).toBe(true);
+    const list = await listSnapshots(asBackend(backend), mine());
+    expect(list).toHaveLength(11); // 10 rolling + the kept one
+    expect(list.find((m) => m.name === kept.name)?.pinned).toBe(true);
+  });
+
+  it("pinning an existing point moves the file and carries its name and count over", async () => {
+    const backend = new FileFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const created = await createSnapshot(asBackend(backend), mine());
+    await renameSnapshot(asBackend(backend), mine(), created.name, "Before cleanup");
+
+    await setSnapshotPinned(asBackend(backend), mine(), created.name, true);
+    expect(backend.blobs.has(created.name)).toBe(false);
+    const kept = (await listSnapshots(asBackend(backend), mine())).find((m) => m.pinned)!;
+    expect(kept.name).not.toBe(created.name);
+    expect(kept.label).toBe("Before cleanup");
+    expect(kept.count).toBe(1);
+    expect(backend.blobs.get(kept.name)).toBeDefined();
+
+    await setSnapshotPinned(asBackend(backend), mine(), kept.name, false);
+    const back = await listSnapshots(asBackend(backend), mine());
+    expect(back).toHaveLength(1);
+    expect(back[0].name).toBe(created.name);
+    expect(back[0].pinned).toBeUndefined();
+    expect(back[0].label).toBe("Before cleanup");
+  });
+
+  it("deleting a kept point does not drop the other kept points from the index", async () => {
+    const backend = new FileFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const a = await createSnapshot(asBackend(backend), mine(), { pinned: true });
+    const b = await createSnapshot(asBackend(backend), mine(), { pinned: true });
+
+    await deleteSnapshot(asBackend(backend), mine(), a.name);
+
+    const list = await listSnapshots(asBackend(backend), mine());
+    expect(list).toHaveLength(1);
+    expect(list[0].name).toBe(b.name);
+    expect(list[0].count).toBe(1);
+  });
+
+  it("reads an index written before these fields existed, deriving 'kept' from the filename", async () => {
+    const backend = new FileFake();
+    const name = "konode_snap_kept_1700000000000.json";
+    backend.blobs.set(name, "{}");
+    backend.blobs.set(INDEX_NAME, JSON.stringify({
+      version: "1.0", encrypted: false,
+      payload: JSON.stringify([{ name, timestamp: 1_700_000_000_000, count: 7 }]),
+    }));
+
+    const list = await listSnapshots(asBackend(backend), mine());
+    expect(list).toHaveLength(1);
+    expect(list[0].pinned).toBe(true);
+    expect(list[0].count).toBe(7);
+    expect(list[0].device_label).toBeUndefined();
+  });
+
+  it("never overwrites an index it cannot read, for a rename or for a pin", async () => {
+    const backend = new FileFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const created = await createSnapshot(asBackend(backend), e2ee("the real passphrase"));
+    const before = backend.blobs.get(INDEX_NAME)!;
+
+    await otherDevice();
+    const wrong = e2ee("a different passphrase");
+    await expect(renameSnapshot(asBackend(backend), wrong, created.name, "Nope")).rejects.toThrow(/cannot be read/i);
+    await expect(setSnapshotPinned(asBackend(backend), wrong, created.name, true)).rejects.toThrow(/cannot be read/i);
+
+    expect(backend.blobs.get(INDEX_NAME)).toBe(before);
+    expect(backend.blobs.has(created.name)).toBe(true); // not moved either
   });
 });

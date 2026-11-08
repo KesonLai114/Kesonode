@@ -1,18 +1,40 @@
 // ─── URL scheme guards used across sync boundaries ─────────────────────────
 
 /**
- * A URL is safe to open/import as synced *content* (a restored tab, a history
- * entry) only if it is plain web navigation. A tampered or peer-supplied packet
- * could otherwise carry a `javascript:` / `data:` / `file:` URL that a session
- * restore would execute or expose — the checksum only proves the file matches
- * what its author wrote, not that the author is trustworthy. So we hard-whitelist
- * http(s) on import.
+ * A URL is safe to open/import as synced *content* (a restored tab, a history entry,
+ * a peer's bookmark) only if it is plain web navigation or a kept bookmark the browser
+ * rewrote onto its own scheme. A tampered or peer-supplied packet could otherwise carry
+ * a `javascript:` / `data:` / `file:` URL that a session restore would execute or expose
+ * — the checksum only proves the file matches what its author wrote, not that the author
+ * is trustworthy. So we hard-whitelist http(s) and Norton Neo's kept form (`neo://`, see
+ * #41); browser-internal pages (`chrome://`, `about:`, `file:`, …) stay out of sync.
  */
+const SAFE_CONTENT_SCHEMES = new Set(["http:", "https:", "neo:"]);
 export function isSafeContentUrl(url: string | undefined | null): boolean {
   if (!url) return false;
   try {
-    const scheme = new URL(url).protocol;
-    return scheme === "http:" || scheme === "https:";
+    return SAFE_CONTENT_SCHEMES.has(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
+// A bookmark a peer or a backup asks us to write is safe to store locally unless its
+// scheme is one the browser would *act on* rather than merely navigate to:
+// `javascript:` / `vbscript:` execute, `data:` / `blob:` embed script or binary,
+// `file:` points at a local path the other device can't open and shouldn't learn
+// about. Everything else — web http(s), the browser's own `chrome://` / `about:`
+// pages a user may have legitimately bookmarked, Norton Neo's kept `neo://` form,
+// extension pages — is navigable and therefore safe to keep. This is deliberately
+// wider than {@link isSafeContentUrl} (which hard-whitelists only http(s) for
+// *history/tabs export*): browser-internal pages must not leak into synced history
+// or open tabs, but a saved `chrome://newtab/` bookmark is harmless, and Norton Neo
+// keeps exactly that under `neo://` (#41).
+const UNSAFE_BOOKMARK_SCHEMES = new Set(["javascript:", "data:", "vbscript:", "blob:", "file:"]);
+export function isSafeBookmarkUrl(url: string | undefined | null): boolean {
+  if (!url) return false;
+  try {
+    return !UNSAFE_BOOKMARK_SCHEMES.has(new URL(url).protocol);
   } catch {
     return false;
   }

@@ -4,7 +4,7 @@ import { providerFromConfig, providerById, providerLabel } from "@/lib/storage-p
 import { sendMessage, request } from "@/lib/utils/messaging";
 import { browser, currentStore } from "@/lib/utils/ext";
 import { missingLocally, installOrSearchUrl } from "@/lib/utils/extensions-match";
-import { KEYS, getSettings, getState, normalizeRemoteSessions, normalizeRemoteExtensions, getRateProgress, getRateAnswered, setRateAnswered } from "@/lib/utils/storage";
+import { KEYS, getSettings, getState, normalizeRemoteSessions, normalizeRemoteExtensions, getRateProgress, getRateAnswered, setRateAnswered, getGuardWarned, setGuardWarned } from "@/lib/utils/storage";
 import { rateCardDue, stateNeedsUser } from "@/lib/rate-prompt";
 import { openTabUrls, tabsToRestore } from "@/lib/session-restore";
 import { reviewPageFor } from "@/lib/store-review";
@@ -52,7 +52,12 @@ const RESTORE_CONFIRM_TABS = 20;
 
 // Where this install can be rated. Null on a build no store knows, and then the rating
 // card never shows (see lib/rate-prompt.ts for when it does).
-const REVIEW_PAGE = reviewPageFor(browser.runtime.id);
+// `reviewPageFor` answers null for a self-built package, so this value is only ever null
+// here. The id is passed for a future store listing; read it defensively because the
+// popup page can be alive from a *previous* load after the extension is reloaded or
+// updated (1.5.2 ships without a manifest key on purpose), at which point
+// `browser.runtime` can be undefined and this module-top-level call would throw.
+const REVIEW_PAGE = reviewPageFor(browser.runtime?.id ?? "");
 
 // ─── App ──────────────────────────────────────────────────────────────────
 
@@ -80,6 +85,10 @@ export default function PopupApp() {
   // settled clean `success`; after that it can only be taken away: by either button, or by
   // anything appearing that needs the user (see `stateNeedsUser`).
   const [rateDue, setRateDue] = useState(false);
+  // Whether the one-time "running alongside the browser's own sync" tip under the guard
+  // banner has been dismissed. Persisted in storage; the banner still shows the short
+  // "publishing paused" line even after this is true.
+  const [guardWarned, setGuardWarnedState] = useState(false);
 
   // Track animation state separately from sync state
   const animTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -94,10 +103,11 @@ export default function PopupApp() {
       // `settings === null` state as "No backend configured", then corrected when
       // the message resolved (the transient flash). Reading storage removes that
       // dependency; the flash is also gated below on `settingsLoaded`.
-      const [st, se, rp, ra] = await Promise.all([getState(), getSettings(), getRateProgress(), getRateAnswered()]);
+      const [st, se, rp, ra, gw] = await Promise.all([getState(), getSettings(), getRateProgress(), getRateAnswered(), getGuardWarned()]);
       setState(st);
       setSettings(se);
       setRateDue(st.status === "success" && !stateNeedsUser(st) && rateCardDue(rp, ra));
+      setGuardWarnedState(gw);
       setLoadError(false);
     } catch (err) {
       console.error("Popup load error:", err);
@@ -432,7 +442,7 @@ export default function PopupApp() {
       )}
 
       {/* ── Banners ── */}
-      {(loadError || actionError || state?.last_error || state?.recovery_notice || (state?.pending_conflicts?.length ?? 0) > 0 || showNoBackend) && (
+      {(loadError || actionError || state?.last_error || state?.recovery_notice || state?.guard_notice || (state?.pending_conflicts?.length ?? 0) > 0 || showNoBackend) && (
         <div className="mt-3 space-y-2">
           {/* With nothing turned on, the error the button gives back ends by telling you to
               turn one on in Data Types, and the popup cannot get you there. So the banner
@@ -466,6 +476,37 @@ export default function PopupApp() {
                 {t("popup_recovery_notice", String(state.recovery_notice.blocked))}
               </span>
             </button>
+          )}
+          {state?.guard_notice && (
+            <div className="space-y-2">
+              <button
+                onClick={openActivityLog}
+                className="flex w-full items-start gap-2 rounded-box border border-sk-warn bg-sk-raised px-3 py-2 text-left transition-colors hover:bg-sk-tint"
+              >
+                <AlertCircle size={12} className="mt-0.5 shrink-0 text-sk-warn" />
+                <span className="text-[12px] text-sk-warn">
+                  {t("popup_guard_notice", String(state.guard_notice.changed))}
+                </span>
+              </button>
+              <div className="px-1 text-[11px] text-sk-warn">
+                {t("popup_guard_detail", [
+                  String(state.guard_notice.changed),
+                  String(state.guard_notice.cap),
+                  String(state.guard_notice.unstableRounds),
+                ])}
+              </div>
+              {!guardWarned && (
+                <div className="rounded-box border border-sk-warn bg-sk-raised px-3 py-2 text-[12px] text-sk-warn">
+                  <div className="mb-2">{t("popup_guard_coexist")}</div>
+                  <button
+                    className="text-[11px] underline underline-offset-2 hover:text-sk-text"
+                    onClick={async () => { await setGuardWarned(true); setGuardWarnedState(true); }}
+                  >
+                    {t("popup_guard_dismiss")}
+                  </button>
+                </div>
+              )}
+            </div>
           )}
 
           {loadError && (

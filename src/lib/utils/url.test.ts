@@ -1,21 +1,46 @@
 import { describe, it, expect } from "vitest";
-import { isSafeContentUrl, isSecureBackendUrl, isSensitiveUrl } from "@/lib/utils/url";
+import { isSafeContentUrl, isSafeBookmarkUrl, isSecureBackendUrl, isSensitiveUrl } from "@/lib/utils/url";
 
 describe("isSafeContentUrl", () => {
-  it("allows http(s) web URLs", () => {
+  it("allows web URLs and Norton Neo's kept form (chrome://newtab/ kept as neo://newtab/, #41)", () => {
     expect(isSafeContentUrl("https://example.com/page")).toBe(true);
     expect(isSafeContentUrl("http://example.com")).toBe(true);
+    expect(isSafeContentUrl("neo://newtab/")).toBe(true);
   });
-  it("rejects injection/exfiltration schemes", () => {
+  it("rejects injection, local-file and browser-internal schemes", () => {
     expect(isSafeContentUrl("javascript:alert(1)")).toBe(false);
     expect(isSafeContentUrl("data:text/html,<script>1</script>")).toBe(false);
     expect(isSafeContentUrl("file:///etc/passwd")).toBe(false);
     expect(isSafeContentUrl("chrome://settings")).toBe(false);
+    expect(isSafeContentUrl("about:blank")).toBe(false);
   });
   it("rejects empty / malformed input", () => {
     expect(isSafeContentUrl("")).toBe(false);
     expect(isSafeContentUrl(undefined)).toBe(false);
     expect(isSafeContentUrl("not a url")).toBe(false);
+  });
+});
+
+describe("isSafeBookmarkUrl", () => {
+  it("allows web, browser-internal and Norton Neo's kept form (#41)", () => {
+    expect(isSafeBookmarkUrl("https://example.com/page")).toBe(true);
+    expect(isSafeBookmarkUrl("http://example.com")).toBe(true);
+    expect(isSafeBookmarkUrl("chrome://newtab/")).toBe(true); // #41: kept as neo://
+    expect(isSafeBookmarkUrl("neo://newtab/")).toBe(true);
+    expect(isSafeBookmarkUrl("about:blank")).toBe(true);
+    expect(isSafeBookmarkUrl("chrome-extension://abc/panel.html")).toBe(true);
+  });
+  it("rejects script / data / local-file schemes", () => {
+    expect(isSafeBookmarkUrl("javascript:alert(1)")).toBe(false);
+    expect(isSafeBookmarkUrl("vbscript:msgbox(1)")).toBe(false);
+    expect(isSafeBookmarkUrl("data:text/html,<script>1</script>")).toBe(false);
+    expect(isSafeBookmarkUrl("blob:https://x/abc")).toBe(false);
+    expect(isSafeBookmarkUrl("file:///etc/passwd")).toBe(false);
+  });
+  it("rejects empty / malformed input", () => {
+    expect(isSafeBookmarkUrl("")).toBe(false);
+    expect(isSafeBookmarkUrl(undefined)).toBe(false);
+    expect(isSafeBookmarkUrl("not a url")).toBe(false);
   });
 });
 

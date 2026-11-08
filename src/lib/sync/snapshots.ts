@@ -3,11 +3,20 @@
 // a name downloadAll's `konode_<type>_` filter never matches, so restore points are
 // invisible to normal sync. When E2EE is on the payload is encrypted like a packet.
 //
+// Kesonode adds `konode_snap_kept_<epochms>.json` for a restore point the user wants to
+// keep forever. Retention walks ONLY the rolling prefix, so a kept point cannot be pruned
+// by this build, an older Kesonode, or upstream Konode: "forever" must not depend on every
+// device being able to read (or decrypt) the shared index. The frozen upstream names are
+// untouched — this is a new file kind in the same folder, one downloadAll never matches.
+//
 // A small index file (`konode_snap_index.json`) carries the bookmark count per
 // snapshot so the UI can show it without reading (and decrypting) every snapshot —
 // and without leaking the count into the plaintext filename, which the storage
 // provider can read. It lives on the backend so EVERY device sees the counts, not
 // just the one that took the snapshot, and it is encrypted whenever E2EE is on.
+// Kesonode also stores the device name, the name the user gave a restore point, and
+// whether it was saved by hand or by the bulk-delete guard there. All three are
+// OPTIONAL: an index written by upstream or by an older build carries none of them.
 //
 // The backend file LIST stays the source of truth for which snapshots exist; the
 // index only annotates them. That split matters twice over: an index entry with no
@@ -29,6 +38,10 @@ const PREFIX = UPSTREAM_PROTOCOL.snapshotFilePrefix;
 const INDEX_NAME = UPSTREAM_PROTOCOL.snapshotIndexName;
 const MAX_SNAPSHOTS = 10;
 
+// Kesonode-only. Keeping a point forever is a property of its FILE NAME, not of the index:
+// `pruneSnapshots` lists `PREFIX` only, so nothing that walks retention can reach it.
+const KEPT_PREFIX = "konode_snap_kept_";
+
 interface SnapshotFile {
   version: "1.0";
   created: string; // ISO-8601
@@ -42,10 +55,27 @@ interface IndexFile {
   payload: string; // JSON SnapshotMeta[], optionally encrypted
 }
 
-const nameFor = snapshotFileName;
+const nameFor = (ts: number, pinned = false): string =>
+  pinned ? `${KEPT_PREFIX}${ts}.json` : snapshotFileName(ts);
+
+const isPinnedName = (name: string): boolean => name.startsWith(KEPT_PREFIX);
 
 function tsFromName(name: string): number | null {
-  return snapshotTimestamp(name);
+  const rolling = snapshotTimestamp(name);
+  if (rolling != null) return rolling;
+  if (!isPinnedName(name)) return null;
+  const m = /^(\d+)\.json$/.exec(name.slice(KEPT_PREFIX.length));
+  return m ? Number(m[1]) : null;
+}
+
+/** Every restore point file, rolling and kept-forever. Both prefixes must be in any list
+ *  passed to the index merge, or a kept point's name, count and device would be dropped
+ *  by the very next index write on another device. */
+async function allSnapshotNames(backend: IBackend): Promise<string[]> {
+  const [rolling, kept] = await Promise.all([
+    backend.listFiles(PREFIX), backend.listFiles(KEPT_PREFIX),
+  ]);
+  return [...rolling, ...kept];
 }
 
 function countUrls(tree: SyncBookmark[]): number {
@@ -157,8 +187,17 @@ async function mergeIndex(
   return merged;
 }
 
-/** Write a snapshot of the current bookmark tree, then prune to the newest N. */
-export async function createSnapshot(backend: IBackend, settings: SyncSettings): Promise<SnapshotMeta> {
+export interface CreateSnapshotOptions {
+  /** Keep this one forever: written under KEPT_PREFIX, outside the rolling retention. */
+  pinned?: boolean;
+  /** What asked for it. Shown beside the timestamp on every device. */
+  origin?: "manual" | "auto";
+}
+
+/** Write a snapshot of the current bookmark tree, then prune the rolling points to N. */
+export async function createSnapshot(
+  backend: IBackend, settings: SyncSettings, opts: CreateSnapshotOptions = {},
+): Promise<SnapshotMeta> {
   const payload = await exportBookmarkPayload();
   const count = countUrls(payload.tree);
   const plain = JSON.stringify(payload);
@@ -172,15 +211,24 @@ export async function createSnapshot(backend: IBackend, settings: SyncSettings):
   // The filename carries the timestamp, so two snapshots in the same millisecond
   // would collide and the second would silently overwrite the first. Step past any
   // name already on the backend instead of losing a restore point.
-  const taken = new Set(await backend.listFiles(PREFIX));
+  const taken = new Set(await allSnapshotNames(backend));
+  const pinned = !!opts.pinned;
   let ts = Date.now();
-  while (taken.has(nameFor(ts))) ts++;
-  const name = nameFor(ts);
+  while (taken.has(nameFor(ts, pinned))) ts++;
+  const name = nameFor(ts, pinned);
   await backend.putFile(name, JSON.stringify(file));
-  const meta: SnapshotMeta = { name, timestamp: ts, count };
+  const meta: SnapshotMeta = {
+    name, timestamp: ts, count,
+    device_label: settings.device_label || undefined,
+    ...(opts.origin ? { origin: opts.origin } : {}),
+    ...(pinned ? { pinned: true } : {}),
+  };
   // Prune first so the index write reflects the post-prune file list in one pass.
-  const live = await pruneSnapshots(backend);
-  await mergeIndex(backend, settings, [meta], [...live, name]);
+  // Kept points are NOT in the rolling list, so they have to be added explicitly or
+  // their annotations would be dropped from the shared index here.
+  const rolling = await pruneSnapshots(backend);
+  const kept = await backend.listFiles(KEPT_PREFIX);
+  await mergeIndex(backend, settings, [meta], [...rolling, ...kept, name]);
   logger.event("Snapshots", `Created ${name} (${count} bookmarks)`);
   return meta;
 }
@@ -212,10 +260,10 @@ async function migrateLegacyIndex(
   return merged;
 }
 
-/** List restore points on the backend, newest first, annotated with known counts. */
+/** List restore points on the backend, newest first, annotated with known counts and names. */
 export async function listSnapshots(backend: IBackend, settings: SyncSettings): Promise<SnapshotMeta[]> {
-  const names = await backend.listFiles(PREFIX);
-  // An unreadable index costs the counts, nothing more — the file list below is what
+  const names = await allSnapshotNames(backend);
+  // An unreadable index costs the annotations, nothing more — the file list below is what
   // says which restore points exist, so the list still works.
   const idx = (await migrateLegacyIndex(backend, settings, names))
     ?? (await getIndex(backend, settings))
@@ -225,9 +273,13 @@ export async function listSnapshots(backend: IBackend, settings: SyncSettings): 
   for (const name of names) {
     const ts = tsFromName(name);
     if (ts == null) continue;
-    // Trust the filename's timestamp over the index — the file list is canonical.
+    // Trust the filename's timestamp AND its kept-forever mark over the index — the file
+    // list is canonical, and an older build's index has no `pinned` field at all.
     const known = byName.get(name);
-    metas.push(known ? { ...known, name, timestamp: ts } : { name, timestamp: ts });
+    const meta: SnapshotMeta = { ...(known ?? {}), name, timestamp: ts };
+    if (isPinnedName(name)) meta.pinned = true;
+    else delete meta.pinned;
+    metas.push(meta);
   }
   return metas.sort((a, b) => b.timestamp - a.timestamp);
 }
@@ -247,6 +299,13 @@ export async function restoreSnapshot(backend: IBackend, name: string, settings:
   if (file.encrypted) {
     if (!settings.encryption_passphrase) throw new Error("This snapshot is encrypted. Set your passphrase first.");
     plain = await decrypt(file.payload, settings.encryption_passphrase);
+  } else if (e2eeActive(settings)) {
+    // 本机已开启端到端加密：拒绝恢复未加密的共享快照，避免向加密组注入未认证的明文数据
+    // （与 sync-engine 的 openPacket 防降级守卫保持一致）。
+    throw new Error(
+      "This restore point is not encrypted, but end-to-end encryption is enabled on this device. " +
+      "Restore is refused so encrypted devices do not silently accept unauthenticated data."
+    );
   }
   const payload = normalizePayload(JSON.parse(plain));
   return restoreBookmarks(payload.tree);
@@ -256,7 +315,10 @@ export async function restoreSnapshot(backend: IBackend, name: string, settings:
  *  survived. Driven by the BACKEND FILE LIST, not a local index: the old version
  *  pruned whatever this device happened to have recorded, so two devices each
  *  holding fewer than the cap between them pruned nothing and the folder grew
- *  without limit. Ordering comes from the timestamp in the filename. */
+ *  without limit. Ordering comes from the timestamp in the filename.
+ *
+ *  Only the ROLLING prefix is walked. `konode_snap_kept_*` is deliberately invisible
+ *  here: those are the points the user asked to keep forever. */
 export async function pruneSnapshots(backend: IBackend): Promise<string[]> {
   const named = (await backend.listFiles(PREFIX))
     .map((name) => ({ name, ts: tsFromName(name) }))
@@ -269,11 +331,75 @@ export async function pruneSnapshots(backend: IBackend): Promise<string[]> {
   return keep.map((x) => x.name);
 }
 
+/** Give one restore point a name the user chose. It lives in the shared index, so every
+ *  device sees it; the snapshot file itself is never rewritten. An empty name clears it.
+ *  An index we cannot read is NEVER replaced — that would erase every other device's
+ *  names and counts (or downgrade the group's encrypted index to plaintext). */
+export async function renameSnapshot(
+  backend: IBackend, settings: SyncSettings, name: string, label: string,
+): Promise<void> {
+  if (tsFromName(name) == null) throw new Error("Not a restore point.");
+  const live = await allSnapshotNames(backend);
+  if (!live.includes(name)) throw new Error("Restore point not found on the backend.");
+  const remote = await getIndex(backend, settings);
+  if (remote === null) throw new Error("The shared restore-point index cannot be read here.");
+
+  const byName = new Map(remote.map((m) => [m.name, m]));
+  const ts = tsFromName(name)!;
+  const next: SnapshotMeta = { ...(byName.get(name) ?? {}), name, timestamp: ts };
+  const clean = label.trim().slice(0, 120);
+  if (clean) next.label = clean;
+  else delete next.label;
+  byName.set(name, next);
+  const alive = new Set(live);
+  await putIndex(backend, settings, [...byName.values()]
+    .filter((m) => alive.has(m.name))
+    .sort((a, b) => b.timestamp - a.timestamp));
+  logger.event("Snapshots", `Renamed ${name}`);
+}
+
+/** Keep a restore point forever, or put it back into the rolling ten. The mark is the
+ *  FILE NAME: moving between the two prefixes is a read + write + delete of one file,
+ *  done only when the user asks. The index read happens BEFORE the move, so an index we
+ *  cannot read leaves both the file and everybody else's annotations untouched. */
+export async function setSnapshotPinned(
+  backend: IBackend, settings: SyncSettings, name: string, pinned: boolean,
+): Promise<void> {
+  const ts = tsFromName(name);
+  if (ts == null) throw new Error("Not a restore point.");
+  if (isPinnedName(name) === pinned) return; // already in the requested state
+
+  const live = await allSnapshotNames(backend);
+  if (!live.includes(name)) throw new Error("Restore point not found on the backend.");
+  const raw = await backend.getFile(name);
+  if (!raw) throw new Error("Restore point not found on the backend.");
+  const target = nameFor(ts, pinned);
+  if (live.includes(target)) throw new Error("A restore point with this timestamp already exists.");
+
+  const remote = await getIndex(backend, settings);
+  if (remote === null) throw new Error("The shared restore-point index cannot be read here.");
+
+  await backend.putFile(target, raw);
+  await backend.deleteFile(name);
+
+  const byName = new Map(remote.map((m) => [m.name, m]));
+  const next: SnapshotMeta = { ...(byName.get(name) ?? {}), name: target, timestamp: ts };
+  if (pinned) next.pinned = true;
+  else delete next.pinned;
+  byName.delete(name);
+  byName.set(target, next);
+  const alive = new Set([...live.filter((n) => n !== name), target]);
+  await putIndex(backend, settings, [...byName.values()]
+    .filter((m) => alive.has(m.name))
+    .sort((a, b) => b.timestamp - a.timestamp));
+  logger.event("Snapshots", `${pinned ? "Kept" : "Returned"} ${target}`);
+}
+
 /** Delete one restore point, then drop it from the shared index. */
 export async function deleteSnapshot(backend: IBackend, settings: SyncSettings, name: string): Promise<void> {
   if (tsFromName(name) == null) throw new Error("Not a restore point.");
   await backend.deleteFile(name);
-  const live = await backend.listFiles(PREFIX);
+  const live = await allSnapshotNames(backend);
   // mergeIndex drops entries with no file behind them, which now includes this one.
   await mergeIndex(backend, settings, [], live);
   logger.event("Snapshots", `Deleted ${name}`);

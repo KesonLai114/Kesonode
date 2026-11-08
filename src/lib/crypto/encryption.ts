@@ -171,6 +171,24 @@ export async function verifyPassphrase(
  */
 export const MIN_PASSPHRASE_LENGTH = 12;
 
+/**
+ * Whether `settings` violate the E2EE passphrase strength floor. Enforced in the worker
+ * (not just the UI) so it cannot be bypassed by sending a crafted message. Only an ENABLED
+ * E2EE with a non-empty, too-short passphrase is rejected — turning E2EE off, or leaving the
+ * passphrase blank, is not, which matches the UI rule.
+ */
+export function passphraseViolatesPolicy(settings: {
+  encryption_enabled?: boolean;
+  encryption_passphrase?: string;
+}): boolean {
+  return (
+    !!settings.encryption_enabled &&
+    typeof settings.encryption_passphrase === "string" &&
+    settings.encryption_passphrase.length > 0 &&
+    settings.encryption_passphrase.length < MIN_PASSPHRASE_LENGTH
+  );
+}
+
 // ─── Recovery key ─────────────────────────────────────────────────────────
 
 /**

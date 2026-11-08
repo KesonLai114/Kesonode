@@ -90,6 +90,15 @@
       }
     }
   },
+  "popup_guard_notice": {
+    "message": "Közzététel szünetel: ezen az eszközön a könyvjelzők folyamatosan változnak ($COUNT$ bejegyzés ebben a ciklusban). Semmi sem veszett el, visszaállítási pont készült; a közzététel magától folytatódik, amint a fa változatlan marad. Lásd: Beállítások → Aktivitás.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
   "popup_no_backend": {
     "message": "Nincs beállítva tárhely"
   },
@@ -1423,6 +1432,27 @@
   "opt_snap_delete_aria": {
     "message": "Visszaállítási pont törlése"
   },
+  "opt_snap_create_kept": {
+    "message": "Véglegesen megőrzött visszaállítási pont létrehozása"
+  },
+  "opt_snap_rename": {
+    "message": "Visszaállítási pont átnevezése"
+  },
+  "opt_snap_rename_placeholder": {
+    "message": "Név"
+  },
+  "opt_snap_rename_save": {
+    "message": "Név mentése"
+  },
+  "opt_snap_pin": {
+    "message": "Véglegesen megőrzött"
+  },
+  "opt_snap_unpin": {
+    "message": "Megőrzés megszüntetése"
+  },
+  "opt_snap_auto": {
+    "message": "Automatikus"
+  },
   "opt_log_section": {
     "message": "Napló"
   },
@@ -1673,5 +1703,40 @@
   },
   "opt_devices_bad_reply": {
     "message": "Nem sikerült beolvasni az eszközlistát."
+  },
+  "popup_guard_detail": {
+    "message": "$COUNT$ változott ebben a ciklusban · küszöb $CAP$ · $ROUNDS$ ciklus egymás után",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "cap": {
+        "content": "$2"
+      },
+      "rounds": {
+        "content": "$3"
+      }
+    }
+  },
+  "popup_guard_coexist": {
+    "message": "Ez általában azt jelenti, hogy a Kesonode a böngésző saját könyvjelző-szinkronizálása mellett fut. Használjon egyetlen szinkronizáló rendszert a könyvjelzőkhöz, vagy zárja ki a könyvjelzőket a szinkronizálásból (Beállítások → Adattípusok), hogy egy másik eszköz tulajdonában lévő mappa kimaradjon a Kesonode-ból."
+  },
+  "popup_guard_dismiss": {
+    "message": "Ne jelenjen meg újra"
+  },
+  "opt_guard_section": {
+    "message": "Helyi változásvédelem"
+  },
+  "opt_guard_label": {
+    "message": "Közzététel szüneteltetése könyvjelzők megvadult változásainál"
+  },
+  "opt_guard_desc": {
+    "message": "Amikor ennek az eszköznek a könyvjelzői több cikluson át nagyot változnak, a feltöltés visszatartásra kerül, amíg a fa meg nem nyugszik. Megakadályozza, hogy egy megvadult szinkronizálás vagy bővítmény félkész átírást sugározzon szét minden társnak. Egyetlen tömeges szerkesztés azonnal közzétételre kerül."
+  },
+  "opt_guard_cap_label": {
+    "message": "Változási küszöb (bejegyzés/ciklus)"
+  },
+  "opt_guard_cap_desc": {
+    "message": "Egy ciklus akkor számít nagy változásnak, ha ennél több könyvjelző változik meg benne, vagy a fa 30%-a — a nagyobbik érték számít. Növelje, ha rendszeresen importál vagy rendez át nagy mappákat."
   }
 }

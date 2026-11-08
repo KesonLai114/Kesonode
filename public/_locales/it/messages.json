@@ -84,6 +84,15 @@
       }
     }
   },
+  "popup_guard_notice": {
+    "message": "Pubblicazione in pausa: i preferiti di questo dispositivo continuano a cambiare ($COUNT$ voci in questo ciclo). Nulla è stato perso; è stato salvato un punto di ripristino e la pubblicazione riprende da sola quando l'albero si stabilizza. Vedi Impostazioni → Attività.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
   "popup_no_backend": {
     "message": "Nessun backend configurato"
   },
@@ -1423,6 +1432,27 @@
   "opt_snap_delete_aria": {
     "message": "Elimina questo punto di ripristino"
   },
+  "opt_snap_create_kept": {
+    "message": "Crea un punto di ripristino permanente"
+  },
+  "opt_snap_rename": {
+    "message": "Rinomina questo punto di ripristino"
+  },
+  "opt_snap_rename_placeholder": {
+    "message": "Nome"
+  },
+  "opt_snap_rename_save": {
+    "message": "Salva nome"
+  },
+  "opt_snap_pin": {
+    "message": "Conserva sempre"
+  },
+  "opt_snap_unpin": {
+    "message": "Non conservare più"
+  },
+  "opt_snap_auto": {
+    "message": "Automatico"
+  },
   "opt_log_section": {
     "message": "Registro"
   },
@@ -1673,5 +1703,40 @@
   },
   "opt_devices_bad_reply": {
     "message": "Impossibile leggere l'elenco dei dispositivi."
+  },
+  "popup_guard_detail": {
+    "message": "$COUNT$ modificati questo ciclo · soglia $CAP$ · $ROUNDS$ cicli di fila",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "cap": {
+        "content": "$2"
+      },
+      "rounds": {
+        "content": "$3"
+      }
+    }
+  },
+  "popup_guard_coexist": {
+    "message": "Di solito significa che Kesonode è in esecuzione insieme alla sincronizzazione dei segnalibri del browser. Usa un solo sistema di sincronizzazione per i segnalibri, oppure escludi i segnalibri dalla sincronizzazione (Impostazioni → Tipi di dati) per tenere fuori da Kesonode una cartella di un altro strumento."
+  },
+  "popup_guard_dismiss": {
+    "message": "Non mostrare più"
+  },
+  "opt_guard_section": {
+    "message": "Protezione modifiche locali"
+  },
+  "opt_guard_label": {
+    "message": "Sospendi la pubblicazione per modifiche incontrollate dei segnalibri"
+  },
+  "opt_guard_desc": {
+    "message": "Quando i segnalibri di questo dispositivo cambiano molto per diversi cicli di fila, l'invio viene trattenuto finché l'albero non si stabilizza. Impedisce a una sincronizzazione o estensione incontrollata di trasmettere una riscrittura a metà a ogni peer. Una singola modifica di massa viene comunque pubblicata subito."
+  },
+  "opt_guard_cap_label": {
+    "message": "Soglia di modifica (voci/ciclo)"
+  },
+  "opt_guard_cap_desc": {
+    "message": "Un ciclo è considerato un cambio grande oltre questo numero di segnalibri, o il 30% dell'albero — il valore maggiore. Aumentalo se importi o riorganizzi spesso cartelle grandi."
   }
 }

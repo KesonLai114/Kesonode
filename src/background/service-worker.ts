@@ -2,7 +2,7 @@
 // Handles: alarm-based polling, bookmark listeners, message routing
 
 import type { ExtensionMessage, ExtensionResponse, SyncState } from "@/lib/types";
-import { getSettings, getState, setState, saveSettings, clearStaleSyncLock, setBulkDeleteApproval, KEYS, exportSettingsBackup, importSettingsBackup } from "@/lib/utils/storage";
+import { getSettings, getState, setState, saveSettings, clearStaleSyncLock, setBulkDeleteApproval, KEYS, exportSettingsBackup, importSettingsBackup, importSettingsRisks } from "@/lib/utils/storage";
 import { SyncEngine, explainSyncFailure } from "@/lib/sync/sync-engine";
 import { registerBookmarkListeners, recordExclusionRelease } from "@/lib/handlers/bookmarks-handler";
 import { createBackend } from "@/lib/backends/abstract-backend";
@@ -172,11 +172,17 @@ async function describeFailure(err: unknown): Promise<string> {
   }
 }
 
-browser.runtime.onMessage.addListener(((message: ExtensionMessage): Promise<ExtensionResponse> =>
-  handleMessage(message).catch(async (err): Promise<ExtensionResponse> => ({
+browser.runtime.onMessage.addListener(((message: ExtensionMessage, sender): Promise<ExtensionResponse> => {
+  // 仅接受来自本扩展自身的消息（options / popup / 本扩展页面）。即使将来开启
+  // externally_connectable，也绝不向外部扩展或网页暴露同步、凭据等敏感操作。
+  if (!sender.id || sender.id !== browser.runtime.id) {
+    return Promise.resolve({ type: "ERROR", payload: "Message rejected: untrusted sender." });
+  }
+  return handleMessage(message).catch(async (err): Promise<ExtensionResponse> => ({
     type: "ERROR",
     payload: await describeFailure(err),
-  }))) as Parameters<typeof browser.runtime.onMessage.addListener>[0]);
+  }));
+}) as Parameters<typeof browser.runtime.onMessage.addListener>[0]);
 
 async function handleMessage(message: ExtensionMessage): Promise<ExtensionResponse> {
   await ensureInit();
@@ -259,9 +265,17 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
     }
 
     case "IMPORT_SETTINGS": {
-      // An import changes every setting at once, so it needs the same wake-up as
-      // SAVE_SETTINGS: the worker holds a settings snapshot in syncEngine, and the
-      // restored interval has to reach the alarm before the next sync is due.
+      // A settings-backup import can silently turn E2EE off, point the backend at a
+      // server the attacker controls, or carry plaintext credentials. Refuse any of
+      // those unless the message carries an explicit `confirmImport` flag the UI sets
+      // only after showing the user the risk. This is defence-in-depth: the UI entry
+      // point is the same place, but this guards against it being bypassed.
+      if (!(message as { confirmImport?: boolean }).confirmImport) {
+        const risks = importSettingsRisks(await getSettings(), message.payload);
+        if (risks.length) {
+          throw new Error("IMPORT_SETTINGS_NEEDS_CONFIRM:" + risks.join(","));
+        }
+      }
       const updated = await importSettingsBackup(message.payload);
       setLoggerDebug(updated.debug_mode);
       await syncEngine?.updateSettings(updated);
@@ -309,7 +323,19 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
 
     case "CREATE_SNAPSHOT": {
       if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
-      await syncEngine.snapshotNow();
+      await syncEngine.snapshotNow({ origin: "manual", pinned: message.payload?.pinned === true });
+      return { type: "SNAPSHOTS", payload: await syncEngine.getSnapshots() };
+    }
+
+    case "RENAME_SNAPSHOT": {
+      if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
+      await syncEngine.renameSnapshot(message.payload.name, message.payload.label);
+      return { type: "SNAPSHOTS", payload: await syncEngine.getSnapshots() };
+    }
+
+    case "PIN_SNAPSHOT": {
+      if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
+      await syncEngine.pinSnapshot(message.payload.name, message.payload.pinned);
       return { type: "SNAPSHOTS", payload: await syncEngine.getSnapshots() };
     }
 

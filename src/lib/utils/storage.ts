@@ -24,7 +24,9 @@ import { BACKEND_LABEL } from "@/lib/constants";
 import { setCompatMode } from "@/lib/compat/protocol";
 import { inferStore, storeUrlFor } from "@/lib/utils/extensions-match";
 import { canonicalUrlKey } from "@/lib/utils/url";
+import { passphraseViolatesPolicy, MIN_PASSPHRASE_LENGTH } from "@/lib/crypto/encryption";
 import { sanitizeExclusions } from "@/lib/utils/bookmark-exclusions";
+import { withChecksum, verifyChecksum } from "@/lib/utils/checksum";
 
 // ─── Device name detection ─────────────────────────────────────────────────
 
@@ -87,6 +89,12 @@ export const DEFAULT_SETTINGS: SyncSettings = {
   debug_mode: false,
   encryption_enabled: false,
   onboarding_completed: false,
+  // Local change guard (lib/sync/change-guard.ts). On by default: it only holds publishing
+  // when this device's bookmarks keep changing by a large amount across cycles, never a
+  // single ordinary edit. guard_cap is the absolute floor (entries/cycle) before the
+  // 30%-of-tree check; both are overridable in Settings → Advanced.
+  guard_enabled: true,
+  guard_cap: 20,
 };
 
 export const DEFAULT_STATE: SyncState = {
@@ -98,6 +106,7 @@ export const DEFAULT_STATE: SyncState = {
   sync_counts: { bookmarks: 0, history: 0, sessions: 0, extensions: 0 },
   bytes_transferred: 0,
   recovery_notice: null,
+  guard_notice: null,
 };
 
 // ─── Keys ──────────────────────────────────────────────────────────────────
@@ -137,6 +146,14 @@ export const KEYS = {
   RECOVERY_SNAPSHOT: "konode_recovery_snap",
   BULK_DELETE_APPROVAL: "konode_bulk_delete_ok",
   LIST_FAILURE_NOTED: "konode_list_fail_noted",
+  // Local change guard (lib/sync/change-guard.ts): the last bookmark tree this device
+  // published, and a once-per-incident latch for its restore point. Both are per-install
+  // working state and never travel in a SyncPacket.
+  GUARD_STATE: "konode_guard_state",
+  GUARD_SNAPSHOT: "konode_guard_snap",
+  // The user's one-shot "don't show the coexist tip again" for the local change guard.
+  // Set by the popup, read there; the guard itself never touches it.
+  GUARD_WARNED: "konode_guard_warned",
   SYNC_LOCK: "konode_sync_lock",
   GDRIVE_SESSION: "konode_gdrive_session",
   GDRIVE_FOLDER: "konode_gdrive_folder",
@@ -261,6 +278,10 @@ export async function getBookmarkExclusions(): Promise<BookmarkExclusion[]> {
 export async function saveSettings(partial: Partial<SyncSettings>): Promise<SyncSettings> {
   const current = await getSettings();
   const next = { ...current, ...partial };
+  // 口令强度兜底：即使绕过 UI 直接发消息，启用 E2EE 时也不允许过短口令（离线可暴力）。
+  if (passphraseViolatesPolicy(next)) {
+    throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters when E2EE is enabled.`);
+  }
   await set(KEYS.SETTINGS, next);
   // A mode change has to take effect in THIS worker, not after the next service-worker
   // wake: the naming helpers the backends use read the active mode at call time.
@@ -284,69 +305,198 @@ export async function saveSettings(partial: Partial<SyncSettings>): Promise<Sync
  * them onto a fresh install would make a device that has seen nothing claim it had seen
  * everything. The synced data itself lives in the user's backend and is not in this file.
  */
-const SETTINGS_BACKUP_FORMAT = "kesonode-settings";
-const SETTINGS_BACKUP_VERSION = 1;
-const SETTINGS_BACKUP_KEYS = [KEYS.GDRIVE_SESSION, KEYS.GDRIVE_FOLDER] as const;
+export const SETTINGS_BACKUP_FORMAT = "kesonode-settings";
 
-/** Optional fields are absent from DEFAULT_SETTINGS on purpose, so name them explicitly. */
-const BACKUP_SETTINGS_FIELDS: (keyof SyncSettings)[] = [
-  ...(Object.keys(DEFAULT_SETTINGS) as (keyof SyncSettings)[]),
-  "encryption_passphrase",
-  "compat_mode",
-];
+/**
+ * The version this build WRITES. Do not bump it just because a setting was added: a new
+ * OPTIONAL field with a default is readable by every older build, and a newer build fills
+ * it in on import. Bump only when a field's meaning or shape changes in a way an old
+ * reader cannot understand — and then add a migration below.
+ */
+export const SETTINGS_BACKUP_VERSION = 1;
+
+/** Versions this build can READ. Unknown versions are refused, never guessed at. */
+export const SUPPORTED_BACKUP_VERSIONS: readonly number[] = [SETTINGS_BACKUP_VERSION];
+
+export type BackupDocument = Record<string, unknown>;
+export type BackupMigration = (doc: BackupDocument) => BackupDocument;
+
+/**
+ * One link per old version, each producing the next. Empty today because every backup
+ * ever written is v1. To introduce v2: add `1: (v1) => ({ ...v1, version: 2, ... })`,
+ * bump SETTINGS_BACKUP_VERSION to 2, and KEEP 1 in SUPPORTED_BACKUP_VERSIONS. Ship a
+ * build that can READ v2 before shipping one that WRITES it, so an older install can
+ * still be used to recover a file written by the new one.
+ */
+export const BACKUP_MIGRATIONS: Readonly<Record<number, BackupMigration>> = {};
+
+/**
+ * Bring a document up to `current` through the chain. Pure and parameterised so the
+ * mechanism can be tested with a synthetic chain before a v2 exists. A missing link is
+ * an error rather than a silent skip: reading a file under rules that do not apply is
+ * worse than refusing it.
+ */
+export function migrateBackupDocument(
+  doc: BackupDocument,
+  from: number,
+  current: number,
+  migrations: Readonly<Record<number, BackupMigration>>
+): BackupDocument {
+  let result = doc;
+  for (let version = from; version < current; version++) {
+    const migrate = migrations[version];
+    if (!migrate) {
+      throw new Error(
+        `No settings backup migration from format version ${version}. ` +
+          "Refusing to read this file under rules that may not apply."
+      );
+    }
+    result = migrate(result);
+  }
+  return result;
+}
+
+const SETTINGS_BACKUP_KEYS = [KEYS.GDRIVE_SESSION, KEYS.GDRIVE_FOLDER] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// ─── The single source of truth for what travels in a settings backup ───────
+//
+// The old whitelist was derived from Object.keys(DEFAULT_SETTINGS) plus two hand-added
+// optional fields. Any new setting that existed only in SyncSettings was therefore
+// EXPORTED but silently DROPPED on import. Typing this as Record<keyof SyncSettings, …>
+// makes adding a setting a compile error until it gets a validator here; export and
+// import both read this one table, so they cannot disagree about what is portable.
+
+export interface BackupField {
+  validate: (value: unknown) => boolean;
+}
+
+const isString = (v: unknown): v is string => typeof v === "string";
+const isBoolean = (v: unknown): v is boolean => typeof v === "boolean";
+const isPositiveNumber = (v: unknown): v is number =>
+  typeof v === "number" && Number.isFinite(v) && v > 0;
+const oneOf = (values: readonly string[]) => (v: unknown): boolean =>
+  typeof v === "string" && values.includes(v);
+const arrayOf = (check: (v: unknown) => boolean) => (v: unknown): boolean =>
+  Array.isArray(v) && v.every(check);
+
+const DATA_TYPES: readonly string[] = ["bookmarks", "history", "sessions", "extensions"];
+const BACKEND_TYPES: readonly string[] = ["gdrive", "webdav", "github"];
+const CONFLICT_STRATEGIES: readonly string[] = ["lww", "prefer-local", "prefer-remote", "manual"];
+const COMPAT_MODES: readonly string[] = ["upstream", "isolated", "standalone"];
+
+export const SETTINGS_BACKUP_SCHEMA: Record<keyof SyncSettings, BackupField> = {
+  device_id: { validate: (v) => isString(v) && v.length > 0 },
+  device_label: { validate: isString },
+  enabled_types: { validate: arrayOf(oneOf(DATA_TYPES)) },
+  backends: { validate: arrayOf((b) => isRecord(b) && oneOf(BACKEND_TYPES)(b.type)) },
+  active_backend: { validate: (v) => v === null || oneOf(BACKEND_TYPES)(v) },
+  sync_interval_seconds: { validate: isPositiveNumber },
+  conflict_strategy: { validate: oneOf(CONFLICT_STRATEGIES) },
+  history_days_limit: { validate: isPositiveNumber },
+  bulk_delete_percent: { validate: (v) => isPositiveNumber(v) && v <= 100 },
+  excluded_bookmarks: { validate: (v) => Array.isArray(v) },
+  auto_sync: { validate: isBoolean },
+  sync_on_change: { validate: isBoolean },
+  notifications_enabled: { validate: isBoolean },
+  debug_mode: { validate: isBoolean },
+  encryption_enabled: { validate: isBoolean },
+  encryption_passphrase: { validate: isString },
+  onboarding_completed: { validate: isBoolean },
+  compat_mode: { validate: oneOf(COMPAT_MODES) },
+  guard_enabled: { validate: isBoolean },
+  // Capped so a typo can't disable the guard entirely: a cap of 0 would hold every cycle,
+  // so the lower bound is 1; the upper bound keeps it from swallowing a whole large tree.
+  guard_cap: { validate: (v) => isPositiveNumber(v) && v <= 1000 },
+};
+
+export const BACKUP_SETTINGS_FIELDS = Object.keys(SETTINGS_BACKUP_SCHEMA) as (keyof SyncSettings)[];
+
 export async function exportSettingsBackup(extensionVersion: string): Promise<SettingsBackup> {
   const raw = await browser.storage.local.get([...SETTINGS_BACKUP_KEYS]);
   // getSettings() merges the defaults and mints the device id if this install somehow
-  // never had one, so the file is always a complete, restorable configuration.
-  const keys: SettingsBackup["keys"] = { settings: await getSettings() };
+  // never had one, so the file is always a complete, restorable configuration. Export
+  // exactly the schema's fields: no per-install working state, and no field the importer
+  // would not know how to restore.
+  const current = await getSettings();
+  const portable: Record<string, unknown> = {};
+  for (const field of BACKUP_SETTINGS_FIELDS) {
+    const value = current[field];
+    if (value !== undefined) portable[field] = value;
+  }
+  const keys: SettingsBackup["keys"] = { settings: portable as unknown as SyncSettings };
   // Stored verbatim: a future session shape must not need a new backup format.
   if (raw[KEYS.GDRIVE_SESSION] !== undefined) keys.gdriveSession = raw[KEYS.GDRIVE_SESSION];
   if (raw[KEYS.GDRIVE_FOLDER] !== undefined) keys.gdriveFolder = raw[KEYS.GDRIVE_FOLDER];
-  return {
+  return withChecksum({
     format: SETTINGS_BACKUP_FORMAT,
     version: SETTINGS_BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     extensionVersion,
     keys,
-  };
+  });
 }
 
-function readBackup(input: unknown): SettingsBackup {
-  if (
-    !isRecord(input) ||
-    input.format !== SETTINGS_BACKUP_FORMAT ||
-    input.version !== SETTINGS_BACKUP_VERSION ||
-    !isRecord(input.keys)
-  ) {
+async function readBackup(input: unknown): Promise<SettingsBackup> {
+  if (!isRecord(input) || input.format !== SETTINGS_BACKUP_FORMAT || !isRecord(input.keys)) {
     throw new Error("This is not a Kesonode settings backup.");
   }
-  const settings = input.keys.settings;
+  const version = input.version;
+  if (typeof version !== "number" || !Number.isInteger(version)) {
+    throw new Error("This is not a Kesonode settings backup.");
+  }
+  if (!SUPPORTED_BACKUP_VERSIONS.includes(version)) {
+    if (version > SETTINGS_BACKUP_VERSION) {
+      throw new Error(
+        `This settings backup was written by a newer Kesonode (format version ${version}). ` +
+          `Update Kesonode to import it; this build reads ${SUPPORTED_BACKUP_VERSIONS.join(", ")}.`
+      );
+    }
+    throw new Error(
+      `Unsupported settings backup format version ${version}. ` +
+        `This build reads ${SUPPORTED_BACKUP_VERSIONS.join(", ")}.`
+    );
+  }
+  // After the version gate, so a newer file is reported as newer rather than as damaged.
+  // A missing checksum means a file written before the field existed: still readable.
+  await verifyChecksum(input);
+  const doc = migrateBackupDocument(input, version, SETTINGS_BACKUP_VERSION, BACKUP_MIGRATIONS);
+  const keys = doc.keys;
+  const settings = isRecord(keys) ? keys.settings : undefined;
+  if (!isRecord(settings)) throw new Error("The settings backup has no settings.");
   // device_id names the konode_<type>_<device_id>.json files in the backend. Losing it
   // would make the restored device publish as a stranger and re-merge everything.
-  if (!isRecord(settings) || typeof settings.device_id !== "string" || !settings.device_id) {
+  if (typeof settings.device_id !== "string" || !settings.device_id) {
     throw new Error("The settings backup has no device ID.");
   }
-  return input as unknown as SettingsBackup;
+  return doc as unknown as SettingsBackup;
 }
 
 export async function importSettingsBackup(input: unknown): Promise<SyncSettings> {
-  const backup = readBackup(input);
+  const backup = await readBackup(input);
   const raw = backup.keys.settings as unknown as Record<string, unknown>;
+  const defaults = DEFAULT_SETTINGS as unknown as Record<string, unknown>;
 
-  // Whitelist, so a hand-edited or foreign file cannot plant arbitrary fields into
-  // konode_settings. Missing fields keep this install's defaults, which is what lets a
-  // backup written by an OLDER version restore on a newer one.
   const partial: Record<string, unknown> = {};
   for (const field of BACKUP_SETTINGS_FIELDS) {
-    if (field in raw) partial[field] = raw[field];
+    // Missing: a backup written by an OLDER version. Keep this install's value, which
+    // is a default on a fresh install — that is what makes old files restorable.
+    if (!(field in raw)) continue;
+    const value = raw[field];
+    if (SETTINGS_BACKUP_SCHEMA[field].validate(value)) {
+      partial[field] = value;
+    } else {
+      // Present but unusable: fall back to the default rather than trusting the file.
+      // An optional field with no default keeps this install's value instead.
+      const fallback = defaults[field];
+      if (fallback !== undefined) partial[field] = fallback;
+    }
   }
   // Two fields the sync engine iterates without checking. A wrong shape here would break
-  // every sync, so fall back to the defaults rather than trusting the file.
+  // every sync, so make sure they end up valid even when absent or malformed.
   if (!Array.isArray(partial.enabled_types)) partial.enabled_types = DEFAULT_SETTINGS.enabled_types;
   if (!Array.isArray(partial.backends)) partial.backends = DEFAULT_SETTINGS.backends;
   partial.excluded_bookmarks = sanitizeExclusions(partial.excluded_bookmarks);
@@ -362,11 +512,52 @@ export async function importSettingsBackup(input: unknown): Promise<SyncSettings
   const writes: Record<string, unknown> = {};
   if (isRecord(backup.keys.gdriveSession)) writes[KEYS.GDRIVE_SESSION] = backup.keys.gdriveSession;
   if (backup.keys.gdriveFolder !== undefined) writes[KEYS.GDRIVE_FOLDER] = backup.keys.gdriveFolder;
+  // 口令强度兜底（同 saveSettings）：导入启用了 E2EE 但口令过短的备份同样拒绝，
+  // 防止社工构造弱口令备份绕过 UI 校验。
+  if (passphraseViolatesPolicy(updated)) {
+    throw new Error(`Import refused: with E2EE enabled the passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters.`);
+  }
   if (Object.keys(writes).length) await browser.storage.local.set(writes);
   if (!(KEYS.GDRIVE_SESSION in writes)) await browser.storage.local.remove(KEYS.GDRIVE_SESSION);
   if (!(KEYS.GDRIVE_FOLDER in writes)) await browser.storage.local.remove(KEYS.GDRIVE_FOLDER);
 
   return updated;
+}
+
+/**
+ * Detect the settings-backup import changes that an attacker would abuse to exfiltrate
+ * data: turning E2EE off, redirecting the backend to a server they control, or carrying
+ * plaintext credentials. The IMPORT_SETTINGS handler refuses any of these unless the
+ * message carries an explicit `confirmImport` flag set by a user who has been shown the
+ * risk. An empty result means the import is benign (e.g. restoring one's own backup with
+ * identical settings).
+ */
+export function importSettingsRisks(current: SyncSettings, input: unknown): string[] {
+  const risks: string[] = [];
+  if (!input || typeof input !== "object") return risks;
+  const rec = input as Record<string, unknown>;
+  const keyRec = rec.keys && typeof rec.keys === "object" ? (rec.keys as Record<string, unknown>) : undefined;
+  const inRec = keyRec?.settings && typeof keyRec.settings === "object"
+    ? (keyRec.settings as Record<string, unknown>)
+    : undefined;
+
+  if (inRec && current.encryption_enabled && inRec.encryption_enabled === false) {
+    risks.push("disables-e2ee");
+  }
+  if (typeof inRec?.active_backend === "string" && inRec.active_backend !== current.active_backend) {
+    risks.push("changes-backend");
+  }
+  if (Array.isArray(inRec?.backends) && inRec.backends.some((b) => {
+    const bo = b && typeof b === "object" ? (b as Record<string, unknown>) : null;
+    const wo = bo?.webdav && typeof bo.webdav === "object" ? (bo.webdav as Record<string, unknown>) : null;
+    const go = bo?.github && typeof bo.github === "object" ? (bo.github as Record<string, unknown>) : null;
+    return (typeof wo?.password === "string" && wo.password !== "")
+      || (typeof go?.token === "string" && go.token !== "");
+  })) {
+    risks.push("has-credentials");
+  }
+  if (keyRec?.gdriveSession) risks.push("has-gdrive-session");
+  return risks;
 }
 
 // ─── State ─────────────────────────────────────────────────────────────────
@@ -786,6 +977,62 @@ export async function getRecoverySnapshotTaken(): Promise<boolean> {
 
 export async function setRecoverySnapshotTaken(taken: boolean): Promise<void> {
   await set(KEYS.RECOVERY_SNAPSHOT, taken);
+}
+
+// ─── Local change guard state ────────────────────────────────────────────────
+// The baseline is the canonical form of the last bookmark tree this device published.
+// It is deliberately NOT in the settings backup: replaying it onto a fresh install
+// would make a device that has never published anything claim it already had.
+// Mirrored by (rather than imported from) lib/sync/change-guard.ts, which imports
+// this module — keeping the shape here means the storage layer has no dependency back
+// into the sync layer.
+
+export interface StoredGuardState {
+  /** Canonical bookmark entries as seen on the previous sync cycle. */
+  lastEntries: string[] | null;
+  /** Consecutive cycles in which the tree changed by more than the cap. */
+  unstableRounds: number;
+}
+
+const EMPTY_GUARD_STATE: StoredGuardState = {
+  lastEntries: null,
+  unstableRounds: 0,
+};
+
+export async function getGuardState(): Promise<StoredGuardState> {
+  const stored = await get<Partial<StoredGuardState> | null>(KEYS.GUARD_STATE, null);
+  // A partly-written state, or one left by a build with a different shape, is no
+  // previous tree at all. Starting over is safe: the next cycle re-establishes it.
+  if (!stored || !Array.isArray(stored.lastEntries)) return { ...EMPTY_GUARD_STATE };
+  return {
+    lastEntries: stored.lastEntries,
+    unstableRounds: typeof stored.unstableRounds === "number" && Number.isFinite(stored.unstableRounds)
+      ? stored.unstableRounds : 0,
+  };
+}
+
+export async function setGuardState(state: StoredGuardState): Promise<void> {
+  await set(KEYS.GUARD_STATE, state);
+}
+
+// One restore point per held-drift incident. Same shape and reason as the mass-delete
+// latch above: a tree that keeps drifting is re-evaluated on every single cycle.
+export async function getGuardSnapshotTaken(): Promise<boolean> {
+  return get<boolean>(KEYS.GUARD_SNAPSHOT, false);
+}
+
+export async function setGuardSnapshotTaken(taken: boolean): Promise<void> {
+  await set(KEYS.GUARD_SNAPSHOT, taken);
+}
+
+// The popup's one-time "you appear to be running Kesonode alongside the browser's own
+// bookmark sync" tip is dismissible. Persisted (not in konode_state) so closing the
+// popup doesn't bring it back, and NOT in the settings backup (it is a one-off UI choice).
+export async function getGuardWarned(): Promise<boolean> {
+  return get<boolean>(KEYS.GUARD_WARNED, false);
+}
+export async function setGuardWarned(warned: boolean): Promise<void> {
+  await set(KEYS.GUARD_WARNED, warned);
 }
 
 // The user's one-shot "yes, apply that deletion" from Settings → Activity.

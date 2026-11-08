@@ -8,6 +8,14 @@ import { folderPath, isPeerFileName, packetFileName, peerDeviceIdFromName } from
 const INSECURE_URL_MSG =
   "WebDAV over plain http:// is not allowed. Your username and password would be sent unencrypted on every request. Use an https:// URL (http is permitted only for localhost).";
 
+// Cap on how many peer files a single PROPFIND may yield. A hostile or buggy server
+// could otherwise hand back an unbounded list and force a runaway download loop that
+// leaks our Basic-auth header to every name it returns (it is checked per-href below).
+const MAX_PEER_FILES = 1000;
+// 单个 peer 文件大小上限（25MB）。恶意/畸形后端可返回超大包拖死 Service Worker，
+// downloadAll 在解析前按 Content-Length（若提供）与正文长度双重检查。
+const MAX_PACKET_BYTES = 25 * 1024 * 1024;
+
 /** The last path segment of a PROPFIND href, decoded when it can be. */
 function hrefBasename(href: string): string {
   try { return decodeURIComponent(href).split("/").pop() ?? ""; }
@@ -233,8 +241,31 @@ export class WebDAVBackend implements IBackend {
         });
 
       const packets: SyncPacket[] = [];
+      // Credentials must only be sent to THIS WebDAV server. An attacker who can influence
+      // the PROPFIND response (rogue/infected server, shared account, poisoned cache) could
+      // otherwise redirect our Basic-auth header to an arbitrary host, or downgrade to
+      // plaintext http://. Resolve every href against the configured base and refuse any
+      // that leave this origin or are not a secure scheme.
+      const baseOrigin = new URL(this.w.url).origin;
       for (const href of hrefs) {
-        const fullUrl = href.startsWith("http") ? href : new URL(href, this.w.url).href;
+        let fullUrl: string;
+        try { fullUrl = new URL(href, this.w.url).href; } catch { continue; }
+        let target: URL;
+        try { target = new URL(fullUrl); } catch { continue; }
+        if (target.origin !== baseOrigin || !isSecureBackendUrl(fullUrl)) {
+          logger.warn(
+            "WebDAV.downloadAll",
+            `Skipping peer file with untrusted href (${target.origin}): credentials are not sent off-server.`
+          );
+          continue;
+        }
+        if (packets.length >= MAX_PEER_FILES) {
+          logger.warn(
+            "WebDAV.downloadAll",
+            `Stopping after ${MAX_PEER_FILES} peer files to avoid a runaway download loop.`
+          );
+          break;
+        }
         const r = await fetch(fullUrl, {
           headers: { Authorization: this.authHeader() },
           cache: "no-store", // avoid a stale peer file from the browser HTTP cache
@@ -252,8 +283,26 @@ export class WebDAVBackend implements IBackend {
           );
           continue;
         }
+        // 拒绝超大包：先看 Content-Length（存在则不必下载正文），再核对正文长度，
+        // 避免恶意/畸形后端用超大文件耗尽内存、拖死 Service Worker。
+        const lenHeader = r?.headers?.get("content-length");
+        if (lenHeader && Number(lenHeader) > MAX_PACKET_BYTES) {
+          logger.warn(
+            "WebDAV.downloadAll",
+            `Skipping oversized peer file (${lenHeader} bytes): ${basename(href)}`
+          );
+          continue;
+        }
+        const body = await r.text();
+        if (body.length > MAX_PACKET_BYTES) {
+          logger.warn(
+            "WebDAV.downloadAll",
+            `Skipping oversized peer file (${body.length} bytes): ${basename(href)}`
+          );
+          continue;
+        }
         try {
-          packets.push(JSON.parse(await r.text()) as SyncPacket);
+          packets.push(JSON.parse(body) as SyncPacket);
         } catch {
           // A corrupt/partial file (e.g. trailing junk from a non-truncating write)
           // must not abort the whole sync — skip it; the owner rewrites it next sync.

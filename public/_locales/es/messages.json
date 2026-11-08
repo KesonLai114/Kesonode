@@ -87,6 +87,15 @@
       }
     }
   },
+  "popup_guard_notice": {
+    "message": "Publicación en pausa: los marcadores de este dispositivo siguen cambiando ($COUNT$ entradas en este ciclo). No se perdió nada; se guardó un punto de restauración y la publicación se reanuda sola cuando el árbol se estabilice. Consulta Configuración → Actividad.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
   "popup_no_backend": {
     "message": "No hay ningún backend configurado"
   },
@@ -1149,6 +1158,27 @@
   "opt_snap_delete_aria": {
     "message": "Eliminar este punto de restauración"
   },
+  "opt_snap_create_kept": {
+    "message": "Crear un punto de restauración permanente"
+  },
+  "opt_snap_rename": {
+    "message": "Renombrar este punto de restauración"
+  },
+  "opt_snap_rename_placeholder": {
+    "message": "Nombre"
+  },
+  "opt_snap_rename_save": {
+    "message": "Guardar nombre"
+  },
+  "opt_snap_pin": {
+    "message": "Conservar siempre"
+  },
+  "opt_snap_unpin": {
+    "message": "Dejar de conservar"
+  },
+  "opt_snap_auto": {
+    "message": "Automático"
+  },
   "opt_log_section": {
     "message": "Registro"
   },
@@ -1673,5 +1703,40 @@
   },
   "opt_snapshots_section_sub": {
     "message": "Copias con marca de tiempo de tus marcadores en el servidor, compartidas por todos tus dispositivos. Al restaurar, se vuelven a agregar los marcadores que falten en este dispositivo (nunca los elimina). Se conservan las 10 más recientes; las más antiguas se eliminan automáticamente y puedes borrar cualquiera de ellas aquí."
+  },
+  "popup_guard_detail": {
+    "message": "$COUNT$ cambiados este ciclo · límite $CAP$ · $ROUNDS$ ciclos seguidos",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "cap": {
+        "content": "$2"
+      },
+      "rounds": {
+        "content": "$3"
+      }
+    }
+  },
+  "popup_guard_coexist": {
+    "message": "Normalmente significa que Kesonode se ejecuta junto con la sincronización de marcadores propia del navegador. Use un único sistema de sincronización para los marcadores, o excluya los marcadores de la sincronización (Ajustes → Tipos de datos) para que una carpeta que pertenece a otra herramienta quede fuera de Kesonode."
+  },
+  "popup_guard_dismiss": {
+    "message": "No mostrar de nuevo"
+  },
+  "opt_guard_section": {
+    "message": "Protección de cambios locales"
+  },
+  "opt_guard_label": {
+    "message": "Pausar la publicación ante cambios descontrolados de marcadores"
+  },
+  "opt_guard_desc": {
+    "message": "Cuando los marcadores de este dispositivo cambian mucho durante varios ciclos seguidos, se retiene la subida hasta que el árbol se asienta. Evita que una sincronización o extensión descontrolada difunda una reescritura a medias a todos los pares. Una edición masiva única se publica de inmediato."
+  },
+  "opt_guard_cap_label": {
+    "message": "Umbral de cambio (entradas/ciclo)"
+  },
+  "opt_guard_cap_desc": {
+    "message": "Un ciclo se considera un cambio grande por encima de esta cantidad de marcadores, o del 30 % del árbol, lo que sea mayor. Súbalo si importa o reorganiza carpetas grandes con frecuencia."
   }
 }

@@ -12,6 +12,55 @@ All notable changes to Konode. Format loosely follows
 
 ### Added
 
+- **A local change guard keeps a runaway bookmark rewrite from reaching the whole group.**
+  Running Kesonode alongside a browser's own bookmark sync is untested upstream: the
+  bookmarks API never says WHO changed a bookmark, so a batch Chrome Sync just pushed in
+  looks like a local edit and was published to every peer within a second. Nothing
+  protected the SENDING side. Each cycle now compares this device's tree with the previous
+  one; after several consecutive cycles of large, never-settling change (or one change of
+  500+ entries) this device's upload is held, a restore point is saved and Settings →
+  Activity explains why. Peers are still pulled and merged, nothing is deleted or
+  reverted, and one quiet cycle clears the hold automatically — so a single bulk edit by
+  the user still publishes immediately. The guard is local working state only: the frozen
+  upstream wire contract (SyncPacket v1.0, `konode_*` names, folder, checksum, E2EE
+  parameters) is untouched, and every device runs its own guard independently.
+
+- **Restore points can be named, kept forever, and say which device saved them.** A
+  point now leads with the name you gave it (or "Bookmark restore point"), with the
+  device name, exact date and bookmark count as the supporting line underneath. The
+  pencil renames it in place; the pin keeps it forever. "Forever" is a property of the
+  FILE NAME (`konode_snap_kept_<epochms>.json`): retention walks only the ordinary
+  `konode_snap_bookmarks_` prefix, so a kept point cannot be pruned by this build, by an
+  older Kesonode, or by upstream Konode — it does not depend on every device being able
+  to read (or decrypt) the shared index. Unpinning puts it back into the rolling ten.
+  The frozen upstream names, the index format and SyncPacket v1.0 are unchanged; all new
+  index fields are optional, and an index written by an older build still reads. Points
+  saved by hand and points the bulk-delete guard saved are labelled separately.
+
+- **Settings backups now have a versioned compatibility contract.** Import reads every
+  supported format version and walks an explicit migration chain instead of refusing
+  anything but a hard-coded `version: 1`; a file written by a newer build is refused with
+  a message telling you to update, rather than being silently misread. Export and import
+  share one table of settings and their validators, so a new setting can no longer be
+  exported and then silently dropped on import, and a damaged value falls back to its
+  default. A literal export file from each release is replayed in the test suite. The
+  format is still v1: adding an optional setting does not need a new version.
+
+- **Data exports now carry a format marker and a checked version.** `kesonode-backup-*.json`
+  has a `format` field that older builds simply ignore, so the file still opens there.
+  Import refuses a wrong marker or an unknown version with a message telling you to
+  update, instead of parsing a future file under old rules. Files written before the
+  marker existed, including the older top-level layout, still open; damaged entries are
+  normalised out rather than aborting the import. Literal exports from both layouts are
+  replayed in the test suite.
+
+- **Both export files now carry a checksum.** `kesonode-settings-*.json` and
+  `kesonode-backup-*.json` hash their whole envelope (minus the checksum itself) with
+  SHA-256 over a canonical, key-sorted serialisation, so a truncated or half-written file
+  is refused with a clear message instead of being partly imported. Files written before
+  the field existed have none and are still accepted. This detects accidental damage only:
+  there is no secret, so it is not an authentication code and can be recomputed.
+
 - **Three compatibility modes** under Settings → Advanced → Compatibility: **Upstream**
   (default, `konode` / `Konode` folder + `konode_*` files), **Own file names** (same folder,
   `kesonode_*` files while still reading upstream ones), and **Fully separate**

@@ -112,6 +112,16 @@
       }
     }
   },
+  "popup_guard_notice": {
+    "message": "Publishing is paused: this device's bookmarks keep changing ($COUNT$ entries this cycle). Nothing was lost; a restore point was saved and publishing resumes on its own once the tree settles. See Settings → Activity.",
+    "description": "The local change guard held this device's own bookmark upload because the local tree changed by more than the cap on several consecutive sync cycles. Reassuring by design: nothing was deleted, and no action is needed because it resumes automatically. 'Settings → Activity' names a tab, so it must match the tab's own translation.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
   "popup_no_backend": {
     "message": "No backend configured",
     "description": "No storage provider has been set up yet. The banner opens Settings."
@@ -144,6 +154,45 @@
     "message": "Active streams",
     "description": "Heading above the four data-type dots. The stylesheet displays it in capitals, so do not capitalise it here."
   },
+
+  "popup_guard_detail": {
+    "message": "$COUNT$ changed this cycle · cap $CAP$ · $ROUNDS$ cycles in a row",
+    "description": "Shown under the guard banner with the live numbers: entries changed this cycle, the cap, and how many consecutive cycles the tree has been changing. Auto-filled, not translated.",
+    "placeholders": {
+      "count": { "content": "$1", "example": "412" },
+      "cap": { "content": "$2", "example": "20" },
+      "rounds": { "content": "$3", "example": "3" }
+    }
+  },
+  "popup_guard_coexist": {
+    "message": "This usually means Kesonode is running alongside your browser's own bookmark sync. Use one sync system for bookmarks, or Exclude bookmarks from sync (Settings → Data types) to keep a folder another tool owns out of Kesonode.",
+    "description": "First-time tip under the guard banner. Reassuring by design: normally two sync systems touch the same tree. 'Settings → Data types' names a tab, so it must match the tab's own translation."
+  },
+  "popup_guard_dismiss": {
+    "message": "Don't show this again",
+    "description": "Button that dismisses the one-time coexist tip under the guard banner."
+  },
+  "opt_guard_section": {
+    "message": "Local change guard",
+    "description": "Heading of the Settings → Advanced section for the local change guard."
+  },
+  "opt_guard_label": {
+    "message": "Pause publishing on runaway bookmark changes",
+    "description": "Toggle label for the local change guard."
+  },
+  "opt_guard_desc": {
+    "message": "When this device's bookmarks change by a large amount on several cycles in a row, hold back its upload until the tree settles. Prevents a runaway sync or extension from broadcasting a half-finished rewrite to every peer. A single bulk edit still publishes immediately.",
+    "description": "Toggle description for the local change guard."
+  },
+  "opt_guard_cap_label": {
+    "message": "Change threshold (entries/cycle)",
+    "description": "Label for the guard threshold slider."
+  },
+  "opt_guard_cap_desc": {
+    "message": "A cycle is a large change above this many bookmark entries, or 30% of the tree — whichever is larger. Raise it if you routinely import or reorganize big folders.",
+    "description": "Description for the guard threshold slider."
+  },
+
   "popup_missing_extensions_one": {
     "message": "$COUNT$ missing extension",
     "description": "Exactly one extension is installed on another device but not on this one.",
@@ -1508,7 +1557,7 @@
     "message": "Restore points"
   },
   "opt_snapshots_section_sub": {
-    "message": "Timestamped copies of your bookmarks on the backend, shared by all your devices. Restoring adds back any bookmarks missing on this device (it never deletes). The newest 10 are kept; older ones are removed automatically, and you can delete any of them here."
+    "message": "Timestamped copies of your bookmarks on the backend, shared by all your devices. Restoring adds back any bookmarks missing on this device (it never deletes). The newest 10 ordinary points are kept and older ones are removed automatically; a point you keep forever is never removed. Name, keep, restore or delete any of them here."
   },
   "opt_snap_now_label": {
     "message": "Save a restore point now"
@@ -1569,6 +1618,27 @@
   },
   "opt_snap_delete_aria": {
     "message": "Delete this restore point"
+  },
+  "opt_snap_create_kept": {
+    "message": "Create a restore point kept forever"
+  },
+  "opt_snap_rename": {
+    "message": "Rename this restore point"
+  },
+  "opt_snap_rename_placeholder": {
+    "message": "Name"
+  },
+  "opt_snap_rename_save": {
+    "message": "Save name"
+  },
+  "opt_snap_pin": {
+    "message": "Keep forever"
+  },
+  "opt_snap_unpin": {
+    "message": "Stop keeping forever"
+  },
+  "opt_snap_auto": {
+    "message": "Automatic"
   },
   "opt_log_section": {
     "message": "Log"

@@ -90,6 +90,15 @@
       }
     }
   },
+  "popup_guard_notice": {
+    "message": "Veröffentlichung pausiert: Die Lesezeichen dieses Geräts ändern sich fortlaufend ($COUNT$ Einträge in diesem Zyklus). Nichts ging verloren, ein Wiederherstellungspunkt wurde gespeichert; sobald sich der Baum nicht mehr ändert, geht es automatisch weiter. Siehe Einstellungen → Aktivität.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "412"
+      }
+    }
+  },
   "popup_no_backend": {
     "message": "Kein Speicher eingerichtet"
   },
@@ -1423,6 +1432,27 @@
   "opt_snap_delete_aria": {
     "message": "Diesen Wiederherstellungspunkt löschen"
   },
+  "opt_snap_create_kept": {
+    "message": "Dauerhaft aufbewahrten Wiederherstellungspunkt erstellen"
+  },
+  "opt_snap_rename": {
+    "message": "Diesen Wiederherstellungspunkt umbenennen"
+  },
+  "opt_snap_rename_placeholder": {
+    "message": "Name"
+  },
+  "opt_snap_rename_save": {
+    "message": "Namen speichern"
+  },
+  "opt_snap_pin": {
+    "message": "Dauerhaft aufbewahren"
+  },
+  "opt_snap_unpin": {
+    "message": "Nicht mehr aufbewahren"
+  },
+  "opt_snap_auto": {
+    "message": "Automatisch"
+  },
   "opt_log_section": {
     "message": "Protokoll"
   },
@@ -1673,5 +1703,40 @@
   },
   "opt_devices_bad_reply": {
     "message": "Die Geräteliste konnte nicht gelesen werden."
+  },
+  "popup_guard_detail": {
+    "message": "$COUNT$ geändert dieser Zyklus · Grenzwert $CAP$ · $ROUNDS$ Zyklen nacheinander",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "cap": {
+        "content": "$2"
+      },
+      "rounds": {
+        "content": "$3"
+      }
+    }
+  },
+  "popup_guard_coexist": {
+    "message": "Das bedeutet meist, dass Kesonode neben dem eigenen Lesezeichen-Sync des Browsers läuft. Nutzen Sie für Lesezeichen nur ein Sync-System, oder schließen Sie Lesezeichen vom Sync aus (Einstellungen → Datentypen), damit ein von einem anderen Werkzeug verwalteter Ordner Kesonode nicht erreicht."
+  },
+  "popup_guard_dismiss": {
+    "message": "Nicht erneut anzeigen"
+  },
+  "opt_guard_section": {
+    "message": "Lokale Änderungssperre"
+  },
+  "opt_guard_label": {
+    "message": "Veröffentlichung bei entgleisten Lesezeichenänderungen pausieren"
+  },
+  "opt_guard_desc": {
+    "message": "Wenn sich die Lesezeichen dieses Geräts über mehrere Zyklen stark ändern, wird der Upload zurückgehalten, bis sich der Baum stabilisiert. Verhindert, dass eine entgleiste Synchronisierung oder Erweiterung ein halbfertiges Umschreiben an alle Peers sendet. Eine einmalige Massenbearbeitung wird sofort veröffentlicht."
+  },
+  "opt_guard_cap_label": {
+    "message": "Änderungsschwelle (Einträge/Zyklus)"
+  },
+  "opt_guard_cap_desc": {
+    "message": "Ein Zyklus gilt ab dieser Anzahl Lesezeichenänderungen oder 30 % des Baums — je nachdem, was größer ist — als große Änderung. Erhöhen Sie den Wert bei regelmäßigem Import oder Umstrukturierung großer Ordner."
   }
 }

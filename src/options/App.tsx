@@ -10,6 +10,9 @@ import {
   hasPermission, unsupportedReason, eventPresent, permissionsToEnable, tabGroupsAskable,
   type Availability, type PermissionOutcome,
 } from "@/lib/utils/capabilities";
+import {
+  buildDataBackup, readDataBackup, type DataBackupBookmarkNode,
+} from "@/lib/utils/data-backup";
 
 /**
  * Which edges of a scroller still have content past them.
@@ -32,7 +35,7 @@ import {
   Puzzle, AlertTriangle, CheckCircle2, XCircle,
   Loader2, ExternalLink, User, LogOut, Eye, EyeOff,
   Pencil, Key, Copy, Check, ArrowRight,
-  Trash2, RotateCcw, Camera, Mail, Star,
+  Trash2, RotateCcw, Camera, Mail, Star, Pin, PinOff,
 } from "lucide-react";
 import { BookmarkExclusionTree } from "@/lib/ui/bookmark-exclusion-tree";
 import { BookmarkList } from "@/lib/ui/bookmark-list";
@@ -42,7 +45,7 @@ import { ConflictsSection } from "@/options/conflicts-section";
 const APP_VERSION = browser.runtime.getManifest().version;
 // A self-built package has no store listing of its own, so reviewPageFor() answers null
 // and the rating row/card stay hidden. Kept so a future listing needs one change, not two.
-const REVIEW_PAGE = reviewPageFor(browser.runtime.id);
+const REVIEW_PAGE = reviewPageFor(browser.runtime?.id ?? "");
 
 function useScrollEdges<T extends HTMLElement>(axis: "x" | "y", revision: unknown = 0) {
   // A CALLBACK ref, not useRef, and that distinction was the whole bug. The audit list
@@ -445,6 +448,9 @@ export default function OptionsApp() {
   const [snapLoad, setSnapLoad] = useState<"loading" | "ok" | string>("loading");
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  // Inline rename for one restore point, and the value being typed into it.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
   // Activity tab: the blocked-deletion card. Two-step, like Restore and Delete above —
   // applying it removes bookmarks, so it does not hang off a single click.
   const [confirmApply, setConfirmApply] = useState(false);
@@ -853,12 +859,34 @@ export default function OptionsApp() {
     else setAuditMsg(sent.error);
   };
 
-  const createSnapshot = async () => {
+  const createSnapshot = async (pinned = false) => {
     setSnapBusy(true); setSnapMsg(null);
     try {
-      const sent = await request({ type: "CREATE_SNAPSHOT" });
+      const sent = await request({ type: "CREATE_SNAPSHOT", payload: { pinned } });
       if (!sent.ok) setSnapMsg(sent.error);
       else if (sent.res.type === "SNAPSHOTS") { setSnapshots(sent.res.payload); setSnapMsg(t("opt_snap_saved")); }
+    } finally {
+      setSnapBusy(false);
+    }
+  };
+
+  const renameSnapshot = async (name: string) => {
+    setSnapBusy(true); setSnapMsg(null);
+    try {
+      const sent = await request({ type: "RENAME_SNAPSHOT", payload: { name, label: renameValue } });
+      if (!sent.ok) setSnapMsg(sent.error);
+      else if (sent.res.type === "SNAPSHOTS") { setSnapshots(sent.res.payload); setRenaming(null); }
+    } finally {
+      setSnapBusy(false);
+    }
+  };
+
+  const pinSnapshot = async (name: string, pinned: boolean) => {
+    setSnapBusy(true); setSnapMsg(null);
+    try {
+      const sent = await request({ type: "PIN_SNAPSHOT", payload: { name, pinned } });
+      if (!sent.ok) setSnapMsg(sent.error);
+      else if (sent.res.type === "SNAPSHOTS") setSnapshots(sent.res.payload);
     } finally {
       setSnapBusy(false);
     }
@@ -1185,18 +1213,13 @@ export default function OptionsApp() {
           : Promise.resolve([] as chrome.history.HistoryItem[]),
       ]);
 
-      const bundle = {
-        version: "1.0",
-        exportedAt: new Date().toISOString(),
-        device: settings?.device_label ?? "unknown",
-        data: {
-          bookmarks: bookmarkTree,
-          extensions: extensions
-            .filter(e => e.id !== browser.runtime.id && e.installType !== "other" && e.installType !== "admin")
-            .map(e => ({ id: e.id, name: e.name, version: e.version, enabled: e.enabled, store: currentStore(), storeUrl: storeUrlFor({ id: e.id, name: e.name, store: currentStore() }) })),
-          history: historyItems.map(h => ({ url: h.url, title: h.title, lastVisitTime: h.lastVisitTime, visitCount: h.visitCount })),
-        },
-      };
+      const bundle = await buildDataBackup({
+        bookmarks: bookmarkTree,
+        extensions: extensions
+          .filter(e => e.id !== (browser.runtime?.id ?? null) && e.installType !== "other" && e.installType !== "admin")
+          .map(e => ({ id: e.id, name: e.name, version: e.version, enabled: e.enabled, store: currentStore(), storeUrl: storeUrlFor({ id: e.id, name: e.name, store: currentStore() }) })),
+        history: historyItems.map(h => ({ url: h.url, title: h.title, lastVisitTime: h.lastVisitTime, visitCount: h.visitCount })),
+      }, settings?.device_label ?? "unknown");
 
       const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -1219,19 +1242,17 @@ export default function OptionsApp() {
     setImportStatus("idle");
     try {
       const text = await file.text();
-      const bundle = JSON.parse(text);
-
-      // Support both old format (bundle.bookmarks) and new (bundle.data.bookmarks)
-      const data = bundle.data ?? bundle;
-
-      if (!bundle.version) throw new Error("Invalid Kesonode backup file");
+      // readDataBackup validates the envelope (format marker + version) and normalises
+      // both the wrapped layout and the older top-level one. A future format is refused
+      // with a clear error instead of being parsed under rules that no longer apply.
+      const data = await readDataBackup(JSON.parse(text) as unknown);
 
       let imported = 0;
 
       // Import bookmarks. The API check is not paranoia: a backup file can be opened on a
       // browser that has no bookmarks API, and without this the import dies on a TypeError
       // and reports a generic failure for a file that is perfectly fine.
-      if (data.bookmarks && dataTypeApiPresent("bookmarks")) {
+      if (data.bookmarks.length && dataTypeApiPresent("bookmarks")) {
         const roots = (await browser.bookmarks.getTree())[0]?.children ?? [];
         const otherId = defaultOtherRootId(roots); // browser-agnostic "Other bookmarks"
 
@@ -1241,24 +1262,22 @@ export default function OptionsApp() {
             title: `${IMPORT_FOLDER_NAME} ${new Date().toLocaleDateString()}`,
           });
 
-          const walk = async (nodes: chrome.bookmarks.BookmarkTreeNode[], parentId: string) => {
+          const walk = async (nodes: DataBackupBookmarkNode[], parentId: string) => {
             for (const node of nodes) {
               if (node.url) {
                 // Only recreate plain web URLs — never javascript:/data:/file: from a
                 // backup file (parity with the sync import guard).
                 if (!isSafeContentUrl(node.url)) continue;
                 try { await browser.bookmarks.create({ parentId, title: node.title, url: node.url }); imported++; } catch { /* skip invalid */ }
-              } else if (node.children) {
+              } else if (Array.isArray(node.children)) {
                 const f = await browser.bookmarks.create({ parentId, title: node.title });
                 await walk(node.children, f.id);
               }
             }
           };
 
-          // Handle both raw tree and wrapped tree
-          const bookmarkData = Array.isArray(data.bookmarks) ? data.bookmarks : [data.bookmarks];
-          for (const root of bookmarkData) {
-            if (root.children) await walk(root.children, importFolder.id);
+          for (const root of data.bookmarks) {
+            if (Array.isArray(root.children)) await walk(root.children, importFolder.id);
           }
         }
       }
@@ -1267,7 +1286,7 @@ export default function OptionsApp() {
       // `history` is an optional permission, so on a browser that gates the namespace this
       // is undefined until it is granted, and every single item would throw into its own
       // catch and be silently dropped.
-      if (Array.isArray(data.history) && dataTypeApiPresent("history")) {
+      if (data.history.length && dataTypeApiPresent("history")) {
         for (const item of data.history) {
           if (item.url && isSafeContentUrl(item.url)) try { await browser.history.addUrl({ url: item.url }); } catch { /* skip */ }
         }
@@ -1276,7 +1295,10 @@ export default function OptionsApp() {
       setImportStatus("ok");
       setImportCount(imported);
       setTimeout(() => { setImportStatus("idle"); setImportCount(0); }, 4000);
-    } catch {
+    } catch (error) {
+      // A refused future format carries an actionable reason; keep it visible even though
+      // the button only has a generic error state.
+      console.error("[Kesonode] Data backup import failed:", error);
       setImportStatus("error");
       setTimeout(() => setImportStatus("idle"), 3000);
     }
@@ -1286,6 +1308,14 @@ export default function OptionsApp() {
 
   const exportConfig = async () => {
     setConfigExportStatus("idle");
+    // 设置备份文件包含明文凭据（WebDAV 密码、GitHub 令牌、Drive 刷新令牌、加密口令）。
+    // 分享它会泄露账号信息，导出前先明确告知用户。
+    if (!window.confirm(
+      "即将导出的设置文件包含明文凭据（WebDAV 密码、GitHub 令牌、Google 刷新令牌、加密口令）。\n请勿分享此文件。是否继续？"
+    )) {
+      setConfigImportStatus("idle");
+      return;
+    }
     const sent = await request({ type: "EXPORT_SETTINGS" });
     if (!sent.ok || sent.res.type !== "SETTINGS_BACKUP") {
       setConfigExportStatus("error");
@@ -1314,7 +1344,28 @@ export default function OptionsApp() {
     setConfigImportStatus("idle");
     try {
       const parsed: unknown = JSON.parse(await file.text());
-      const sent = await request({ type: "IMPORT_SETTINGS", payload: parsed });
+      const doImport = (confirmImport: boolean) =>
+        request({ type: "IMPORT_SETTINGS", payload: parsed, confirmImport });
+      // 关闭 E2EE / 更改后端 / 内嵌明文凭据 这类危险导入会被 worker 拒绝（抛出
+      // IMPORT_SETTINGS_NEEDS_CONFIRM:...）。把风险展示给用户，确认后才带确认标志重发。
+      const CONFIRM_PREFIX = "IMPORT_SETTINGS_NEEDS_CONFIRM:";
+      let sent = await doImport(false);
+      if (!sent.ok && sent.error.startsWith(CONFIRM_PREFIX)) {
+        const message = sent.error.slice(CONFIRM_PREFIX.length).split(",").map((code) => {
+          switch (code) {
+            case "disables-e2ee": return "· 将关闭端到端加密（之后同步数据以明文上传）";
+            case "changes-backend": return "· 将更改同步后端（可能指向其他服务器）";
+            case "has-credentials": return "· 包含明文后端凭据（WebDAV 密码 / GitHub 令牌）";
+            case "has-gdrive-session": return "· 包含 Google Drive 登录令牌";
+            default: return "· " + code;
+          }
+        }).join("\n");
+        if (!window.confirm(`此配置文件将进行以下敏感更改：\n${message}\n\n是否仍要导入？`)) {
+          setConfigImportStatus("idle");
+          return;
+        }
+        sent = await doImport(true);
+      }
       if (!sent.ok) {
         setConfigImportStatus("error");
         setTimeout(() => setConfigImportStatus("idle"), 3000);
@@ -2437,8 +2488,12 @@ export default function OptionsApp() {
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                       {snapMsg && <span className="row-desc">{snapMsg}</span>}
-                      <button className="btn-secondary" onClick={createSnapshot} disabled={snapBusy}>
+                      <button className="btn-secondary" onClick={() => createSnapshot()} disabled={snapBusy}>
                         {snapBusy ? <Loader2 size={12} className="spin" /> : <Camera size={12} />} {t("opt_snap_create")}
+                      </button>
+                      <button className="btn-icon" aria-label={t("opt_snap_create_kept")} title={t("opt_snap_create_kept")}
+                        onClick={() => createSnapshot(true)} disabled={snapBusy}>
+                        <Pin size={12} />
                       </button>
                     </div>
                   </div>
@@ -2467,16 +2522,38 @@ export default function OptionsApp() {
                     <div key={s.name} className="settings-row">
                       <div className="settings-row-left">
                         <div>
-                          <div className="row-label">{new Date(s.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</div>
-                          {/* The count comes from the shared index; an unreadable index
-                              (e.g. no passphrase set yet) leaves it unknown, and a bare
-                              "bookmarks" with no number reads as a rendering fault. */}
+                          <div className="row-label">
+                            {s.label || t("opt_snap_unknown")}
+                            {s.pinned && <span className="badge-active" style={{ marginLeft: 8 }}>{t("opt_snap_pin")}</span>}
+                            {s.origin === "auto" && <span className="badge-quiet" style={{ marginLeft: 8 }}>{t("opt_snap_auto")}</span>}
+                          </div>
+                          {/* The name the user gave it is the primary line; the device, the
+                              exact time and the size are supporting detail underneath.
+                              A count that cannot be read (e.g. no passphrase set yet) is
+                              simply left out rather than shown as a bare "bookmarks". */}
                           <div className="row-desc">
-                            {s.count != null ? plural("opt_snap_count", s.count) : t("opt_snap_unknown")}
+                            {s.device_label ? `${isolate(s.device_label)} · ` : ""}
+                            {new Date(s.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                            {s.count != null ? ` · ${plural("opt_snap_count", s.count)}` : ""}
                           </div>
                         </div>
                       </div>
-                      {confirmRestore === s.name ? (
+                      {renaming === s.name ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                          <input className="field-input-inline" dir="auto" autoFocus
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") void renameSnapshot(s.name);
+                              if (e.key === "Escape") setRenaming(null);
+                            }}
+                            placeholder={t("opt_snap_rename_placeholder")} />
+                          <button className="btn-secondary" onClick={() => setRenaming(null)} disabled={snapBusy}>{t("opt_cancel")}</button>
+                          <button className="btn-secondary" onClick={() => renameSnapshot(s.name)} disabled={snapBusy}>
+                            {snapBusy ? <Loader2 size={12} className="spin" /> : <Check size={12} />} {t("opt_snap_rename_save")}
+                          </button>
+                        </div>
+                      ) : confirmRestore === s.name ? (
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                           <button className="btn-secondary" onClick={() => setConfirmRestore(null)} disabled={snapBusy}>{t("opt_cancel")}</button>
                           <button className="btn-secondary" style={{ color: "var(--accent)", borderColor: "var(--accent)" }} onClick={() => restoreSnapshot(s.name)} disabled={snapBusy}>
@@ -2494,6 +2571,16 @@ export default function OptionsApp() {
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                           <button className="btn-secondary" onClick={() => setConfirmRestore(s.name)} disabled={snapBusy}>
                             <RotateCcw size={12} /> {t("popup_restore")}
+                          </button>
+                          <button className="btn-icon" aria-label={t("opt_snap_rename")} title={t("opt_snap_rename")}
+                            onClick={() => { setRenaming(s.name); setRenameValue(s.label ?? ""); setConfirmRestore(null); setConfirmDelete(null); }} disabled={snapBusy}>
+                            <Pencil size={12} />
+                          </button>
+                          <button className="btn-icon"
+                            aria-label={s.pinned ? t("opt_snap_unpin") : t("opt_snap_pin")}
+                            title={s.pinned ? t("opt_snap_unpin") : t("opt_snap_pin")}
+                            onClick={() => pinSnapshot(s.name, !s.pinned)} disabled={snapBusy}>
+                            {s.pinned ? <PinOff size={12} /> : <Pin size={12} />}
                           </button>
                           <button className="btn-icon" aria-label={t("opt_snap_delete_aria")} title={t("opt_snap_delete_aria")} onClick={() => setConfirmDelete(s.name)} disabled={snapBusy}>
                             <Trash2 size={12} />
@@ -2730,6 +2817,40 @@ export default function OptionsApp() {
                   )}
                 </div>
               )}
+
+              <div className="settings-section">
+                <div className="settings-card-head">{t("opt_guard_section")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_guard_label")}</div>
+                      <div className="row-desc">{t("opt_guard_desc")}</div>
+                    </div>
+                  </div>
+                  <label className="toggle-wrap">
+                    <input type="checkbox" className="toggle-input"
+                      checked={settings.guard_enabled ?? true}
+                      onChange={(e) => update({ guard_enabled: e.target.checked })} />
+                    <span className="toggle-track"><span className="toggle-thumb" /></span>
+                  </label>
+                </div>
+                {(settings.guard_enabled ?? true) && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div>
+                        <div className="row-label">{t("opt_guard_cap_label")}</div>
+                        <div className="row-desc">{t("opt_guard_cap_desc")}</div>
+                      </div>
+                    </div>
+                    <div className="slider-wrap">
+                      <input type="range" min={5} max={200} step={5}
+                        value={settings.guard_cap ?? 20}
+                        onChange={(e) => update({ guard_cap: Number(e.target.value) })} className="slider" />
+                      <span className="slider-val">{settings.guard_cap ?? 20}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <div className="settings-section">
                 <div className="settings-card-head">{t("opt_developer_section")}</div>

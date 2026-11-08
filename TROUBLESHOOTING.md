@@ -37,6 +37,24 @@ also lets a large cleanup through, but only up to 95% of your tree, so it cannot
 when a device asks to clear nearly everything. It is a standing setting rather than a
 one-time approval, so prefer the card above.
 
+**"Publishing is paused" / my other devices aren't getting this device's bookmarks.**
+The local change guard noticed that this device's bookmark tree kept changing by a large
+amount on several sync cycles in a row without settling. That pattern usually means two
+sync systems are feeding each other's writes back and forth, or an extension is
+rebuilding a bookmark folder. Kesonode pauses **only this device's upload**; it still
+receives everyone else's changes, and nothing here was deleted or reverted. A restore
+point was saved automatically.
+
+You don't have to do anything: one cycle in which the tree stays quiet clears the hold and
+publishing resumes. If it keeps coming back, check whether Chrome Sync / Firefox Sync is
+running alongside Kesonode on this profile. Picking one system for bookmarks is the
+simple answer; **Exclude bookmarks from sync** can also keep a folder another tool owns
+out of Kesonode entirely.
+
+A single large cleanup is NOT held — deleting 40 bookmarks in one go publishes
+immediately. Only repeated, never-settling churn (or one cycle changing more than 500
+entries) trips the guard.
+
 **Nothing syncs unless I keep a DevTools window open (dev builds).**
 After rebuilding an unpacked extension you must click **↻ reload** on it
 (`chrome://extensions`). The background service worker is suspended when idle and
