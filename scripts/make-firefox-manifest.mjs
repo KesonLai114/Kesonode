@@ -29,23 +29,18 @@ const repoRoot = resolve(here, "..");
 const srcPath = resolve(repoRoot, "public/manifest.json");
 const outPath = resolve(repoRoot, process.argv[2] ?? "dist-firefox/manifest.json");
 
-// Firefox add-on id. An email-form id is the convention when you don't own a domain, and
-// when this was chosen konode.org was neither registered nor ours (the domain + marketing
-// site were dropped 2026-07-16), so the earlier `konode@konode.org` pointed at a domain
-// that did not exist. `konabe@proton.me` is the contact address already used everywhere
-// else (README, PRIVACY.md, the options Feedback link).
+// Firefox add-on id. Kesonode carries its OWN identity, distinct from the upstream
+// Konode listing (which used konabe@proton.me). An email-form id is the convention when
+// you don't own a domain to host the id under.
 //
-// konode.org IS ours again since, and serves the site. That changes NOTHING here.
-//
-// DO NOT "tidy" this into `konode@konode.org` now that the domain resolves. The id is
-// STABLE once AMO has a listing: a different id is a brand-new add-on that loses its
-// reviews, its ratings and every existing user's updates. AMO has listed Konode since
-// 2026-08-04, so the window in which this was free to change is closed. An earlier version
-// of this comment said "nothing is uploaded to AMO yet, so changing it is still free",
-// which was true when written and would now be an expensive thing to believe.
-//
-// It is ALSO locked to the Google OAuth client, see driveRedirectFor() below.
-const GECKO_ID = "konabe@proton.me";
+// It is locked to the Google OAuth client: the Drive redirect URI is
+// sha1(this id) + ".extensions.allizom.org/gdrive" (see driveRedirectFor below). Changing
+// this id changes that URI, so the NEW URI must be registered as an Authorized redirect
+// URI on Kesonode's own Google OAuth client, or Firefox Drive sign-in fails with
+// redirect_uri_mismatch. This id is purely a distribution identity — it is NOT part of the
+// frozen sync wire contract (konode_* files, the Konode folder, SyncPacket v1.0), so it
+// does not affect sync compatibility with upstream.
+const GECKO_ID = "kesonode@proton.me";
 const STRICT_MIN_VERSION = "128.0";
 
 /**
