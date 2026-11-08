@@ -312,6 +312,18 @@ authoritative packages. This fork has no store listing, issue tracker or support
 of its own; links that used to point at the upstream project's listings, rating pages and
 feedback addresses have been cleared until this fork has addresses of its own.
 
+## Sponsor
+
+If this software is useful to you, consider sponsoring the author to support ongoing
+maintenance and development. Sponsorship is entirely voluntary and does not affect any
+feature.
+
+<p align="center">
+  <img src="docs/sponsors/wechat.png" alt="WeChat QR code" width="220">
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/sponsors/alipay.png" alt="Alipay QR code" width="220">
+</p>
+
 ## License
 
 See [LICENSE](LICENSE).

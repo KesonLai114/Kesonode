@@ -29,7 +29,5 @@ store-listing/
 # The zip next to it is already covered by *.zip above.
 konode-main/
 
-# Local build leftovers (they embed absolute machine paths) and personal sponsor
-# images: neither belongs in a repository that may later be made public.
+# Local build leftovers embed absolute machine paths and don't belong in the repo.
 vitest.config.ts.timestamp-*.mjs
-docs/sponsors/
