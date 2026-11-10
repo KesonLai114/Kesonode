@@ -8,6 +8,33 @@ All notable changes to Konode. Format loosely follows
 > upstream releases, not to this fork's product name. Kesonode-only changes are recorded
 > in the section immediately below and never change the upstream wire contract.
 
+## [Unreleased]
+
+### Fixed
+
+- **A restore point keeps naming the device that actually took it.** The default name is
+  `Bookmark restore point · <device> · <short id>`, and the device half was re-derived from
+  the CURRENT settings — so renaming the computer, or importing a settings backup that
+  changed its name, re-labelled points that had been sitting on the backend for weeks. One
+  machine's restore points could be found under three different names on the same screen.
+  The tag is now frozen into the shared index (`auto_name`) at the moment the point is
+  saved; later settings changes reach only new points. Points saved before this build keep
+  the device recorded in their own entry, which was already frozen per point.
+
+- **The extension no longer quietly renames the computer, which renamed its restore
+  points.** `cleanDeviceLabel()` strips the `<browser> · <short id>` halves that old builds
+  glued onto the device name — but it stripped a browser word from ANY label ending in one,
+  so a name its owner typed ("Macbook · Edge", natural on a machine that runs several
+  browsers) was rewritten to "Macbook" the first time settings were read. Since a restore
+  point is named after its device, that surfaced as "the names changed by themselves". A
+  browser word is now only treated as machine-written when the machine's short id came off
+  the same string; the old `<OS> · <browser> · <id>` form is still cleaned.
+
+- **A restore point named after your own machine keeps that name.** `snapshotIsUnnamed()`
+  treated any name starting with the device label as machine-generated, so "Macbook 升级前"
+  silently reverted to the default the next time the list was drawn. Only an 8-character
+  device id inside the name is proof that a machine wrote it.
+
 ## [1.5.13] - 2026-11-10
 
 ### Added

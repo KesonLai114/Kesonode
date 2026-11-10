@@ -78,6 +78,12 @@ describe("cleanDeviceLabel — give the user their own words back", () => {
     expect(cleanDeviceLabel("Mac mini M4pro")).toBe("Mac mini M4pro");
     expect(cleanDeviceLabel("办公室那台")).toBe("办公室那台");
     expect(cleanDeviceLabel("Mac · Office")).toBe("Mac · Office"); // not a browser token
+    // A browser word on its own is the owner's choice, not a leftover: on a machine that
+    // runs three browsers, "<machine> · Edge" is the distinguishing half. Stripping it
+    // renamed the computer behind the user's back, and restore points are named after it.
+    expect(cleanDeviceLabel("Macbook · Edge")).toBe("Macbook · Edge");
+    expect(cleanDeviceLabel("Macbook · Chromium")).toBe("Macbook · Chromium");
+    expect(cleanDeviceLabel("工作机 · Firefox")).toBe("工作机 · Firefox");
   });
 
   it("does not eat a date that happens to be all digits", () => {

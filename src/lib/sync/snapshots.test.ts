@@ -725,6 +725,47 @@ describe("snapshots — shared index refused (Nutstore 403)", () => {
   });
 });
 
+describe("snapshots — a point keeps naming the device that took it", () => {
+  const macbook = () => settings({
+    device_label: "Macbook",
+    device_id: "451dbeb9-0000-4000-8000-000000000001",
+  });
+  const tag = (device: string) => `${t("opt_snap_unknown")} · ${device} · 451dbeb9`;
+
+  it("freezes the device into the point, so a later rename reaches only new points", async () => {
+    const backend = new FileFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const first = await createSnapshot(asBackend(backend), macbook());
+
+    // The owner renames the computer in Settings — or an older build "cleaned" the name
+    // it had stored. Either way, the point already taken keeps its own device.
+    const renamed = settings({ device_label: "Studio", device_id: macbook().device_id });
+    const second = await createSnapshot(asBackend(backend), renamed);
+
+    const byName = new Map((await listSnapshots(asBackend(backend), renamed)).map((m) => [m.name, m]));
+    expect(snapshotDisplayName(byName.get(first.name)!)).toBe(tag("Macbook"));
+    expect(snapshotDisplayName(byName.get(second.name)!)).toBe(tag("Studio"));
+  });
+
+  it("keeps the frozen device even when the entry loses its device fields", async () => {
+    // An index written by a build that only stores `label` — or a merge that dropped the
+    // device fields — must not make the point borrow the viewer's identity.
+    const backend = new FileFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const point = await createSnapshot(asBackend(backend), macbook());
+    const stripped = { ...point, device_label: undefined, device_id: undefined };
+    expect(snapshotDisplayName(stripped)).toBe(tag("Macbook"));
+  });
+
+  it("lets the user name a point after their own machine", async () => {
+    // "Macbook 升级前" starts with the device label and is still a name a person chose;
+    // treating that as an automatic name threw their words away and showed the default.
+    const named = { label: "Macbook 升级前", device_label: "Macbook", device_id: macbook().device_id };
+    expect(snapshotIsUnnamed(named)).toBe(false);
+    expect(snapshotDisplayName(named)).toBe("Macbook 升级前");
+  });
+});
+
 describe("snapshots — the shared index is written under a condition", () => {
   // The index is the ONE file several devices write. Without a condition, two devices
   // taking a restore point at the same moment each merged into the list they had read,

@@ -719,6 +719,18 @@ export interface SnapshotMeta {
    *  Absent on older index entries; paired with `device_label` so a point can name its
    *  origin device even when the label was left empty. */
   device_id?: string;
+  /**
+   * Kesonode-only. `<device label> · <short id>` EXACTLY as it was when this point was
+   * saved, frozen into the index so the point keeps naming the device that took it.
+   *
+   * The live fields above are not enough on their own: a device renamed in Settings —
+   * or, before that was fixed, a device whose name the extension silently rewrote —
+   * re-labelled its OLDER restore points as well, and one machine's points could be
+   * found under three different names. A restore point's origin is history; it must not
+   * be re-derived from configuration that moves. Absent on points saved before this
+   * field existed, which fall back to `device_label`/`device_id` (also frozen per entry).
+   */
+  auto_name?: string;
   /** The name the user gave this restore point. Absent or empty means unnamed. */
   label?: string;
   /** Kept forever: outside the rolling 10-point retention. Derived from the filename. */

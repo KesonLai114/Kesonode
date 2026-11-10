@@ -419,7 +419,18 @@ export interface CreateSnapshotOptions {
   origin?: "manual" | "auto";
 }
 
-type SnapshotNameMeta = Pick<SnapshotMeta, "label" | "device_label" | "device_id">;
+type SnapshotNameMeta = Pick<SnapshotMeta, "label" | "device_label" | "device_id" | "auto_name">;
+
+/** `<device name> · <short id>` — the half of a default name that identifies the machine. */
+function deviceTag(meta: SnapshotNameMeta): string {
+  const parts: string[] = [];
+  const device = meta.device_label?.trim();
+  const short = shortDeviceId(meta.device_id);
+  if (device) parts.push(device);
+  // A default device label minted by this build already ends in the short id.
+  if (short && !device?.includes(short)) parts.push(short);
+  return parts.join(" · ");
+}
 
 /**
  * The ONE place a restore point's visible name is decided.
@@ -428,24 +439,24 @@ type SnapshotNameMeta = Pick<SnapshotMeta, "label" | "device_label" | "device_id
  * falling back to just `Bookmark restore point` when the shared index carries no device
  * info, and always overridden by a name the user actually chose.
  *
- * Default names are computed at DISPLAY time and are never written into the shared
- * index. That is the fix for this rule drifting again and again: older builds baked
- * `"<device> <short id> restore point"` into `label`, which (a) froze the wording in
- * whichever language happened to save it, (b) made an automatic name look like a
- * user's own, and (c) left the UI with a second, different fallback for points whose
- * index had no label. Changing the rule could never reach those points. Now there is
- * one function to change.
+ * The device half is read from `auto_name` — the tag frozen into the index on the day the
+ * point was saved — and only from the live `device_label` for points saved before that
+ * field existed. Re-deriving it from current settings is what renamed other people's
+ * history: renaming the device (or the extension silently cleaning its name) rewrote the
+ * label of points that had been sitting there for weeks, so one machine's restore points
+ * were found under three different names. A restore point names the device that MADE it,
+ * not the device that happens to be looking at it.
+ *
+ * Default names are still never written into `label`: that field means "the user named
+ * this", and a machine-written string in it would (a) freeze the wording in whichever
+ * language happened to save it, (b) make an automatic name look like the user's own, and
+ * (c) leave the UI with a second, different fallback. One function, one rule.
  */
 export function snapshotDisplayName(meta: SnapshotNameMeta): string {
   const label = meta.label?.trim();
   if (label && !snapshotIsUnnamed(meta)) return label;
-  const parts = [t("opt_snap_unknown")];
-  const device = meta.device_label?.trim();
-  const short = shortDeviceId(meta.device_id);
-  if (device) parts.push(device);
-  // A default device label minted by this build already ends in the short id.
-  if (short && !device?.includes(short)) parts.push(short);
-  return parts.join(" · ");
+  const tag = meta.auto_name?.trim() || deviceTag(meta);
+  return tag ? `${t("opt_snap_unknown")} · ${tag}` : t("opt_snap_unknown");
 }
 
 /** True when the row has no name the USER chose. Older builds persisted an automatic
@@ -457,15 +468,13 @@ export function snapshotIsUnnamed(meta: SnapshotNameMeta): boolean {
   const short = shortDeviceId(meta.device_id);
   if (!short) return false;
   // An 8-char device id inside a restore point's name means a machine wrote it: nobody
-  // types one by hand. That covers every build that baked an automatic name into `label`
-  // — including the ones whose device label has since been renamed, where the old
-  // startsWith(device) test stopped matching and the stale name froze on screen.
-  if (label.includes(short)) return true;
-  const device = meta.device_label?.trim();
-  // Match on the full device label too, not on a localized suffix: a name the user typed
-  // ("Macmini 升级前还原点") must never be swallowed, and a point saved under a different
-  // UI language has a different suffix anyway.
-  return device ? label.startsWith(device) : false;
+  // types one by hand. That covers every build that baked an automatic name into `label`.
+  //
+  // Deliberately NOT "starts with the device label": "Macbook 升级前" is exactly how
+  // someone names a restore point they took before upgrading, and treating that as
+  // machine-written silently threw their name away and showed the default instead —
+  // which is also "the name changed by itself". Only the id is proof.
+  return label.includes(short);
 }
 
 /** Write a snapshot of the current bookmark tree, then prune the rolling points to N. */
@@ -496,6 +505,10 @@ export async function createSnapshot(
     name, timestamp: ts, count,
     device_label: settings.device_label || undefined,
     device_id: settings.device_id || undefined,
+    // Frozen NOW, from the settings of the device that is taking this point. Everything
+    // that later changes — the user renaming the computer, a settings import, a cleaner
+    // with a different idea of what a device is called — must not reach this point.
+    auto_name: deviceTag({ device_label: settings.device_label, device_id: settings.device_id }) || undefined,
     // No `label`: only a name the user chooses is stored. The default name is built by
     // snapshotDisplayName() when the row is drawn, so one rule covers every point and
     // every language (see the comment above that function).

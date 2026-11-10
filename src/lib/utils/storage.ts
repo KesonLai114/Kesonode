@@ -105,24 +105,35 @@ const AUTO_BROWSER = /\s*[·•]\s*(?:Edge|Chromium|Firefox|Brave|Safari|夸克�
  * it cannot be anything else (eight hex chars with at least one letter). That keeps a
  * hand-written "工作机 · 20240101" from losing its date: all-digit tokens are only ever
  * stripped on an exact match with the device id.
+ *
+ * The browser token is stripped ONLY as part of that machine pattern — after an id came
+ * off the same string. On its own, "<name> · Edge" is somebody's own name: a Macbook
+ * whose owner wrote "Macbook · Edge" (they run Edge; the browser is the distinguishing
+ * half on a machine that has three of them) is not a leftover to be cleaned. Stripping it
+ * was the third report of the same symptom: the extension quietly renamed the computer,
+ * and since a restore point is named after its device, every point saved afterwards
+ * carried the name the owner had not chosen — "the restore point names changed by
+ * themselves". A label the user typed is data, not a migration to finish.
  */
 export function cleanDeviceLabel(raw: string | null | undefined, deviceId?: string): string {
   const original = (raw ?? "").trim();
   if (!original) return "";
   const ownShort = shortDeviceId(deviceId).toLowerCase();
   let out = original;
-  // Two passes: the id comes off the end first, which exposes the browser token that
+  // Three passes: the id comes off the end first, which exposes the browser token that
   // was sitting in front of it.
   for (let i = 0; i < 3; i++) {
-    const next = out
-      .replace(AUTO_SHORT_ID, (match, token: string) => {
-        const low = token.toLowerCase();
-        const isOwn = !!ownShort && low === ownShort;
-        const unmistakable = /[a-f]/.test(low); // eight digits alone could be a date
-        return isOwn || unmistakable ? "" : match;
-      })
-      .replace(AUTO_BROWSER, "")
-      .trim();
+    let strippedId = false;
+    const withoutId = out.replace(AUTO_SHORT_ID, (match, token: string) => {
+      const low = token.toLowerCase();
+      const isOwn = !!ownShort && low === ownShort;
+      const unmistakable = /[a-f]/.test(low); // eight digits alone could be a date
+      if (!isOwn && !unmistakable) return match;
+      strippedId = true;
+      return "";
+    });
+    // A browser word is machine-written only when the machine id was there too.
+    const next = (strippedId ? withoutId.replace(AUTO_BROWSER, "") : withoutId).trim();
     if (!next || next === out) break;
     out = next;
   }
