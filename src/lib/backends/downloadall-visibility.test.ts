@@ -269,3 +269,33 @@ describe("downloadAll — a peer file we cannot read is reported, not skipped in
     expect(backend.failedPeers.join(" ")).toContain("unreadable");
   });
 });
+
+describe("WebDAV — a listing that names another origin is explained once", () => {
+  // The shape a NAS or reverse proxy produces: PROPFIND succeeds, the names are right,
+  // and every href is an absolute URL on the plain-http port. downloadAll refuses them
+  // (credentials must not leave this server), so the folder reads as EMPTY to every
+  // caller above it — including a first sync, whose only message was "try again once it
+  // is reachable" about a storage that answers every request.
+  it("names both addresses once instead of one warning per file", async () => {
+    const cfg: BackendConfig = {
+      type: "webdav", label: "WebDAV", enabled: true,
+      webdav: { url: "https://dav.example.com/dav/", username: "u", password: "p" },
+    };
+    listOkDownloadFails(200, `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">
+        <d:response><d:href>http://dav.example.com:5005/dav/konode/${PEER}</d:href></d:response>
+      </d:multistatus>`);
+
+    const backend = new WebDAVBackend(cfg);
+    expect(await backend.downloadAll("extensions", "me")).toEqual([]);
+
+    const log = await auditText();
+    expect(log).toContain("lists files on http://dav.example.com:5005");
+    expect(log).toContain("https://dav.example.com");
+    expect(log).toContain("won't send your login");
+    expect(log.split("lists files on").length - 1).toBe(1);
+
+    // And the file is still accounted for, so an ordinary sync reports it as degraded
+    // rather than clean-with-one-device-missing.
+    expect(backend.failedPeers.join(" ")).toContain("instead of");
+  });
+});

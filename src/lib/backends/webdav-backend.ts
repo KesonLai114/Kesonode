@@ -363,7 +363,39 @@ export class WebDAVBackend implements IBackend {
     // 404 = the sync folder doesn't exist yet (no peers).
     if (res.status === 404) return [];
     if (!res.ok) this.fail(res, "list");
-    return parseDavEntries(await res.text());
+    const entries = parseDavEntries(await res.text());
+    this.warnOnForeignHrefs(entries);
+    return entries;
+  }
+
+  /**
+   * Name a listing whose hrefs point somewhere other than the configured address.
+   *
+   * `downloadAll` refuses such hrefs on purpose — Basic credentials must not leave this
+   * server — but it can only say so about a file it was about to fetch, and every caller
+   * above it just sees an empty folder. That is how a NAS or a reverse proxy answering
+   * PROPFIND with absolute URLs on another scheme, port or host produced "No other
+   * device's bookmarks could be read" on a storage that was perfectly reachable, with the
+   * only clue buried in a per-file warning. Saying it once, at the listing, puts it in
+   * Settings → Activity before anyone has to guess.
+   *
+   * One line per listing: every entry in it has the same cause.
+   */
+  private warnOnForeignHrefs(entries: DavEntry[]): void {
+    let baseOrigin: string;
+    try { baseOrigin = new URL(this.w.url).origin; } catch { return; }
+    for (const e of entries) {
+      let target: URL;
+      try { target = new URL(e.href, this.w.url); } catch { continue; }
+      if (target.origin === baseOrigin && isSecureBackendUrl(target.href)) continue;
+      logger.warn(
+        "WebDAV",
+        `This server lists files on ${target.origin}, but the WebDAV address is ${baseOrigin}. ` +
+        `Kesonode won't send your login to another address, so those files are ignored — use the ` +
+        `address the server itself reports (same scheme, host and port).`
+      );
+      return;
+    }
   }
 
   /** A write changes the listing, so the cached one is no longer true. */
