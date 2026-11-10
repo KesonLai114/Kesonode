@@ -8,7 +8,7 @@ All notable changes to Konode. Format loosely follows
 > upstream releases, not to this fork's product name. Kesonode-only changes are recorded
 > in the section immediately below and never change the upstream wire contract.
 
-## [Unreleased]
+## [1.5.13] - 2026-11-10
 
 ### Added
 
@@ -306,6 +306,8 @@ All notable changes to Konode. Format loosely follows
   already written. The default name is now computed at display time by
   `snapshotDisplayName()` and never stored as a user label; legacy automatic labels
   are recognised as unnamed by device + short id, and a name the user chose always wins.
+
+## [Unreleased]
 
 ## [1.5.4] - 2026-11-09
 
