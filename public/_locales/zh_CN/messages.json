@@ -1382,7 +1382,7 @@
     "message": "还原点"
   },
   "opt_snapshots_section_sub": {
-    "message": "在后端保存了带时间戳的书签副本，所有设备共享。恢复时会把该设备缺失的书签补回（永不删除）。普通还原点仅保留最新的 10 条，较旧的会自动移除；标记为「永久保留」的还原点不会被自动清理，只能手动删除。在此可重命名、永久保留、恢复或删除任意一条。"
+    "message": "在后端保存了带时间戳的书签副本，所有设备共享。恢复时会把该设备缺失的书签补回（永不删除）。自动还原点保留最新的 10 条，你手动保存的还原点另有 10 个位置，更旧的会自动移除；标记为「永久保留」的还原点不会被自动清理。在此可重命名、永久保留、恢复或删除任意一条。"
   },
   "opt_snap_now_label": {
     "message": "立即保存还原点"
@@ -1578,6 +1578,10 @@
   },
   "opt_export": {
     "message": "导出"
+  },
+  "opt_export_credentials_warning": {
+    "message": "这个设置文件会包含明文凭据：WebDAV 密码、GitHub 令牌、Google 刷新令牌、加密口令。拿到文件的人可以直接使用它们。请妥善保管——不要放进共享网盘、发到聊天窗口，或附在问题反馈里。\n\n仍要导出吗？",
+    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
   },
   "opt_exported": {
     "message": "已导出"

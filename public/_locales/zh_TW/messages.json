@@ -1391,7 +1391,7 @@
     "message": "還原點"
   },
   "opt_snapshots_section_sub": {
-    "message": "存在後端、帶時間戳記的書籤副本，你所有裝置共用。還原會把這台裝置上缺少的書籤補回來（永遠不會刪除）。只保留最新的 10 個，比較舊的會自動移除，你也可以在這裡刪掉其中任何一個。"
+    "message": "存在後端、帶時間戳記的書籤副本，你所有裝置共用。還原會把這台裝置上缺少的書籤補回來（永遠不會刪除）。自動還原點保留最新的 10 個，你親手儲存的還原點另有 10 個位置，更舊的會自動移除；標記為「永久保留」的還原點不會被自動清理。你可以在這裡重新命名、永久保留、還原或刪除其中任何一個。"
   },
   "opt_snap_now_label": {
     "message": "立即儲存還原點"
@@ -1608,6 +1608,10 @@
   },
   "opt_export": {
     "message": "匯出"
+  },
+  "opt_export_credentials_warning": {
+    "message": "這個設定檔會包含明文憑證：WebDAV 密碼、GitHub 權杖、Google 重新整理權杖、加密口令。拿到檔案的人可以直接使用它們。請妥善保管——不要放進共享雲端硬碟、傳到聊天視窗，或附在問題回報裡。\n\n仍要匯出嗎？",
+    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
   },
   "opt_exported": {
     "message": "已匯出"

@@ -63,7 +63,57 @@ All notable changes to Konode. Format loosely follows
   now returns to that question rather than to "welcome" for an install whose settings were
   already saved.
 
+### Changed
+
+- **The settings-backup warning is now localized, and the export file's contents are
+  documented.** Settings → Advanced has always said the file holds credentials in plain
+  text, but the confirmation dialog was Chinese-only in every locale. It goes through
+  `_locales` now (all 11 locales), and `PRIVACY.md` gained a **Settings backup** section:
+  the file really does contain the WebDAV password, the GitHub token, the Google refresh
+  token and the encryption passphrase, it is checksummed rather than locked, and no lock
+  is possible because the file is what holds the passphrase. It is a password, and should
+  be treated as one.
+
 ### Fixed
+
+- **A failure that repeats identically stops being retried every minute.** A wrong
+  password, a revoked token, a repository that no longer exists: these fail the same way
+  on every cycle, and the engine used exactly the same cycle to say so — rewriting the
+  status, appending a kept line to the 200-entry Activity log and waking any open popup
+  with a sentence it had already shown. Left alone for an afternoon the log was nothing
+  but copies of that line, which is how the entries the popup sends people in to read
+  disappear (#20 again). The same message in consecutive cycles now buys a growing pause
+  (2 → 4 → 8 → 15 minutes, the message itself being what identifies "the same failure"),
+  said once in the log while it grows. A different error starts over immediately, "Sync
+  now" is never gated and clears the count, and saving settings clears it too — which are
+  the two things someone does after fixing the cause. Rate limits keep their own
+  30-minute cooldown and are not counted twice.
+
+- **A restore point saved by hand is no longer rotated away by automatic ones.** Ten
+  slots, shared: a week of blocked deletions (a browser whose own bookmark sync runs
+  alongside Kesonode will produce exactly that) evicted the backup someone took on purpose
+  before an upgrade, silently, with nothing left to restore. Points now carry their kind
+  in the FILE NAME — the same mechanism `konode_snap_kept_` already uses — with
+  `konode_snap_manual_` in a ring of its own (10), so automatic points cannot reach the
+  ones you saved, an unreadable index cannot blur the distinction, and a device on an
+  older build simply does not see them (and therefore cannot prune them).
+
+- **Two devices saving a restore point at the same moment no longer lose one's name and
+  count.** `konode_snap_index.json` is the ONE file several devices write, and it was
+  read-merge-written with nothing to stop the later write from replacing the earlier one's
+  entry — which looks, from the outside, exactly like "my restore point lost its name
+  again". `IBackend` gained `getFileVersion` / `putFileIfVersion`: WebDAV uses `If-Match`
+  (or `If-None-Match: *`) with the ETag, GitHub uses the blob SHA it already sent, Drive
+  uses the file's `etag`. A lost race is simply redone — re-read, merge, write — up to
+  three times, and the last attempt is unconditional so the improvement can never cost
+  the write. Renaming and keep-forever go through the same path.
+
+- **A safety-net restore point no longer pays for a second connection.** The blocked-
+  deletion and held-drift paths called `snapshotNow()` from inside a sync, which built a
+  NEW backend and connected it — an extra MKCOL/PROPFIND on the one cycle that can least
+  afford it, since those incidents usually happen while a metered storage is refusing
+  requests. They now reuse the connection the sync already holds. The held-drift point
+  also records `origin: "auto"` now, so Activity stops presenting it as one you saved.
 
 - **Drive and GitHub rate limits now park the sync the same way WebDAV's do.** The
   30-minute cooldown keyed off `HttpError.rateLimited`, which only the WebDAV backend ever

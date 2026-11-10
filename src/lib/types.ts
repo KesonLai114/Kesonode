@@ -661,6 +661,28 @@ export interface IBackend {
   // `konode_<type>_` prefix). `name` is the basename in the folder; getFile returns
   // null when absent; listFiles returns basenames that start with `prefix`.
   putFile(name: string, content: string): Promise<void>;
+  /**
+   * An opaque token that changes whenever `name` changes — WebDAV/Drive ETag, GitHub blob
+   * SHA — or `null` when the file does not exist. Throws when this storage cannot produce
+   * one, which is the signal to the caller that conditional writes are unavailable.
+   *
+   * Only the shared restore-point index needs this. Every other file belongs to exactly
+   * one device and is written by nobody else, but that index is read-merge-written by all
+   * of them: two devices taking a restore point at the same moment each merged the other's
+   * OLD list, and the later write dropped the earlier one's names and counts. The files
+   * themselves were never at risk, only the annotations — but "my restore point lost its
+   * name again" is indistinguishable, from the outside, from something much worse.
+   */
+  getFileVersion?(name: string): Promise<string | null>;
+  /**
+   * Write `name` ONLY if it still carries `version` (`null`: only if it does not exist
+   * yet), returning false when someone else wrote in between. Has to be one conditional
+   * request — a read followed by a write here would be the same race with more steps.
+   *
+   * Optional, and paired with getFileVersion: a backend that cannot do it leaves the
+   * caller on the plain read-merge-write, which is what every backend did before.
+   */
+  putFileIfVersion?(name: string, content: string, version: string | null): Promise<boolean>;
   getFile(name: string): Promise<string | null>;
   listFiles(prefix: string): Promise<string[]>;
   // The same listing with each file's modification time, where the backend's listing

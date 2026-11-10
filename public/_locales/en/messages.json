@@ -1619,7 +1619,7 @@
     "message": "Restore points"
   },
   "opt_snapshots_section_sub": {
-    "message": "Timestamped copies of your bookmarks on the backend, shared by all your devices. Restoring adds back any bookmarks missing on this device (it never deletes). The newest 10 ordinary points are kept and older ones are removed automatically; a point you keep forever is never removed. Name, keep, restore or delete any of them here."
+    "message": "Timestamped copies of your bookmarks on the backend, shared by all your devices. Restoring adds back any bookmarks missing on this device (it never deletes). The newest 10 automatic points are kept, and the points you save by hand get 10 slots of their own; older ones are removed automatically. A point you keep forever is never removed."
   },
   "opt_snap_now_label": {
     "message": "Save a restore point now"
@@ -1849,6 +1849,10 @@
   },
   "opt_export": {
     "message": "Export"
+  },
+  "opt_export_credentials_warning": {
+    "message": "This file will contain your credentials in PLAIN TEXT: the WebDAV password, the GitHub token, the Google refresh token and the encryption passphrase. Anyone who gets the file can use them. Keep it private — not in shared cloud storage, not in a chat, not attached to a bug report.\n\nExport it anyway?",
+    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
   },
   "opt_exported": {
     "message": "Exported"

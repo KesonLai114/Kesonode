@@ -362,6 +362,55 @@ export class GDriveBackend implements IBackend {
     return pickCanonical(files)?.id ?? null;
   }
 
+  /** The file's `etag`, or null when it isn't in the folder. */
+  async getFileVersion(name: string): Promise<string | null> {
+    return withRetry(async () => {
+      const folderId = this.folderId ?? (await this.ensureFolder());
+      const h = await this.authHeaders();
+      const id = await this.findFileId(name, folderId, h);
+      if (!id) return null;
+      const res = await fetch(`${DRIVE_API}/files/${id}?fields=etag`, { headers: h, cache: "no-store" });
+      if (res.status === 404) return null;
+      if (!res.ok) throw await this.httpError(res, `Drive version read failed: ${res.status}`);
+      const etag = ((await res.json()) as { etag?: string }).etag;
+      if (!etag) throw new Error("Drive returned no etag, so writes cannot be made conditional");
+      return etag;
+    });
+  }
+
+  /** Update-media only if the file still carries `version`; false when someone else wrote
+   *  first (412), which is the caller's cue to re-read and merge again.
+   *
+   *  A file that does not exist yet is created without a condition: Drive has no
+   *  If-None-Match on a create. That race is between two devices taking their FIRST
+   *  restore point at the same instant, and the loser's file is still written under its
+   *  own name — only that one annotation is at stake, never a restore point. */
+  async putFileIfVersion(name: string, content: string, version: string | null): Promise<boolean> {
+    return withRetry(async () => {
+      const folderId = this.folderId ?? (await this.ensureFolder());
+      const h = await this.authHeaders();
+      const token = await this.getToken(false);
+      const existingId = await this.findFileId(name, folderId, h);
+      if (!existingId || version === null) {
+        if (existingId) return false; // created since we looked
+        await this.putFile(name, content);
+        return true;
+      }
+      const res = await fetch(`${UPLOAD_API}/files/${existingId}?uploadType=media`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "If-Match": version,
+        },
+        body: content,
+      });
+      if (res.status === 412) return false;
+      if (!res.ok) throw await this.httpError(res, `Drive update failed: ${res.status}`);
+      return true;
+    });
+  }
+
   async putFile(name: string, content: string): Promise<void> {
     await withRetry(async () => {
       const folderId = this.folderId ?? (await this.ensureFolder());

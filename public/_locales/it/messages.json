@@ -1391,7 +1391,7 @@
     "message": "Punti di ripristino"
   },
   "opt_snapshots_section_sub": {
-    "message": "Copie con data e ora dei tuoi segnalibri sul backend, condivise da tutti i tuoi dispositivi. Il ripristino aggiunge di nuovo i segnalibri che mancano su questo dispositivo (non elimina mai nulla). Vengono conservate le 10 più recenti; quelle più vecchie vengono rimosse automaticamente, e qui puoi eliminare quelle che vuoi."
+    "message": "Copie con data e ora dei tuoi segnalibri sul backend, condivise da tutti i tuoi dispositivi. Il ripristino aggiunge di nuovo i segnalibri che mancano su questo dispositivo (non elimina mai nulla). Vengono conservati i 10 punti automatici più recenti e quelli che salvi tu hanno altri 10 posti; quelli più vecchi vengono rimossi automaticamente. Un punto che scegli di conservare per sempre non viene mai rimosso."
   },
   "opt_snap_now_label": {
     "message": "Salva ora un punto di ripristino"
@@ -1608,6 +1608,10 @@
   },
   "opt_export": {
     "message": "Esporta"
+  },
+  "opt_export_credentials_warning": {
+    "message": "Questo file conterrà le tue credenziali IN CHIARO: la password WebDAV, il token GitHub, il token di aggiornamento Google e la passphrase di cifratura. Chiunque ottenga il file può usarle. Conservalo con cura: non in uno spazio condiviso, non in una chat e non come allegato di una segnalazione.\n\nEsportare comunque?",
+    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
   },
   "opt_exported": {
     "message": "Esportato"

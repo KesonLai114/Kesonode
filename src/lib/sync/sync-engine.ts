@@ -1,5 +1,5 @@
 import type { SyncSettings, SyncState, DataType, SyncPacket, SyncSession, SyncExtension, ConflictItem, BackendConfig,
-  DeviceInfo, DeviceBrowser, ConflictDiff, ListedFile, BookmarkPayload, FirstSyncChoice,
+  DeviceInfo, DeviceBrowser, ConflictDiff, ListedFile, BookmarkPayload, FirstSyncChoice, IBackend,
 } from "@/lib/types";
 import { createBackend } from "@/lib/backends/abstract-backend";
 import { normalizeRepoSlug } from "@/lib/backends/github-backend";
@@ -44,6 +44,9 @@ import {
   startSyncCooldown,
   clearSyncCooldown,
   SYNC_COOLDOWN_MS,
+  syncBackoffRemaining,
+  noteSyncFailure,
+  clearSyncFailure,
   dropRemoteDevice,
   getRemoteDeviceIds,
   dropRemoteDevices,
@@ -183,7 +186,7 @@ export class EncryptionMismatchError extends Error {
  * different thing from never having started.
  */
 export type SyncOutcome = "ran" | "no-backend" | "already-running" | "nothing-enabled" | "cooling-down"
-  | "first-sync-pending";
+  | "backing-off" | "first-sync-pending";
 
 /**
  * The status a finished sync should report. `sync()` used to hard-code
@@ -397,6 +400,11 @@ export class SyncEngine {
     this.resolver.updateStrategy(settings.conflict_strategy);
     setCompatMode(settings.compat_mode);
     if (encChanged) await clearUploadChecksums();
+    // Whatever was wrong may be what the user just changed (a password, a token, a repo,
+    // the passphrase) — so the repeated-failure pause is dropped and the next cycle tries
+    // again. The rate-limit cooldown is deliberately left alone: that one is the storage's
+    // own window, and a settings save cannot shorten it.
+    await clearSyncFailure();
   }
 
   /**
@@ -464,6 +472,18 @@ export class SyncEngine {
         logger.info("SyncEngine", `Automatic sync paused for another ${Math.ceil(remaining / 60000)} min after a rate limit`);
         this.isSyncing = false;
         return "cooling-down";
+      }
+      // The same failure, cycle after cycle — a wrong password, a revoked token, a folder
+      // that no longer exists. Different animal from the metered window above: nothing is
+      // going to change by asking again in sixty seconds, and asking anyway rewrote the
+      // status and the Activity log with the identical sentence every minute. The pause
+      // grows and is capped (see noteSyncFailure); "Sync now" and saving settings both
+      // clear it, which are exactly the two things someone does after fixing the cause.
+      const backoff = await syncBackoffRemaining();
+      if (backoff > 0) {
+        logger.info("SyncEngine", `Automatic sync paused for another ${Math.ceil(backoff / 60000)} min: the last failures were all the same error`);
+        this.isSyncing = false;
+        return "backing-off";
       }
     }
 
@@ -541,6 +561,10 @@ export class SyncEngine {
     const backend = createBackend(backendConfig);
 
     try {
+      // A manual press is the retry, so it starts the count over: whatever this cycle runs
+      // into is recorded fresh (and a repeat of the same error just re-earns the pause).
+      // Inside the try so a failing storage read hands the lock back like any other error.
+      if (options.force) await clearSyncFailure();
       // Read and cleared together, before the sync can do anything with it: from here on
       // the approval is spent whatever this cycle makes of it. See `bulkApprovedThisSync`.
       // Inside the try, so a storage read that fails gives the lock back like any other
@@ -593,11 +617,13 @@ export class SyncEngine {
       const recovery = await this.recordBlockedDeletion(
         this.bulkBlockedThisSync,
         typesToSync.includes("bookmarks"),
+        backend,
       );
       const guardNotice = await this.recordGuardIncident(
         this.guardNoticeThisSync,
         typesToSync.includes("bookmarks"),
         this.guardClearedThisSync,
+        backend,
       );
 
       // Encryption disagreements and per-type failures share one surface: both mean
@@ -654,7 +680,12 @@ export class SyncEngine {
       logger.info("SyncEngine", problems.length ? `Sync complete with ${problems.length} problem(s)` : "Sync complete");
       // A cycle that got through unmetered means the window has passed, so automatic
       // sync resumes on its normal interval right away instead of waiting out the rest.
-      if (!this.rateLimitedThisSync) await clearSyncCooldown();
+      // Same for the repeated-failure pause: this cycle reached the backend and finished,
+      // whatever it found there, so the streak that bought the pause is spent.
+      if (!this.rateLimitedThisSync) {
+        await clearSyncCooldown();
+        await clearSyncFailure();
+      }
       // A "keep forever" the storage refused during a 403 window gets its file renamed
       // on the first cycle that reaches the backend again, without waiting for Settings.
       try {
@@ -675,10 +706,33 @@ export class SyncEngine {
       // stalled every stream, and that is exactly what an empty list tells the popup.
       const newState = await setState({ status: "error", last_error: msg, failed_types: [] });
       this.onStateChange(newState);
+      // Counted against the record rather than the state, because the state was just
+      // overwritten with this very message. A metered window has its own 30-minute cooldown
+      // (noteRateLimit above); counting it here too would leave the shorter pause in place
+      // after the long one expired.
+      const failure = this.rateLimitedThisSync ? null : await noteSyncFailure(msg);
       // The EXPLAINED message, not the raw error. The Activity log is where someone goes
       // to find out what happened, and it was the one place still showing a bare
       // "NetworkError when attempting to fetch resource" once per minute.
-      logger.error("SyncEngine.sync", msg);
+      //
+      // Kept, though, only while it is news. A repeat is one condition, not one event per
+      // cycle: writing it as an error turned the 200-entry log into nothing but copies of
+      // the same sentence, in about three hours, and buried whatever the popup was sending
+      // people in to read (#20 again). The repeat still reaches the console.
+      if (failure && failure.streak > 1) {
+        logger.info("SyncEngine.sync", `Still failing the same way (${failure.streak} cycles in a row): ${msg}`);
+      } else {
+        logger.error("SyncEngine.sync", msg);
+      }
+      // Said only while the pause is still GROWING (streaks 2-5: 2, 4, 8, 15 minutes).
+      // Past that the timer has hit its ceiling and the next cycles are identical, so a
+      // kept line per attempt would rebuild the very noise this is here to stop.
+      if (failure && failure.until > 0 && failure.streak <= 5) {
+        logger.warn(
+          "SyncEngine",
+          `Automatic sync will retry in ${Math.ceil((failure.until - Date.now()) / 60000)} min: the same error has now failed ${failure.streak} cycles in a row. "Sync now" retries immediately; the pause clears itself when a cycle gets through.`,
+        );
+      }
     } finally {
       await this.finishSync(backend);
     }
@@ -918,7 +972,8 @@ export class SyncEngine {
    */
   private async recordBlockedDeletion(
     blocked: (BulkDeleteBlock & { device_id?: string; device_label?: string | null }) | null,
-    syncedBookmarks: boolean
+    syncedBookmarks: boolean,
+    open?: IBackend
   ): Promise<SyncState["recovery_notice"]> {
     if (!blocked) {
       if (syncedBookmarks && (await getRecoverySnapshotTaken())) {
@@ -949,7 +1004,7 @@ export class SyncEngine {
           "restore point was saved. Apply it or keep them in Settings → Activity."
       );
       try {
-        await this.snapshotNow({ origin: "auto" });
+        await this.snapshotNow({ origin: "auto" }, open);
         await setRecoverySnapshotTaken(true);
       } catch (e) {
         // Leave the latch clear so the next cycle retries the write — a failed
@@ -982,7 +1037,8 @@ export class SyncEngine {
   private async recordGuardIncident(
     notice: SyncState["guard_notice"],
     syncedBookmarks: boolean,
-    cleared = false
+    cleared = false,
+    open?: IBackend
   ): Promise<SyncState["guard_notice"]> {
     if (!notice) {
       if (syncedBookmarks && (await getGuardSnapshotTaken())) {
@@ -1007,7 +1063,7 @@ export class SyncEngine {
           "sync is running alongside Kesonode. See Settings → Activity."
       );
       try {
-        await this.snapshotNow();
+        await this.snapshotNow({ origin: "auto" }, open);
         await setGuardSnapshotTaken(true);
       } catch (e) {
         logger.warn("SyncEngine", `Guard recovery snapshot failed: ${e instanceof Error ? e.message : e}`);
@@ -1405,8 +1461,15 @@ export class SyncEngine {
     await this.sync(["bookmarks"], { force: true });
   }
 
-  /** Write a snapshot of the current bookmark tree to the backend. */
-  async snapshotNow(opts: CreateSnapshotOptions = {}): Promise<SnapshotMeta> {
+  /** Write a snapshot of the current bookmark tree to the backend.
+   *
+   *  `open` is the connection the caller already holds. The two incident paths (a blocked
+   *  mass delete, a held drift) run INSIDE a sync, where a connected backend is right
+   *  there — and they used to build a second one, paying an extra MKCOL/PROPFIND on the
+   *  one cycle that can least afford it. Those incidents are usually a metered storage
+   *  refusing requests, so the safety net was the step most likely to fail. */
+  async snapshotNow(opts: CreateSnapshotOptions = {}, open?: IBackend): Promise<SnapshotMeta> {
+    if (open) return writeSnapshot(open, this.settings, opts);
     return this.withBackend((b) => writeSnapshot(b, this.settings, opts));
   }
 
@@ -1451,7 +1514,10 @@ export class SyncEngine {
   async restoreFromSnapshot(name: string): Promise<number> {
     const restored = await this.withBackend((b) => applySnapshot(b, name, this.settings));
     if (restored > 0) {
-      const outcome = await this.sync(["bookmarks"]);
+      // Forced: the user pressed Restore. A paused or cooled-down automatic loop must not
+      // hold back publishing what they just asked for — and this is also the moment the
+      // pause is worth retrying, since a restore is often the reaction to a failing device.
+      const outcome = await this.sync(["bookmarks"], { force: true });
       if (outcome !== "ran") {
         // e.g. a periodic sync already holds the lock. The restore itself stands; the
         // next cycle publishes it. Worth a line so it isn't a silent gap.

@@ -89,6 +89,20 @@ someone with full access to your device's browser profile; end-to-end encryption
 protects your data on the **storage backend** (which never sees the passphrase), not
 against an attacker who already controls your device.
 
+### Settings backup
+
+Settings → Advanced can export your configuration as a single JSON file, so that
+another browser can be set up from it without retyping anything. **That file contains
+the credentials above in plain text** — the WebDAV password, the GitHub token, the
+Google refresh token and the encryption passphrase — because restoring it has to work
+without them. It carries a checksum, not a lock: no passphrase protects it, and one
+could not, since the file is what holds the passphrase in the first place.
+
+Treat an exported settings file exactly like a password. Do not put it in cloud storage
+you share, send it in a chat, or attach it to a bug report. Kesonode says this in the
+dialog that writes it, and refusing to export is always an option — the account can be
+connected again by hand in the setup wizard.
+
 ## Optional end-to-end encryption
 
 Kesonode offers **optional** end-to-end encryption (AES-256-GCM, with a key derived

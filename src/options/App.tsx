@@ -1366,12 +1366,11 @@ export default function OptionsApp() {
 
   const exportConfig = async () => {
     setConfigExportStatus("idle");
-    // 设置备份文件包含明文凭据（WebDAV 密码、GitHub 令牌、Drive 刷新令牌、加密口令）。
-    // 分享它会泄露账号信息，导出前先明确告知用户。
-    if (!window.confirm(
-      "即将导出的设置文件包含明文凭据（WebDAV 密码、GitHub 令牌、Google 刷新令牌、加密口令）。\n请勿分享此文件。是否继续？"
-    )) {
-      setConfigImportStatus("idle");
+    // 设置备份文件包含明文凭据（WebDAV 密码、GitHub 令牌、Drive 刷新令牌、加密口令），
+    // 整份只有一个校验和——这是"能一键恢复"的代价。用户很可能把它放进网盘或聊天窗口，
+    // 所以在写出文件之前必须明确告知，并且用本地化文案（这里原本是硬编码中文）。
+    if (!window.confirm(t("opt_export_credentials_warning"))) {
+      setConfigExportStatus("idle");
       return;
     }
     const sent = await request({ type: "EXPORT_SETTINGS" });

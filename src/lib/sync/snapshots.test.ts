@@ -213,6 +213,53 @@ describe("snapshots — prune", () => {
     expect(backend.blobs.has("konode_snap_bookmarks_notanumber.json")).toBe(true);
     expect(await listSnapshots(asBackend(backend), settings())).toHaveLength(3);
   });
+
+  // A week of incidents is enough to turn the ten-slot ring over, and before this the
+  // ring did not care who had saved a point: the backup someone took on purpose before an
+  // upgrade was evicted by automatic ones, silently, with nothing left to restore.
+  it("does not let automatic points evict the ones saved by hand", async () => {
+    const backend = new FileFake();
+    const mine = "konode_snap_manual_1700000000000.json";
+    backend.blobs.set(mine, "{}");
+    seedFiles(backend, 12, 1_700_000_100_000); // a dozen newer automatic points
+
+    await pruneSnapshots(asBackend(backend));
+
+    expect(backend.blobs.has(mine)).toBe(true);
+    expect([...backend.blobs.keys()].filter((n) => n.startsWith("konode_snap_bookmarks_")))
+      .toHaveLength(10);
+    expect(await listSnapshots(asBackend(backend), settings())).toHaveLength(11);
+  });
+
+  it("rotates the by-hand points against themselves", async () => {
+    const backend = new FileFake();
+    for (let i = 0; i < 12; i++) {
+      backend.blobs.set(`konode_snap_manual_${1_700_000_000_000 + i}.json`, "{}");
+    }
+
+    await pruneSnapshots(asBackend(backend));
+
+    const left = [...backend.blobs.keys()].filter((n) => n.startsWith("konode_snap_manual_"));
+    expect(left).toHaveLength(10);
+    // The two oldest went, which is the same rule the automatic ring follows.
+    expect(left).not.toContain("konode_snap_manual_1700000000000.json");
+  });
+
+  it("writes a point the user saved under its own prefix, and it restores", async () => {
+    const backend = new FileFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com/" });
+    const saved = await createSnapshot(asBackend(backend), settings(), { origin: "manual" });
+    const auto = await createSnapshot(asBackend(backend), settings(), { origin: "auto" });
+
+    expect(saved.name).toMatch(/^konode_snap_manual_/);
+    expect(auto.name).toMatch(/^konode_snap_bookmarks_/);
+    expect(backend.blobs.has(saved.name)).toBe(true);
+
+    const bar = (await chrome.bookmarks.getTree())[0].children!.find((c) => c.id === "1")!;
+    await chrome.bookmarks.remove(bar.children!.find((c) => c.url === "https://a.com/")!.id);
+    expect(await restoreSnapshot(asBackend(backend), saved.name, settings())).toBe(1);
+    expect(await localUrls()).toContain("https://a.com/");
+  });
 });
 
 describe("snapshots — delete", () => {
@@ -574,6 +621,51 @@ class ForbiddenIndexFake extends FileFake {
   }
 }
 
+/**
+ * A backend that can report a version and refuses a write that names a stale one, like
+ * WebDAV's `If-Match` or GitHub's `sha`. `interfere` runs ONCE, immediately before a
+ * conditional write: it models the other device landing its own write in exactly the
+ * window a plain read-merge-write cannot survive.
+ */
+class VersionedFake extends FileFake {
+  private versions = new Map<string, number>();
+  writes = 0;
+  writeAttempts = 0;
+  interfere: (() => void) | null = null;
+
+  /** The version this backend currently reports, so a caller can hand it out. */
+  private versionOf(n: string): string | null {
+    return this.blobs.has(n) ? `v${this.versions.get(n) ?? 0}` : null;
+  }
+
+  getFileVersion(n: string): Promise<string | null> {
+    return Promise.resolve(this.versionOf(n));
+  }
+
+  /** Pretend another device wrote `content` (bypassing the condition). */
+  applyElsewhere(n: string, content: string): void {
+    this.versions.set(n, (this.versions.get(n) ?? 0) + 1);
+    this.blobs.set(n, content);
+  }
+
+  putFileIfVersion(n: string, content: string, version: string | null): Promise<boolean> {
+    this.writeAttempts++;
+    if (this.interfere) {
+      const run = this.interfere;
+      this.interfere = null;
+      run();
+    }
+    if (this.versionOf(n) !== version) return Promise.resolve(false);
+    this.applyElsewhere(n, content);
+    this.writes++;
+    return Promise.resolve(true);
+  }
+}
+
+/** The shared index as this module writes it: a plain (unencrypted) wrapper. */
+const indexFile = (list: unknown[]): string =>
+  JSON.stringify({ version: "1.0", encrypted: false, payload: JSON.stringify(list) });
+
 describe("snapshots — shared index refused (Nutstore 403)", () => {
   const device = () => settings({
     device_label: "Macmini M4pro",
@@ -630,6 +722,50 @@ describe("snapshots — shared index refused (Nutstore 403)", () => {
     expect(kept).toBeDefined();
     expect(snapshotDisplayName(kept)).toBe(expected);
     expect(backend.blobs.has(INDEX_NAME)).toBe(false);
+  });
+});
+
+describe("snapshots — the shared index is written under a condition", () => {
+  // The index is the ONE file several devices write. Without a condition, two devices
+  // taking a restore point at the same moment each merged into the list they had read,
+  // and the later write silently dropped the earlier one's name and count — which, from
+  // the outside, is what "my restore point lost its name again" looks like.
+  const since = 1_700_000_000_000;
+
+  it("merges again when another device wrote the index in between", async () => {
+    await otherDevice();
+    const backend = new VersionedFake();
+    // A peer's restore point, already on the backend but not yet in the index.
+    const peerPoint = `konode_snap_bookmarks_${since}.json`;
+    backend.blobs.set(peerPoint, "{}");
+
+    // The peer lands its annotation exactly in the window between our read and our write.
+    backend.interfere = () => {
+      backend.applyElsewhere(
+        INDEX_NAME,
+        indexFile([{ name: peerPoint, timestamp: since, count: 7, device_label: "Laptop" }]),
+      );
+    };
+
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const mine = await createSnapshot(asBackend(backend), settings(), { origin: "manual" });
+
+    expect(backend.writeAttempts).toBe(2); // the first was refused, the second landed
+    const published = JSON.parse(JSON.parse(backend.blobs.get(INDEX_NAME)!).payload) as
+      { name: string; count?: number }[];
+    // BOTH annotations survive, which is the whole point.
+    expect(published.map((m) => m.name).sort()).toEqual([mine.name, peerPoint].sort());
+    expect(published.find((m) => m.name === peerPoint)!.count).toBe(7);
+  });
+
+  it("still writes the index for a storage that cannot report a version", async () => {
+    await otherDevice();
+    const backend = new FileFake(); // no getFileVersion / putFileIfVersion
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const created = await createSnapshot(asBackend(backend), settings(), { origin: "manual" });
+
+    const published = JSON.parse(JSON.parse(backend.blobs.get(INDEX_NAME)!).payload) as { name: string }[];
+    expect(published.map((m) => m.name)).toContain(created.name);
   });
 });
 

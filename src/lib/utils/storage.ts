@@ -274,6 +274,10 @@ export const KEYS = {
   // Automatic sync is parked until this timestamp after the storage meters us (429, or
   // Nutstore's 403). Device-local working state only; never travels in a SyncPacket.
   SYNC_COOLDOWN_UNTIL: "konode_sync_cooldown_until",
+  // The last failure automatic sync ran into, how many cycles in a row said the same
+  // thing, and when it may try again. Separate from the cooldown above: that one is a
+  // known-length window, this one is "the same error, again". Device-local only.
+  SYNC_FAILURE: "konode_sync_failure",
   GDRIVE_SESSION: "konode_gdrive_session",
   GDRIVE_FOLDER: "konode_gdrive_folder",
   ONBOARDING_DRAFT: "konode_onboarding_draft",
@@ -1323,6 +1327,72 @@ export async function startSyncCooldown(now = Date.now()): Promise<boolean> {
 
 export async function clearSyncCooldown(): Promise<void> {
   await set(KEYS.SYNC_COOLDOWN_UNTIL, 0);
+}
+
+// ─── Repeated-failure backoff ───────────────────────────────────────────────
+//
+// A rate limit has a known shape and gets the 30-minute cooldown above. A WRONG password
+// does not: it repeats identically every cycle for as long as nobody fixes it. Retrying
+// is still the right thing to do — that is how a credential the user has since corrected
+// gets noticed — but doing it every single minute rewrote the status, appended a kept
+// line to the 200-entry Activity log, and re-broadcast to any open popup, all saying the
+// same sentence. Left alone for an afternoon the log was nothing but copies of that one
+// line, which is the exact condition that hides the entries the popup sends people in to
+// read (#20 in yet another place).
+//
+// So the same failure in consecutive cycles buys a growing pause. The identity of "the
+// same failure" is the message text itself, deliberately: no attempt is made to guess
+// whether an error is "permanent", because a guess that is wrong either hides a real
+// problem behind a pause or keeps the storm going. A different error starts over at once,
+// and the first occurrence never pauses anything — one failure is a dropped connection,
+// not a pattern.
+//
+// Cleared by a clean cycle, by "Sync now", and by saving settings (the user may just have
+// fixed the thing that was wrong).
+
+export const SYNC_BACKOFF_BASE_MS = 2 * 60 * 1000;
+export const SYNC_BACKOFF_MAX_MS = 15 * 60 * 1000;
+
+export interface SyncFailureState {
+  /** Consecutive cycles that recorded this exact message. 0 after a clean cycle. */
+  streak: number;
+  message: string | null;
+  /** Timestamp automatic sync may try again. 0 means "no pause". */
+  until: number;
+}
+
+const NO_FAILURE: SyncFailureState = { streak: 0, message: null, until: 0 };
+
+export async function getSyncFailureState(): Promise<SyncFailureState> {
+  return { ...NO_FAILURE, ...(await get<Partial<SyncFailureState>>(KEYS.SYNC_FAILURE, {})) };
+}
+
+/** Milliseconds until automatic sync may try again after a repeated failure. */
+export async function syncBackoffRemaining(now = Date.now()): Promise<number> {
+  const { until } = await getSyncFailureState();
+  return Math.max(0, until - now);
+}
+
+/** Record one failed cycle and return the state it produced. */
+export async function noteSyncFailure(
+  message: string,
+  now = Date.now()
+): Promise<SyncFailureState> {
+  const prev = await getSyncFailureState();
+  const streak = prev.message === message ? prev.streak + 1 : 1;
+  const pause = streak < 2
+    ? 0
+    : Math.min(SYNC_BACKOFF_BASE_MS * 2 ** (streak - 2), SYNC_BACKOFF_MAX_MS);
+  const next: SyncFailureState = { streak, message, until: pause ? now + pause : 0 };
+  await set(KEYS.SYNC_FAILURE, next);
+  return next;
+}
+
+/** Forget the streak. Cheap to call on every clean cycle: it writes only when set. */
+export async function clearSyncFailure(): Promise<void> {
+  const prev = await getSyncFailureState();
+  if (prev.streak === 0 && prev.until === 0 && prev.message === null) return;
+  await set(KEYS.SYNC_FAILURE, { ...NO_FAILURE });
 }
 
 export async function acquireSyncLock(ttlMs: number): Promise<boolean> {

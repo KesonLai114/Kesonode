@@ -549,6 +549,48 @@ export class WebDAVBackend implements IBackend {
     });
   }
 
+  /** The file's ETag, or null when it isn't there. HEAD keeps it to headers only.
+   *
+   *  A server that sends no ETag cannot answer "did this change since I read it", and
+   *  guessing would be worse than saying so: throwing leaves the shared index on the
+   *  plain read-merge-write it has always used. */
+  async getFileVersion(name: string): Promise<string | null> {
+    return withRetry(async () => {
+      this.guardRateLimit();
+      const res = await fetch(`${this.baseUrl}/${name}`, {
+        method: "HEAD", headers: this.headers(), cache: "no-store",
+      });
+      if (res.status === 404) return null;
+      if (!res.ok) this.fail(res, "HEAD");
+      const etag = res.headers?.get("etag")?.trim();
+      if (!etag) throw new Error("This WebDAV server sends no ETag, so writes cannot be made conditional");
+      return etag;
+    });
+  }
+
+  /** PUT that only lands if the file still has `version`.
+   *
+   *  `If-None-Match: *` for a file that must not exist yet; `If-Match` otherwise. A 412 is
+   *  the answer we want — the caller re-reads and merges again — so it is not an error. */
+  async putFileIfVersion(name: string, content: string, version: string | null): Promise<boolean> {
+    return withRetry(async () => {
+      this.guardRateLimit();
+      const headers: Record<string, string> = {
+        Authorization: this.authHeader(),
+        "Content-Type": "application/json",
+        // `If-None-Match: *` for a file that must not exist yet; `If-Match` otherwise.
+        [version === null ? "If-None-Match" : "If-Match"]: version === null ? "*" : version,
+      };
+      const res = await fetch(`${this.baseUrl}/${name}`, {
+        method: "PUT", headers, body: content,
+      });
+      if (res.status === 412) return false;
+      if (!res.ok) this.fail(res, "PUT");
+      this.invalidateListing();
+      return true;
+    });
+  }
+
   async listFiles(prefix: string): Promise<string[]> {
     return withRetry(async () => {
       const entries = await this.folderListing();

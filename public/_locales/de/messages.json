@@ -1391,7 +1391,7 @@
     "message": "Wiederherstellungspunkte"
   },
   "opt_snapshots_section_sub": {
-    "message": "Mit Zeitstempel versehene Kopien deiner Lesezeichen im Speicher, die alle deine Geräte teilen. Eine Wiederherstellung fügt auf diesem Gerät fehlende Lesezeichen wieder hinzu (sie löscht nie). Die neuesten 10 bleiben erhalten, ältere werden automatisch entfernt, und du kannst hier jeden davon löschen."
+    "message": "Mit Zeitstempel versehene Kopien deiner Lesezeichen im Speicher, die alle deine Geräte teilen. Eine Wiederherstellung fügt auf diesem Gerät fehlende Lesezeichen wieder hinzu (sie löscht nie). Von den automatisch erstellten Punkten bleiben die neuesten 10 erhalten, von den selbst gespeicherten ebenfalls die neuesten 10; ältere werden automatisch entfernt. Ein Punkt, den du dauerhaft behältst, wird nie automatisch gelöscht."
   },
   "opt_snap_now_label": {
     "message": "Jetzt einen Wiederherstellungspunkt speichern"
@@ -1608,6 +1608,10 @@
   },
   "opt_export": {
     "message": "Exportieren"
+  },
+  "opt_export_credentials_warning": {
+    "message": "Diese Datei enthält deine Zugangsdaten im KLARTEXT: das WebDAV-Passwort, das GitHub-Token, das Google-Refresh-Token und die Verschlüsselungs-Passphrase. Wer die Datei hat, kann sie verwenden. Bewahre sie entsprechend auf – nicht in einem geteilten Cloud-Speicher, nicht in einem Chat, nicht als Anhang einer Fehlermeldung.\n\nTrotzdem exportieren?",
+    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
   },
   "opt_exported": {
     "message": "Exportiert"

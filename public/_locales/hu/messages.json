@@ -1391,7 +1391,7 @@
     "message": "Visszaállítási pontok"
   },
   "opt_snapshots_section_sub": {
-    "message": "Időbélyeggel ellátott másolatok a könyvjelzőidről a tárhelyeden, az összes eszközöd között megosztva. A visszaállítás visszateszi az ezen az eszközön hiányzó könyvjelzőket (soha nem töröl). A legújabb 10 marad meg, a régebbiek automatikusan törlődnek, és bármelyiket törölheted itt."
+    "message": "Időbélyeggel ellátott másolatok a könyvjelzőidről a tárhelyeden, az összes eszközöd között megosztva. A visszaállítás visszateszi az ezen az eszközön hiányzó könyvjelzőket (soha nem töröl). Az automatikus pontokból a legújabb 10 marad meg, a saját mentéseidnek külön 10 helyük van; a régebbieket automatikusan törli. Az „örökre megtartott” pontot soha nem törli."
   },
   "opt_snap_now_label": {
     "message": "Visszaállítási pont mentése most"
@@ -1608,6 +1608,10 @@
   },
   "opt_export": {
     "message": "Exportálás"
+  },
+  "opt_export_credentials_warning": {
+    "message": "Ez a fájl a hitelesítő adataidat NYÍLT SZÖVEGBEN tartalmazza: a WebDAV-jelszót, a GitHub-tokent, a Google frissítő tokent és a titkosítási jelmondatot. A fájl birtokában bárki használhatja őket. Tartsd bizalmasan: ne tedd megosztott tárhelyre, ne küldd csevegésben, és ne csatold hibajelentéshez.\n\nMégis exportálod?",
+    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
   },
   "opt_exported": {
     "message": "Exportálva"

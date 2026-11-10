@@ -5,6 +5,8 @@ import {
   getImportedHistoryStamps, recordImportedHistory, releaseImportedHistory,
   updateKey, appendAudit, KEYS, detectDeviceName,
   syncCooldownRemaining, startSyncCooldown, clearSyncCooldown, SYNC_COOLDOWN_MS,
+  noteSyncFailure, clearSyncFailure, syncBackoffRemaining,
+  SYNC_BACKOFF_BASE_MS, SYNC_BACKOFF_MAX_MS,
   getSettings, saveSettings, DEFAULT_SETTINGS, ensureActiveBackendConfig,
   setRemoteSession, setRemoteExtensions, getRemoteSessions,
 } from "@/lib/utils/storage";
@@ -56,6 +58,50 @@ describe("rate-limit cooldown", () => {
     await startSyncCooldown(now);
     await clearSyncCooldown();
     expect(await syncCooldownRemaining(now)).toBe(0);
+  });
+});
+
+describe("repeated-failure backoff", () => {
+  afterEach(async () => { await clearSyncFailure(); });
+
+  it("never pauses on the first failure of a kind", async () => {
+    const now = 1_000_000;
+    const first = await noteSyncFailure("Wrong password", now);
+    expect(first.streak).toBe(1);
+    expect(first.until).toBe(0);
+    expect(await syncBackoffRemaining(now)).toBe(0);
+  });
+
+  it("grows 2 → 4 → 8 min for the same message, then stays at the ceiling", async () => {
+    const now = 1_000_000;
+    const delays: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const s = await noteSyncFailure("Wrong password", now);
+      delays.push(s.until ? s.until - now : 0);
+    }
+    expect(delays).toEqual([0, 2 * 60_000, 4 * 60_000, 8 * 60_000,
+      SYNC_BACKOFF_MAX_MS, SYNC_BACKOFF_MAX_MS]);
+  });
+
+  it("starts over as soon as the message changes, even after a long streak", async () => {
+    const now = 1_000_000;
+    await noteSyncFailure("Wrong password", now);
+    await noteSyncFailure("Wrong password", now);
+    await noteSyncFailure("Wrong password", now);
+    const other = await noteSyncFailure("Storage folder not found", now);
+    expect(other.streak).toBe(1);
+    expect(other.until).toBe(0);
+  });
+
+  it("stops counting once the window has passed, and is cleared by a clean cycle", async () => {
+    const now = 1_000_000;
+    await noteSyncFailure("Wrong password", now);
+    await noteSyncFailure("Wrong password", now);
+    expect(await syncBackoffRemaining(now)).toBe(SYNC_BACKOFF_BASE_MS);
+    expect(await syncBackoffRemaining(now + SYNC_BACKOFF_BASE_MS)).toBe(0);
+    await clearSyncFailure();
+    const after = await noteSyncFailure("Wrong password", now);
+    expect(after.streak).toBe(1);
   });
 });
 

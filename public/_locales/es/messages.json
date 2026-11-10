@@ -1335,6 +1335,10 @@
   "opt_export": {
     "message": "Exportar"
   },
+  "opt_export_credentials_warning": {
+    "message": "Este archivo contendrá tus credenciales EN TEXTO PLANO: la contraseña de WebDAV, el token de GitHub, el token de actualización de Google y la frase de contraseña de cifrado. Cualquiera que tenga el archivo puede usarlas. Guárdalo en privado: no en un almacenamiento compartido, no en un chat y no adjunto a un informe de error.\n\n¿Exportarlo igualmente?",
+    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
+  },
   "opt_exported": {
     "message": "Exportado"
   },
@@ -1720,7 +1724,7 @@
     }
   },
   "opt_snapshots_section_sub": {
-    "message": "Copias con marca de tiempo de tus marcadores en el servidor, compartidas por todos tus dispositivos. Al restaurar, se vuelven a agregar los marcadores que falten en este dispositivo (nunca los elimina). Se conservan las 10 más recientes; las más antiguas se eliminan automáticamente y puedes borrar cualquiera de ellas aquí."
+    "message": "Copias con marca de tiempo de tus marcadores en el servidor, compartidas por todos tus dispositivos. Al restaurar, se vuelven a agregar los marcadores que falten en este dispositivo (nunca los elimina). Se conservan los 10 puntos automáticos más recientes y los que guardes tú tienen otros 10; los más antiguos se eliminan automáticamente. Un punto que conserves para siempre no se elimina nunca."
   },
   "popup_guard_detail": {
     "message": "$COUNT$ cambiados este ciclo · límite $CAP$ · $ROUNDS$ ciclos seguidos",

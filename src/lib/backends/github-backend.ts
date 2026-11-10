@@ -221,6 +221,35 @@ export class GitHubBackend implements IBackend {
     return (await res.json()).sha ?? null;
   }
 
+  /** The blob SHA of a named file, which GitHub will only accept back as a condition for
+   *  replacing exactly that revision (a stale one gets 409). Null when the file is absent. */
+  async getFileVersion(name: string): Promise<string | null> {
+    return this.getFileSHA(`${this.path}/${name}`, this.branch);
+  }
+
+  /** PUT whose `sha` names the revision it replaces, so a concurrent write is refused
+   *  instead of silently overwritten. Returns false on 409/422 — someone got there first,
+   *  and the caller re-reads and merges again. */
+  async putFileIfVersion(name: string, content: string, version: string | null): Promise<boolean> {
+    await this.ensureRepoInitialized();
+    const filename = `${this.path}/${name}`;
+    const body: Record<string, unknown> = {
+      message: `snapshot: ${name}`, content: utf8ToBase64(content), branch: this.branch,
+    };
+    if (version) body.sha = version;
+    const res = await fetch(`${GITHUB_API}/repos/${this.repoSlug}/contents/${filename}`, {
+      method: "PUT", headers: this.headers(), body: JSON.stringify(body),
+    });
+    // 409: the sha we named is no longer the current one. 422: no sha was named, but the
+    // file exists — someone created it since we looked. Both mean "re-read and retry".
+    if (res.status === 409 || res.status === 422) return false;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw this.httpError(res, `GitHub putFile failed: ${res.status}. ${err.message ?? ""}`);
+    }
+    return true;
+  }
+
   async downloadAll(data_type: DataType, excludeDeviceId?: string): Promise<SyncPacket[]> {
     return withRetry(async () => {
       const res = await fetch(
