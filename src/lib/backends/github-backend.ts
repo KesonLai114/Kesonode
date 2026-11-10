@@ -1,5 +1,5 @@
 import type { IBackend, BackendConfig, DataType, SyncPacket } from "@/lib/types";
-import { withRetry, HttpError, defaultShouldRetry, rateLimitMessage } from "@/lib/utils/retry";
+import { withRetry, withPeerRetry, HttpError, defaultShouldRetry, rateLimitMessage } from "@/lib/utils/retry";
 import { logger } from "@/lib/utils/logger";
 import { utf8ToBase64 } from "@/lib/utils/base64";
 import { folderPath, isPeerFileName, packetFileName, peerDeviceIdFromName } from "@/lib/compat/protocol";
@@ -24,6 +24,8 @@ export function normalizeRepoSlug(input: string | undefined): string {
 
 export class GitHubBackend implements IBackend {
   readonly type = "github" as const;
+  /** Peer files this sync could not read; the engine surfaces these as a visible problem. */
+  readonly failedPeers: string[] = [];
 
   constructor(private config: BackendConfig) {}
 
@@ -201,16 +203,26 @@ export class GitHubBackend implements IBackend {
       // download_url is unauthenticated and 404s/HTMLs on private repos.
       const packets: SyncPacket[] = [];
       for (const m of matches) {
-        const r = await fetch(
-          `${GITHUB_API}/repos/${this.repoSlug}/contents/${this.path}/${m.name}?ref=${this.branch}`,
-          { headers: { ...this.headers(), Accept: "application/vnd.github.raw+json" }, cache: "no-store" }
-        );
-        if (!r.ok) {
-          // See the note in webdav-backend: a peer we can't fetch silently vanished from
-          // the sync while it still reported success.
+        let r: Response;
+        try {
+          r = await withPeerRetry(async () => {
+            const res = await fetch(
+              `${GITHUB_API}/repos/${this.repoSlug}/contents/${this.path}/${m.name}?ref=${this.branch}`,
+              { headers: { ...this.headers(), Accept: "application/vnd.github.raw+json" }, cache: "no-store" }
+            );
+            if (!res.ok) throw new HttpError(res.status, `HTTP ${res.status}`);
+            return res;
+          });
+        } catch (err) {
+          // Record it too: the engine turns this into a visible ERROR rather than a
+          // "Synced" status with one device missing from the merge.
+          const detail = err instanceof HttpError
+            ? `HTTP ${err.status}`
+            : err instanceof Error ? err.message : String(err);
+          this.failedPeers.push(`${m.name} (${detail})`);
           logger.warn(
             "GitHub.downloadAll",
-            `Couldn't download ${m.name} (HTTP ${r.status}) — that device is left out of this sync`
+            `Couldn't download ${m.name} (${detail}) — that device is left out of this sync`
           );
           continue;
         }

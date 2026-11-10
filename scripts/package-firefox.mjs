@@ -15,11 +15,11 @@
 //   `npm run package:firefox` builds and packages the STORE variant;
 //   `npm run package:source` does both browsers as SOURCE builds.
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { variantFromArgv, assertVariant, artifactDir } from "./build-variant.mjs";
+import { variantFromArgv, assertVariant, assertVersion, assertBundleComplete, artifactDir } from "./build-variant.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -32,11 +32,13 @@ if (!existsSync(resolve(distDir, "manifest.json"))) {
 
 const variant = variantFromArgv();
 assertVariant(distDir, variant);
+// Same gates as the Chrome package: web-ext zips whatever dist-firefox/ contains,
+// so a stale build would otherwise ship under the current version's filename.
+const version = assertVersion(repoRoot, distDir);
+assertBundleComplete(distDir);
 
 const artifactsDir = resolve(repoRoot, "web-ext-artifacts", artifactDir("firefox", variant));
 mkdirSync(artifactsDir, { recursive: true });
-
-const { version } = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8"));
 
 // Run web-ext's entry point under the Node that is already running, rather than through
 // `npx`. On Windows npx is a .cmd, and since the CVE-2024-27980 fix Node refuses to

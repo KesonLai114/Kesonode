@@ -8,6 +8,189 @@ All notable changes to Konode. Format loosely follows
 > upstream releases, not to this fork's product name. Kesonode-only changes are recorded
 > in the section immediately below and never change the upstream wire contract.
 
+## [Unreleased]
+
+### Added
+
+- **A first sync between two devices that both have bookmarks now asks which side wins.**
+  The old behaviour was a silent, non-destructive merge — safe, but a new browser had no
+  way to say "replace my bookmarks with my other machine's" or "start this group from the
+  bookmarks I already have here". When a device has bookmarks, has never published a packet,
+  and peers already have bookmark files, sync pauses without merging or publishing; the
+  popup shows a card and Settings → Activity offers **Merge** (the old behaviour), **Use the
+  remote copy** (clear this tree and rebuild it from the newest peer, with a restore point
+  saved first), and **Use the copy in this browser** (delete the peers' bookmark files).
+  The decision is per-install and never travels in a settings backup, so a browser restored
+  from another browser's config still gets to choose. The card also stays in Activity as a
+  manual "choose again" entry point, e.g. after a storage outage. A probe that fails (a
+  WebDAV 503) falls through to the ordinary merge instead of parking sync. No new shared
+  file type and no SyncPacket change: the frozen wire contract is untouched.
+
+- **The first page of setup can restore a settings backup.** Reinstalling used to mean
+  closing the wizard, finding Settings → Advanced and importing there. The welcome screen
+  now offers **Choose a backup file and import**, with the same overwrite / new-device /
+  sensitive-change questions as Settings. It marks setup complete, drops the draft, and
+  asks for a WebDAV host permission if the imported config needs one. Both entry points
+  share one implementation (`utils/settings-import.ts`), so they cannot drift apart.
+
+- **An update that needs a permission opens a one-click grant page.** A new version can
+  require an optional permission, and an imported WebDAV config can bring a host permission
+  nobody granted. After `onInstalled(reason: "update")` the worker checks what the CURRENT
+  setup needs (`missingPermissionsFor`) and opens `onboarding.html?reason=permissions`,
+  which lists what is missing and asks in one click. `permissions.request()` needs a user
+  gesture, so the worker never tries to ask by itself; the Settings **Grant access** rows
+  remain the way back in if that page was closed. That first page carries the same
+  backup-import option as the welcome screen, so an update never sends anyone into
+  Settings just to restore a config.
+
+- **Setup asks for a device name on the first page.** A browser does not expose the
+  computer's own name to an extension: the automatic label can only be
+  `Mac · Chromium · <short id>`, never `Mac mini M4pro`, and two identical machines look
+  identical. The welcome screen now carries the name field (shared with the storage step)
+  and says why it has to be typed; Settings → Device says the same under its field.
+
+### Fixed
+
+- **A storage that refuses to serve a peer's file no longer looks like a successful sync.**
+  WebDAV, GitHub and Drive each skipped an unreadable peer file with a warning and carried
+  on; the cycle then published this device's packet and reported "Synced" with FEWER
+  devices than the folder actually held. That is exactly the shape of the "both browsers
+  mind their own business" report when a WebDAV answers 503: both sides showed a clean
+  sync, neither had merged the other. A single peer-file GET now gets one short retry for
+  transient statuses (5xx/429/408/423 — not 401/403/404), and a failure that persists is
+  collected on the backend and turned into a visible sync ERROR that names the files and
+  says their data was not merged. One bad file still does not stop the other peers.
+
+- **"Use the copy in this browser" no longer reports success when deletions fail.** A 503
+  during the peer-file deletions used to be logged and ignored, leaving the group half
+  reset while the choice was marked done. It now throws with the number of files that
+  could and could not be removed, keeps the choice open for a retry, and logs the follow-up
+  needed on the other devices (choose "Use the remote copy" there).
+
+- **Peers are no longer called "Unnamed device" when their files cannot be read.** The
+  device list depended on downloading one of a peer's files at the moment the page opened,
+  and gave up on the FIRST file that came back empty or threw — a WebDAV rate limit was
+  enough to make two perfectly named machines call each other unnamed, as in the field
+  report. Every sync now keeps a small local `device_id → name` cache from the packets it
+  already downloaded, the list tries a device's other files before giving up, and falls
+  back to that cache. The cache is display-only: nothing keys off it and the frozen wire
+  contract is untouched.
+
+- **Restore points keep their name when the shared index is refused.** With the index
+  unreadable (Nutstore's 403), points with no annotation anywhere were relabelled with the
+  name of whichever device happened to be viewing the list. Renaming a device, or importing
+  a backup that changed it, therefore looked like somebody had silently renamed every
+  older restore point. An unknown origin now stays unknown; a name the user chose, the
+  shared index, and this device's own local annotations still win in that order.
+
+- **The device list names data types in the page's language (upstream #87).** Its second
+  line printed the internal ids ("bookmarks, sessions") inside a translated sentence. It
+  now uses the same words as the data-type switches, joined by `Intl.ListFormat` so each
+  language supplies its own punctuation; the Forget confirmation uses the same list.
+
+- **Plain `http://` WebDAV no longer sounds like a risk you may accept.** The note under
+  the address said the password "would be sent unencrypted", as if the connection worked.
+  It now says Kesonode does not connect over it and what to use instead (upstream #83's
+  wording change; the multi-screen `http://` validation is still upstream).
+
+- **"Keep forever" no longer fails while the storage refuses writes.** The mark is the
+  file name, so the click needed a PUT and a DELETE; Nutstore's 403 frequency cap
+  rejects writes too, and one refused write made the whole click fail with a wall of
+  403 text — while the pencil (rename) kept working because it has a local fallback.
+  The intent is now kept in a device-local queue and shown as kept immediately; the
+  rename is finished on the first sync or Settings visit that reaches the backend
+  again, retention protects the queued point meanwhile, and a half-finished attempt
+  (write done, delete refused) is completed without leaving a duplicate.
+
+- **A rate-limited WebDAV server is no longer polled through its whole window.** The 403
+  explanation added in 1.5.4 told a QuarkPC user to "wait for the window to pass", but
+  the alarm kept running every 60 seconds, spending the NEXT 30-minute Nutstore window
+  before it opened — a field report logged 403s five minutes apart with no recovery.
+  A 429, or a 403 from a Nutstore host, now parks AUTOMATIC sync for one 30-minute
+  window; "Sync now" and applying a blocked deletion are never gated, a clean cycle
+  clears the pause immediately, and the Activity log says what happened once.
+
+- **A missing optional permission no longer warns every minute, and can be granted with
+  one click.** `extensions` stayed switched on with `management` never granted, so every
+  cycle wrote the same "permission any more, switch it off and on again" warning (×1276
+  in one night) while nothing synced. On QuarkPC that detour produced no prompt at all.
+  The warning is now one per incident, names the browser's own permissions screen as the
+  fallback, and Settings → Data Types has a **Grant access** button that only re-asks,
+  re-checks the API and syncs that type immediately.
+
+- **QuarkPC is named in the default device label.** Its user agent is Chrome's plus a
+  `QuarkPC/` token, so a fresh install called itself "Mac · Chromium" and every peer's
+  device list missed it entirely. Both the default label and the browser carried in a
+  sync packet now read 夸克浏览器.
+
+- **Restore points keep their default name even when the shared index is refused.**
+  A WebDAV backend answering 403 (Nutstore's frequency cap) made `getIndex()` unreadable,
+  so `mergeIndex()` wrote nothing and every point reached the UI with no device label,
+  short id or count — `snapshotDisplayName()` had no data to build `Bookmark restore point ·
+  <device> · <short id>` with and fell back to the bare prefix. That is why several rounds
+  of naming changes never showed up. Annotations for points this install creates or renames
+  are now also kept in `chrome.storage.local` and merged into the list when the shared index
+  is unavailable; renaming and keeping a point no longer fail on an unreadable index. The
+  local copy never reaches the backend, so cross-device names still depend on the index and
+  the frozen wire contract is unchanged. Points saved before this build have no annotation
+  anywhere; while the index is wholly unreadable, their display name falls back to the
+  identity of the device viewing the list (display-only, never stored), so the corrected rule
+  is visible immediately instead of only on points created after the upgrade.
+
+- **A package can no longer carry a version different from its own filename.**
+  `sync-version.mjs` used to bump the patch on EVERY run, and `build`, `build:firefox`
+  and `package:source` each call it — one release could therefore produce several
+  different versions. Zip filenames are built from `package.json`, but the
+  `manifest.json` inside is copied verbatim from `dist/`: v1.5.5 shipped as a
+  1.5.5-named zip containing a 1.5.4 manifest, which is also why source fixes looked
+  like they never reached the installed build. Stamping is now idempotent and bumps
+  are explicit (`npm run version:patch`, also repairing `package-lock.json`). Both
+  package scripts refuse to zip unless `package.json`, `public/manifest.json` and the
+  built manifest agree, and refuse a bundle whose HTML pages reference missing
+  chunks or lack `type="module"` — the two halves of an `Unexpected token 'export'`
+  failure when a new version is extracted over an old folder.
+
+- **Importing a settings backup onto another browser no longer clones that device.**
+  Restoring `device_id` verbatim made both installs write the same
+  `konode_<type>_<id>.json` file and appear as one device. Import now asks once:
+  "as a new device" (recommended) mints a fresh UUID and a default label of
+  `<OS> · <browser> · <8-char id>`, while "restore this machine's identity" keeps the
+  backup's values for a same-machine upgrade/reinstall. Accounts, tokens, passphrase
+  and Drive session are restored either way.
+
+- **Restore points finally use one naming rule.** The 1.5.3 rule
+  `Bookmark restore point · <device label> · <short id>` was implemented three times:
+  baked into the shared index at creation, duplicated as a UI fallback, and spread
+  across locale suffixes. Changing it could never reach points an older build had
+  already written. The default name is now computed at display time by
+  `snapshotDisplayName()` and never stored as a user label; legacy automatic labels
+  are recognised as unnamed by device + short id, and a name the user chose always wins.
+
+## [1.5.4] - 2026-11-09
+
+### Fixed
+
+- **A WebDAV 403 now says what it means.** Nutstore (坚果云) answers its WebDAV frequency
+  limit with 403 Forbidden rather than 429 — 600 requests per 30 minutes on a free
+  account, 1500 on paid, counted across EVERY app using the account — and that reached a
+  QuarkPC user (field report, 2026-11-08) as a bare "WebDAV GET failed: 403" repeated
+  every sync with nothing to act on. Every WebDAV 403 now names the host and, on Nutstore,
+  the limit and the lever (wait for the window, or raise Sync interval); on other servers
+  it points at the path and the account's rights instead. Test connection says the same.
+
+- **Importing a config with a WebDAV backend now asks for host permission.** Previously the
+  import replaced the settings but never requested the server's host permission, so the next
+  sync failed with "Failed to fetch" and no prompt explained why. Import now requests the
+  origin immediately, and if that is refused (e.g. the click's user gesture has elapsed),
+  Settings → Advanced shows a "Grant access" button for the exact host.
+
+### Added
+
+- **The version is shown where copies are easy to confuse.** The extension name now carries the
+  version (e.g. `Kesonode | 私人书签与标签页同步 v1.5.4`), so several unpacked installs loaded
+  from different folders are tellable apart in the browser's extension list, and the popup
+  footer shows `v1.5.4`.
+
 ## [1.5.3] - 2026-11-09
 
 ### Added
@@ -36,6 +219,15 @@ All notable changes to Konode. Format loosely follows
   The frozen upstream names, the index format and SyncPacket v1.0 are unchanged; all new
   index fields are optional, and an index written by an older build still reads. Points
   saved by hand and points the bulk-delete guard saved are labelled separately.
+
+- **A restore point with no name now names its device (+ short id) by default.** The
+  unnamed row used to read only "Bookmark restore point", so on a multi-device group you
+  could not tell which machine a point came from without opening it. The default title is
+  now "Bookmark restore point · <device label> · <short id>" when the index carries the
+  origin, and the supporting line keeps showing the device under a name you gave it. The
+  short id is the first 8 hex chars of the saving device's id. Points the shared index has
+  no device info for (older builds, or an index this device could not read) still fall
+  back to "Bookmark restore point" alone.
 
 - **Settings backups now have a versioned compatibility contract.** Import reads every
   supported format version and walks an explicit migration chain instead of refusing

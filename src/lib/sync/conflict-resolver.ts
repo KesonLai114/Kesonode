@@ -155,6 +155,25 @@ export function notifyConflict(dataType: DataType): void {
 }
 
 /**
+ * A first-sync direction question is NOT a conflict, but it needs the same "open Kesonode
+ * and answer this" behaviour. Reusing the `conflict-` id prefix (with a distinguishing
+ * infix) keeps `openConflictFromNotification` as the single click handler.
+ */
+export function notifyFirstSync(): void {
+  if (!apiPresent("notifications", "create")) {
+    logger.info("notifyFirstSync", "This browser has no notifications API, so the first-sync choice is only shown in Kesonode");
+    return;
+  }
+  browser.notifications.create(`${CONFLICT_NOTIFICATION_PREFIX}first-${Date.now()}`, {
+    type: "basic",
+    iconUrl: "icons/icon48.png",
+    title: "Kesonode: First sync",
+    message: "This browser and your other devices both have bookmarks. Open Kesonode to choose how to combine them.",
+    priority: 1,
+  });
+}
+
+/**
  * Open what a clicked conflict notification asks for, and say whether the click was ours.
  *
  * The toast says "Open Kesonode to resolve it", and clicking it did nothing: nothing listened

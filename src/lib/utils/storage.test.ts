@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   normalizeRemoteSessions, normalizeRemoteExtensions,
   acquireSyncLock, releaseSyncLock, clearStaleSyncLock,
   getImportedHistoryStamps, recordImportedHistory, releaseImportedHistory,
-  updateKey, appendAudit, KEYS,
+  updateKey, appendAudit, KEYS, detectDeviceName,
+  syncCooldownRemaining, startSyncCooldown, clearSyncCooldown, SYNC_COOLDOWN_MS,
   getSettings, saveSettings, DEFAULT_SETTINGS, ensureActiveBackendConfig,
   setRemoteSession, setRemoteExtensions, getRemoteSessions,
 } from "@/lib/utils/storage";
@@ -26,6 +27,37 @@ function entry(device: string, ts: string, tabCount = 1): RemoteSessionEntry {
     },
   };
 }
+
+describe("detectDeviceName", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("names QuarkPC instead of reporting Chrome's engine", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 QuarkPC/7.4.7.1036",
+    });
+    expect(detectDeviceName()).toBe("Mac · 夸克浏览器");
+  });
+});
+
+describe("rate-limit cooldown", () => {
+  afterEach(async () => { await clearSyncCooldown(); });
+
+  it("parks automatic sync for one window, without extending a live one", async () => {
+    const now = 1_000_000;
+    expect(await syncCooldownRemaining(now)).toBe(0);
+    expect(await startSyncCooldown(now)).toBe(true);
+    expect(await syncCooldownRemaining(now)).toBe(SYNC_COOLDOWN_MS);
+    expect(await startSyncCooldown(now + 1000)).toBe(false);
+    expect(await syncCooldownRemaining(now + SYNC_COOLDOWN_MS)).toBe(0);
+  });
+
+  it("is cleared by a cycle that got through unmetered", async () => {
+    const now = Date.now();
+    await startSyncCooldown(now);
+    await clearSyncCooldown();
+    expect(await syncCooldownRemaining(now)).toBe(0);
+  });
+});
 
 describe("ensureActiveBackendConfig", () => {
   // Reported from a device: Koofr → Google Drive in Settings, OAuth consent succeeded,

@@ -10,9 +10,22 @@ import {
   hasPermission, unsupportedReason, eventPresent, permissionsToEnable, tabGroupsAskable,
   type Availability, type PermissionOutcome,
 } from "@/lib/utils/capabilities";
+import { importSettingsBackupFromFile } from "@/lib/utils/settings-import";
+import { snapshotDisplayName, snapshotIsUnnamed } from "@/lib/sync/snapshots";
 import {
   buildDataBackup, readDataBackup, type DataBackupBookmarkNode,
 } from "@/lib/utils/data-backup";
+
+/**
+ * The device row used to print the internal ids ("bookmarks, sessions") in the middle
+ * of a translated sentence (upstream #87). The catalogue already holds the same words
+ * the data-type switches use; Intl.ListFormat supplies each language's own punctuation,
+ * so no separator has to be translated.
+ */
+function typeList(types: readonly DataType[]): string {
+  return new Intl.ListFormat(catalogueLocale(), { type: "conjunction", style: "narrow" })
+    .format(types.map((type) => t(`datatype_${type}`)));
+}
 
 /**
  * Which edges of a scroller still have content past them.
@@ -40,6 +53,7 @@ import {
 import { BookmarkExclusionTree } from "@/lib/ui/bookmark-exclusion-tree";
 import { BookmarkList } from "@/lib/ui/bookmark-list";
 import { ConflictsSection } from "@/options/conflicts-section";
+import { FirstSyncSection } from "@/options/first-sync-section";
 // Shown in the About section. The manifest is the single source of truth for the
 // version — bump `package.json` and the build stamps it into the manifest.
 const APP_VERSION = browser.runtime.getManifest().version;
@@ -393,6 +407,10 @@ export default function OptionsApp() {
   const [importCount, setImportCount] = useState(0);
   const [configExportStatus, setConfigExportStatus] = useState<"idle" | "ok" | "error">("idle");
   const [configImportStatus, setConfigImportStatus] = useState<"idle" | "ok" | "error">("idle");
+  // 导入带入 WebDAV 后端却尚未授权时记下缺失的主机权限，UI 上给一个"点此授权"按钮，
+  // 因为自动请求可能因跨越 await 失去用户手势而失败（#导入后未授权 bug）。
+  const [webdavAuthNeeded, setWebdavAuthNeeded] = useState<string | null>(null);
+  const [webdavAuthError, setWebdavAuthError] = useState(false);
 
   // Extensions diff
   const [remoteExtensions, setRemoteExtensions] = useState<SyncExtension[] | null>(null);
@@ -436,6 +454,15 @@ export default function OptionsApp() {
 
   // Activity tab: bookmark restore points (loaded when the tab opens).
   const [snapshots, setSnapshots] = useState<SnapshotMeta[]>([]);
+  // "Windows 10/11 · Chromium · b3f1c2d4" — the origin device, for a restore point's
+  // default name and the supporting line. Empty when the shared index carried no device
+  // info (older points), so the fallback stays "Bookmark restore point" alone.
+  const snapDevice = (s: SnapshotMeta): string => {
+    const id = s.device_id ? s.device_id.replace(/-/g, "").slice(0, 8) : "";
+    if (s.device_label && id) return `${s.device_label} · ${id}`;
+    if (s.device_label) return s.device_label;
+    return id;
+  };
   const [snapBusy, setSnapBusy] = useState(false);
   const [snapMsg, setSnapMsg] = useState<string | null>(null);
   // Its OWN slot. The clear-log failure used to be written into snapMsg, which renders in
@@ -1101,6 +1128,12 @@ export default function OptionsApp() {
   // back, and nothing anywhere said why. On Firefox for Android — where the request can
   // never succeed — that is a toggle that just refuses to move, which is exactly what a
   // user reported about History. Now the reason is on screen either way.
+  /** The two ways asking for an optional permission can fail, shared by both paths. */
+  const permissionAskError = (outcome: PermissionOutcome, perm: string): string =>
+    outcome === "cannot-prompt"
+      ? `This browser can't show permission prompts, so Kesonode couldn't ask for the "${perm}" permission. Grant it on Kesonode's permissions screen in your browser's extension settings, then try again.`
+      : `Kesonode needs the "${perm}" permission to sync this. Allow it in the prompt, or grant it on Kesonode's permissions screen in your browser's extension settings.`;
+
   const toggleDataType = async (type: DataType) => {
     if (!settings) return;
     const enabling = !settings.enabled_types.includes(type);
@@ -1112,12 +1145,7 @@ export default function OptionsApp() {
       if (perm) {
         const outcome = await ensurePermission({ permissions: perms });
         if (outcome !== "granted") {
-          setTypeError({
-            type,
-            message: outcome === "cannot-prompt"
-              ? `This browser can't show permission prompts, so Kesonode couldn't ask for the "${perm}" permission. Grant it on Kesonode's permissions screen in your browser's extension settings, then try again.`
-              : `Kesonode needs the "${perm}" permission to sync this. It stays off until that's allowed.`,
-          });
+          setTypeError({ type, message: permissionAskError(outcome, perm) });
           return;
         }
       }
@@ -1135,6 +1163,36 @@ export default function OptionsApp() {
       ? [...settings.enabled_types, type]
       : settings.enabled_types.filter((t) => t !== type);
     update({ enabled_types: next });
+  };
+
+  /**
+   * Re-ask for a type's optional permission WITHOUT making the user turn the switch
+   * off and on again. On QuarkPC that detour produced no prompt at all (field report
+   * 2026-11-08), so Data Types needs one button that only does the one thing.
+   */
+  const grantDataTypePermission = async (type: DataType) => {
+    setTypeError(null);
+    // request() has to be the first await in the click's task (see ensurePermission).
+    const perms = permissionsToEnable(type, groupNames.askable);
+    const perm = perms[0];
+    const outcome = perm ? await ensurePermission({ permissions: perms }) : "granted";
+    if (outcome !== "granted") {
+      if (perm) setTypeError({ type, message: permissionAskError(outcome, perm) });
+      return;
+    }
+    // The browser may say "granted" while the API still is not there. Re-read rather
+    // than trust the answer; this is the first honest check of the new state.
+    const state = await dataTypeAvailability(type);
+    setAvailability((prev) => ({ ...prev, [type]: state }));
+    if (state.state !== "ready" && perm) {
+      setTypeError({
+        type,
+        message: state.state === "unsupported" ? unsupportedReason(type) : permissionAskError("denied", perm),
+      });
+      return;
+    }
+    // The type is usable now: sync it immediately instead of waiting for the next alarm.
+    void request({ type: "SYNC_NOW", payload: { data_type: type } }).catch(() => {});
   };
 
   // Names and colours for tab groups, on top of the membership Open tabs always carries.
@@ -1344,31 +1402,14 @@ export default function OptionsApp() {
     setConfigImportStatus("idle");
     try {
       const parsed: unknown = JSON.parse(await file.text());
-      const doImport = (confirmImport: boolean) =>
-        request({ type: "IMPORT_SETTINGS", payload: parsed, confirmImport });
-      // 关闭 E2EE / 更改后端 / 内嵌明文凭据 这类危险导入会被 worker 拒绝（抛出
-      // IMPORT_SETTINGS_NEEDS_CONFIRM:...）。把风险展示给用户，确认后才带确认标志重发。
-      const CONFIRM_PREFIX = "IMPORT_SETTINGS_NEEDS_CONFIRM:";
-      let sent = await doImport(false);
-      if (!sent.ok && sent.error.startsWith(CONFIRM_PREFIX)) {
-        const message = sent.error.slice(CONFIRM_PREFIX.length).split(",").map((code) => {
-          switch (code) {
-            case "disables-e2ee": return "· 将关闭端到端加密（之后同步数据以明文上传）";
-            case "changes-backend": return "· 将更改同步后端（可能指向其他服务器）";
-            case "has-credentials": return "· 包含明文后端凭据（WebDAV 密码 / GitHub 令牌）";
-            case "has-gdrive-session": return "· 包含 Google Drive 登录令牌";
-            default: return "· " + code;
-          }
-        }).join("\n");
-        if (!window.confirm(`此配置文件将进行以下敏感更改：\n${message}\n\n是否仍要导入？`)) {
-          setConfigImportStatus("idle");
-          return;
+      // The same conversation the setup wizard's first page offers: overwrite, new device,
+      // risky changes, and the WebDAV origin that still needs granting.
+      const outcome = await importSettingsBackupFromFile(parsed, (message) => window.confirm(message));
+      if (!outcome.ok) {
+        if (outcome.reason === "failed") {
+          setConfigImportStatus("error");
+          setTimeout(() => setConfigImportStatus("idle"), 3000);
         }
-        sent = await doImport(true);
-      }
-      if (!sent.ok) {
-        setConfigImportStatus("error");
-        setTimeout(() => setConfigImportStatus("idle"), 3000);
         return;
       }
       // The worker has already reinitialised the engine; bring this page's copy of the
@@ -1378,6 +1419,14 @@ export default function OptionsApp() {
       const s = r[KEYS.GDRIVE_SESSION] as { email?: string; displayName?: string } | undefined;
       setGdriveUser(s ? { email: s.email ?? "", displayName: s.displayName ?? "" } : null);
       setConfigImportStatus("ok");
+      // A host permission can only be requested from a user gesture. When this call lost
+      // it (we just spent several awaits importing), Settings shows a dedicated button.
+      if (outcome.hostOrigin) {
+        const result = await ensurePermission({ origins: [outcome.hostOrigin] });
+        if (result !== "granted" && !(await hasPermission({ origins: [outcome.hostOrigin] }))) {
+          setWebdavAuthNeeded(outcome.hostOrigin);
+        }
+      }
       setTimeout(() => setConfigImportStatus("idle"), 4000);
     } catch {
       setConfigImportStatus("error");
@@ -1960,6 +2009,16 @@ export default function OptionsApp() {
                   // put the reason where the description was. A dead toggle that springs
                   // back is the one outcome this must never produce again.
                   const off = availability[type]?.state === "unsupported";
+                  const needsPerm = settings.enabled_types.includes(type)
+                    && availability[type]?.state === "needs-permission";
+                  // Shown on either version of the warning row: a failed Grant access
+                  // still has to leave a way to try again.
+                  const grantBtn = needsPerm ? (
+                    <button type="button" className="btn-secondary" style={{ marginLeft: 8 }}
+                      onClick={() => void grantDataTypePermission(type)}>
+                      {t("opt_cfg_import_auth_btn")}
+                    </button>
+                  ) : null;
                   return (
                     <div key={type} className={`settings-row${off ? " is-unavailable" : ""}`}>
                       <div className="settings-row-left">
@@ -1972,16 +2031,16 @@ export default function OptionsApp() {
                               you revoke an optional permission from their own extension
                               settings and tell the extension nothing, so this type would
                               otherwise sit here looking enabled and sync nothing at all. */}
-                          {settings.enabled_types.includes(type)
-                            && availability[type]?.state === "needs-permission"
-                            && typeError?.type !== type && (
+                          {needsPerm && typeError?.type !== type && (
                             <div className="error-row" role="alert">
                               <AlertTriangle size={12} /> {t("opt_data_permission_lost")}
+                              {grantBtn}
                             </div>
                           )}
                           {typeError?.type === type && (
                             <div className="error-row" role="alert">
                               <AlertTriangle size={12} /> {typeError.message}
+                              {grantBtn}
                             </div>
                           )}
                         </div>
@@ -2270,6 +2329,18 @@ export default function OptionsApp() {
                 <h1 className="page-title">{t("opt_activity_head")}</h1>
                 <p className="page-subtitle">{t("opt_activity_head_sub")}</p>
 
+                {/* A first-sync direction question outranks the conflict cards: until it is
+                    answered, no merge has happened at all, so the conflicts below would be
+                    about a tree the user may be about to replace. Also the manual entry
+                    point for choosing the direction again after a storage outage. */}
+                <FirstSyncSection
+                  pending={!!syncState?.first_sync_pending}
+                  onResolved={async () => {
+                    const after = await request({ type: "GET_STATE" });
+                    if (after.ok && after.res.type === "STATE") setSyncState(after.res.payload);
+                  }}
+                />
+
                 {/* ── Conflicts (#35) ──
                     First on the tab, because the popup's Resolve button lands here and a
                     question waiting for an answer should not sit below the device list. */}
@@ -2349,7 +2420,7 @@ export default function OptionsApp() {
                               {isDormant(d.lastSeen, d.isSelf, Date.now()) && <span className="badge-quiet">{t("opt_device_dormant")}</span>}
                             </div>
                             <div className="row-desc">
-                              {d.types.join(", ")}
+                              {typeList(d.types)}
                               {/* "39 days ago" is what tells a ghost from a live device at a
                                   glance; the exact time stays one hover away. */}
                               {d.lastSeen && <> <span title={new Date(d.lastSeen).toLocaleString()}>
@@ -2379,7 +2450,7 @@ export default function OptionsApp() {
                         <div className="settings-row">
                           <div className="settings-row-left">
                             <div className="row-desc">
-                              {plural("opt_forget_confirm", d.types.length, [String(d.types.length), d.types.join(", ")])}
+                              {plural("opt_forget_confirm", d.types.length, [String(d.types.length), typeList(d.types)])}
                             </div>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
@@ -2523,16 +2594,17 @@ export default function OptionsApp() {
                       <div className="settings-row-left">
                         <div>
                           <div className="row-label">
-                            {s.label || t("opt_snap_unknown")}
+                            {snapshotDisplayName(s)}
                             {s.pinned && <span className="badge-active" style={{ marginLeft: 8 }}>{t("opt_snap_pin")}</span>}
                             {s.origin === "auto" && <span className="badge-quiet" style={{ marginLeft: 8 }}>{t("opt_snap_auto")}</span>}
                           </div>
-                          {/* The name the user gave it is the primary line; the device, the
-                              exact time and the size are supporting detail underneath.
-                              A count that cannot be read (e.g. no passphrase set yet) is
-                              simply left out rather than shown as a bare "bookmarks". */}
+                          {/* The default name already carries the device + short id, so the
+                              supporting line adds the device only when the user named the
+                              point — and otherwise keeps the exact time and size. A count
+                              that cannot be read (e.g. no passphrase set yet) is simply
+                              left out rather than shown as a bare "bookmarks". */}
                           <div className="row-desc">
-                            {s.device_label ? `${isolate(s.device_label)} · ` : ""}
+                            {!snapshotIsUnnamed(s) && snapDevice(s) ? `${isolate(snapDevice(s))} · ` : ""}
                             {new Date(s.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
                             {s.count != null ? ` · ${plural("opt_snap_count", s.count)}` : ""}
                           </div>
@@ -2767,6 +2839,38 @@ export default function OptionsApp() {
                     />
                   </label>
                 </div>
+                {webdavAuthNeeded && (
+                  <div className="settings-row" style={{ borderTop: "1px solid var(--hairline)" }}>
+                    <div className="settings-row-left">
+                      <div className="row-desc" style={{ color: "var(--danger)" }}>
+                        {t("opt_cfg_import_auth", webdavAuthNeeded.replace(/\/\*$/, "").replace(/^https?:\/\//, ""))}
+                      </div>
+                    </div>
+                    <button
+                      className="btn-secondary"
+                      onClick={async () => {
+                        setWebdavAuthError(false);
+                        const ok = await ensurePermission({ origins: [webdavAuthNeeded] });
+                        if (ok === "granted" || (await hasPermission({ origins: [webdavAuthNeeded] }))) {
+                          setWebdavAuthNeeded(null);
+                        } else {
+                          setWebdavAuthError(true);
+                        }
+                      }}
+                    >
+                      {t("opt_cfg_import_auth_btn")}
+                    </button>
+                  </div>
+                )}
+                {webdavAuthError && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div className="row-desc" style={{ color: "var(--danger)" }}>
+                        {t("opt_cfg_import_auth_err")}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {(FORK_LINKS.issues || FORK_LINKS.email || REVIEW_PAGE) && (

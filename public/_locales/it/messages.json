@@ -277,7 +277,7 @@
     "message": "Usa il tuo indirizzo Fastmail completo come nome utente e una password per l'app con accesso a Files (WebDAV)."
   },
   "extension_name": {
-    "message": "Kesonode | Sync privata di segnalibri e schede"
+    "message": "Kesonode | Sync privata di segnalibri e schede v1.5.10"
   },
   "popup_setup_title": {
     "message": "Completa la configurazione di Kesonode"
@@ -835,7 +835,7 @@
     "message": "Nome del dispositivo"
   },
   "opt_device_name_desc": {
-    "message": "Come appare questo dispositivo nei registri di sincronizzazione."
+    "message": "How this device appears in sync logs and on your other devices. Browsers do not let extensions read the computer's own name, so set it yourself (e.g. Mac mini M4pro)."
   },
   "opt_device_name_placeholder": {
     "message": "Il mio portatile"
@@ -1738,5 +1738,138 @@
   },
   "opt_guard_cap_desc": {
     "message": "Un ciclo è considerato un cambio grande oltre questo numero di segnalibri, o il 30% dell'albero — il valore maggiore. Aumentalo se importi o riorganizzi spesso cartelle grandi."
+  },
+  "opt_cfg_import_auth": {
+    "message": "The imported config points at the WebDAV server $HOST$, but Kesonode has no permission to reach it yet. Grant access now, or syncing will fail with \"Failed to fetch\".",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_auth_btn": {
+    "message": "Grant access"
+  },
+  "opt_cfg_import_auth_err": {
+    "message": "The browser refused the request. Grant the host permission for $HOST$ from your browser's extension settings, then sync again.",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "onb_welcome_device_name": {
+    "message": "Name this device"
+  },
+  "onb_welcome_device_hint": {
+    "message": "Browsers do not let extensions read your computer's name, so the automatic label is only a generic one. Enter a name you will recognise on your other devices, for example Mac mini M4pro."
+  },
+  "onb_import_title": {
+    "message": "Already have a backup?"
+  },
+  "onb_import_desc": {
+    "message": "Import a configuration backup you exported earlier to restore sync settings without filling in the wizard again."
+  },
+  "onb_import_button": {
+    "message": "Choose a backup file and import"
+  },
+  "onb_import_busy": {
+    "message": "Importing…"
+  },
+  "onb_import_done_title": {
+    "message": "Configuration imported"
+  },
+  "onb_import_done_desc": {
+    "message": "Your sync settings are restored. If this version needs new permissions, grant them in the next step."
+  },
+  "onb_import_failed": {
+    "message": "Import failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "Invalid backup file"
+      }
+    }
+  },
+  "onb_perm_title": {
+    "message": "This update needs your permission again"
+  },
+  "onb_perm_desc": {
+    "message": "After an update these permissions must be confirmed before sync can continue. Click the button and your browser will show the permission prompt."
+  },
+  "onb_perm_grant": {
+    "message": "Grant permissions"
+  },
+  "onb_perm_granted": {
+    "message": "Permissions granted. Sync can continue."
+  },
+  "onb_perm_denied": {
+    "message": "Permission was not granted. You can allow it in the browser's extension settings, or try again."
+  },
+  "onb_perm_checking": {
+    "message": "Checking permissions…"
+  },
+  "import_confirm_overwrite": {
+    "message": "Import this configuration file? It will overwrite your current settings."
+  },
+  "import_confirm_new_device": {
+    "message": "Is this backup from another device or browser?\n\n[OK] Import as a new device: generate a fresh device ID and default name (recommended)\n[Cancel] Restore this machine's identity: keep the backup's device ID and name (for an upgrade or reinstall of the same machine)"
+  },
+  "import_risk_header": {
+    "message": "This file will make the following sensitive changes:\n$LIST$\n\nImport it anyway?",
+    "placeholders": {
+      "list": {
+        "content": "$1",
+        "example": "Turns off end-to-end encryption"
+      }
+    }
+  },
+  "import_risk_disables_e2ee": {
+    "message": "Turns off end-to-end encryption (data is then uploaded in plaintext)"
+  },
+  "import_risk_changes_backend": {
+    "message": "Changes the sync backend (it may point at another server)"
+  },
+  "import_risk_has_credentials": {
+    "message": "Contains plaintext backend credentials (WebDAV password / GitHub token)"
+  },
+  "import_risk_has_gdrive_session": {
+    "message": "Contains a Google Drive sign-in token"
+  },
+  "opt_first_sync_head": {
+    "message": "Prima sincronizzazione: scegli la direzione"
+  },
+  "opt_first_sync_head_sub": {
+    "message": "Quando questo browser e gli altri dispositivi hanno già dei preferiti, decidi prima quale lato prevale. Puoi scegliere di nuovo qui in qualsiasi momento."
+  },
+  "opt_first_sync_pending": {
+    "message": "La sincronizzazione è in pausa finché non scegli. Gli altri dispositivi hanno già dei preferiti nell’archivio."
+  },
+  "opt_first_sync_merge": {
+    "message": "Unisci (consigliato)"
+  },
+  "opt_first_sync_merge_desc": {
+    "message": "Mantiene i preferiti di questo browser e aggiunge quelli degli altri dispositivi. Il risultato è l’unione dei due; nulla viene eliminato."
+  },
+  "opt_first_sync_remote": {
+    "message": "Usa la copia remota"
+  },
+  "opt_first_sync_remote_desc": {
+    "message": "Cancella i preferiti di questo browser e li ricostruisce dal dispositivo più recente. Prima viene salvato un punto di ripristino, ma i preferiti presenti solo qui vanno persi."
+  },
+  "opt_first_sync_local": {
+    "message": "Usa la copia di questo browser"
+  },
+  "opt_first_sync_local_desc": {
+    "message": "Elimina dall’archivio i file dei preferiti degli altri dispositivi, lasciando solo questo albero. Chiudi prima Kesonode sugli altri dispositivi, altrimenti caricheranno di nuovo i loro preferiti."
+  },
+  "opt_first_sync_busy": {
+    "message": "Elaborazione…"
+  },
+  "popup_first_sync_notice": {
+    "message": "Prima sincronizzazione: scegli come unire i preferiti"
+  },
+  "popup_first_sync_cta": {
+    "message": "Scegli"
   }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { WebDAVBackend } from "./webdav-backend";
+import { WebDAVBackend, forbiddenMessage } from "./webdav-backend";
 import { KEYS } from "@/lib/utils/storage";
 import type { BackendConfig } from "@/lib/types";
 
@@ -73,5 +73,32 @@ describe("WebDAV: ensuring the sync folder exists", () => {
     expect(log).toContain("redirects");
     expect(log).toContain("dav.example.com");
     expect(log).not.toContain("://u:"); // never the credentials
+  });
+});
+
+describe("WebDAV: what a 403 says", () => {
+  // Nutstore answers its WebDAV frequency limit with 403 rather than 429, so it reached a
+  // QuarkPC user as a bare "WebDAV GET failed: 403" every sync, with nothing to act on.
+  it("names the frequency limit on Nutstore hosts", () => {
+    const msg = forbiddenMessage("dav.jianguoyun.com");
+    expect(msg).toContain("600 requests per 30 minutes");
+    expect(msg).toContain("dav.jianguoyun.com");
+    expect(forbiddenMessage("dav.nutstore.com")).toContain("600");
+  });
+
+  it("points other servers at the path and the account's rights", () => {
+    const msg = forbiddenMessage("dav.example.com");
+    expect(msg).not.toContain("600");
+    expect(msg).toContain("dav.example.com");
+  });
+
+  it("a 403 from GET carries the explanation instead of a bare status", async () => {
+    vi.stubGlobal("fetch", () => Promise.resolve({ ok: false, status: 403 } as Response));
+    const nutstore: BackendConfig = {
+      type: "webdav", label: "WebDAV", enabled: true,
+      webdav: { url: "https://dav.jianguoyun.com/dav/", username: "u", password: "p" },
+    };
+    await expect(new WebDAVBackend(nutstore).getFile("x.json")).rejects.toThrow(/Forbidden \(403\)/);
+    await expect(new WebDAVBackend(nutstore).getFile("x.json")).rejects.toThrow(/Sync interval/);
   });
 });

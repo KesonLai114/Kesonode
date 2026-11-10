@@ -1,5 +1,5 @@
 import type { IBackend, BackendConfig, DataType, ListedFile, SyncPacket } from "@/lib/types";
-import { withRetry, HttpError, rateLimitMessage } from "@/lib/utils/retry";
+import { withRetry, withPeerRetry, HttpError, rateLimitMessage } from "@/lib/utils/retry";
 import { logger } from "@/lib/utils/logger";
 import { getAccessToken, getStoredGDriveUser } from "./gdrive-oauth";
 import { clearUploadChecksums, getLastDriveFolder, setLastDriveFolder } from "@/lib/utils/storage";
@@ -47,6 +47,8 @@ export interface GDriveUserInfo {
 
 export class GDriveBackend implements IBackend {
   readonly type = "gdrive" as const;
+  /** Peer files this sync could not read; the engine surfaces these as a visible problem. */
+  readonly failedPeers: string[] = [];
   private folderId: string | null = null;
 
   constructor(private config: BackendConfig) {}
@@ -248,13 +250,23 @@ export class GDriveBackend implements IBackend {
       }
       const packets: SyncPacket[] = [];
       for (const f of peers) {
-        const r = await fetch(`${DRIVE_API}/files/${f.id}?alt=media`, { headers: h, cache: "no-store" });
-        if (!r.ok) {
-          // See the note in webdav-backend: a peer we can't fetch silently vanished from
-          // the sync while it still reported success.
+        let r: Response;
+        try {
+          r = await withPeerRetry(async () => {
+            const res = await fetch(`${DRIVE_API}/files/${f.id}?alt=media`, { headers: h, cache: "no-store" });
+            if (!res.ok) throw new HttpError(res.status, `HTTP ${res.status}`);
+            return res;
+          });
+        } catch (err) {
+          // Record it too: the engine turns this into a visible ERROR rather than a
+          // "Synced" status with one device missing from the merge.
+          const detail = err instanceof HttpError
+            ? `HTTP ${err.status}`
+            : err instanceof Error ? err.message : String(err);
+          this.failedPeers.push(`${f.name} (${detail})`);
           logger.warn(
             "GDrive.downloadAll",
-            `Couldn't download ${f.name} (HTTP ${r.status}) — that device is left out of this sync`
+            `Couldn't download ${f.name} (${detail}) — that device is left out of this sync`
           );
           continue;
         }

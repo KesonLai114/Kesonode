@@ -22,7 +22,7 @@
     "message": "de"
   },
   "extension_name": {
-    "message": "Kesonode | Privater Lesezeichen- und Tab-Sync"
+    "message": "Kesonode | Privater Lesezeichen- und Tab-Sync v1.5.10"
   },
   "extension_description": {
     "message": "Datenschutzfreundliche Browser-Synchronisierung in deinen eigenen Speicher: Google Drive, WebDAV, GitHub."
@@ -835,7 +835,7 @@
     "message": "Gerätename"
   },
   "opt_device_name_desc": {
-    "message": "So erscheint dieses Gerät in den Synchronisierungsprotokollen."
+    "message": "How this device appears in sync logs and on your other devices. Browsers do not let extensions read the computer's own name, so set it yourself (e.g. Mac mini M4pro)."
   },
   "opt_device_name_placeholder": {
     "message": "Mein Laptop"
@@ -1738,5 +1738,138 @@
   },
   "opt_guard_cap_desc": {
     "message": "Ein Zyklus gilt ab dieser Anzahl Lesezeichenänderungen oder 30 % des Baums — je nachdem, was größer ist — als große Änderung. Erhöhen Sie den Wert bei regelmäßigem Import oder Umstrukturierung großer Ordner."
+  },
+  "opt_cfg_import_auth": {
+    "message": "The imported config points at the WebDAV server $HOST$, but Kesonode has no permission to reach it yet. Grant access now, or syncing will fail with \"Failed to fetch\".",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_auth_btn": {
+    "message": "Grant access"
+  },
+  "opt_cfg_import_auth_err": {
+    "message": "The browser refused the request. Grant the host permission for $HOST$ from your browser's extension settings, then sync again.",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "onb_welcome_device_name": {
+    "message": "Name this device"
+  },
+  "onb_welcome_device_hint": {
+    "message": "Browsers do not let extensions read your computer's name, so the automatic label is only a generic one. Enter a name you will recognise on your other devices, for example Mac mini M4pro."
+  },
+  "onb_import_title": {
+    "message": "Already have a backup?"
+  },
+  "onb_import_desc": {
+    "message": "Import a configuration backup you exported earlier to restore sync settings without filling in the wizard again."
+  },
+  "onb_import_button": {
+    "message": "Choose a backup file and import"
+  },
+  "onb_import_busy": {
+    "message": "Importing…"
+  },
+  "onb_import_done_title": {
+    "message": "Configuration imported"
+  },
+  "onb_import_done_desc": {
+    "message": "Your sync settings are restored. If this version needs new permissions, grant them in the next step."
+  },
+  "onb_import_failed": {
+    "message": "Import failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "Invalid backup file"
+      }
+    }
+  },
+  "onb_perm_title": {
+    "message": "This update needs your permission again"
+  },
+  "onb_perm_desc": {
+    "message": "After an update these permissions must be confirmed before sync can continue. Click the button and your browser will show the permission prompt."
+  },
+  "onb_perm_grant": {
+    "message": "Grant permissions"
+  },
+  "onb_perm_granted": {
+    "message": "Permissions granted. Sync can continue."
+  },
+  "onb_perm_denied": {
+    "message": "Permission was not granted. You can allow it in the browser's extension settings, or try again."
+  },
+  "onb_perm_checking": {
+    "message": "Checking permissions…"
+  },
+  "import_confirm_overwrite": {
+    "message": "Import this configuration file? It will overwrite your current settings."
+  },
+  "import_confirm_new_device": {
+    "message": "Is this backup from another device or browser?\n\n[OK] Import as a new device: generate a fresh device ID and default name (recommended)\n[Cancel] Restore this machine's identity: keep the backup's device ID and name (for an upgrade or reinstall of the same machine)"
+  },
+  "import_risk_header": {
+    "message": "This file will make the following sensitive changes:\n$LIST$\n\nImport it anyway?",
+    "placeholders": {
+      "list": {
+        "content": "$1",
+        "example": "Turns off end-to-end encryption"
+      }
+    }
+  },
+  "import_risk_disables_e2ee": {
+    "message": "Turns off end-to-end encryption (data is then uploaded in plaintext)"
+  },
+  "import_risk_changes_backend": {
+    "message": "Changes the sync backend (it may point at another server)"
+  },
+  "import_risk_has_credentials": {
+    "message": "Contains plaintext backend credentials (WebDAV password / GitHub token)"
+  },
+  "import_risk_has_gdrive_session": {
+    "message": "Contains a Google Drive sign-in token"
+  },
+  "opt_first_sync_head": {
+    "message": "Erste Synchronisierung: Richtung wählen"
+  },
+  "opt_first_sync_head_sub": {
+    "message": "Wenn dieser Browser und deine anderen Geräte bereits Lesezeichen haben, entscheide zuerst, welche Seite gilt. Du kannst hier jederzeit erneut wählen."
+  },
+  "opt_first_sync_pending": {
+    "message": "Die Synchronisierung ist angehalten, bis du gewählt hast. Andere Geräte haben bereits Lesezeichen im Speicher."
+  },
+  "opt_first_sync_merge": {
+    "message": "Zusammenführen (empfohlen)"
+  },
+  "opt_first_sync_merge_desc": {
+    "message": "Die Lesezeichen dieses Browsers behalten und die der anderen Geräte ergänzen. Es entsteht die Vereinigung beider; nichts wird gelöscht."
+  },
+  "opt_first_sync_remote": {
+    "message": "Die Kopie aus dem Speicher verwenden"
+  },
+  "opt_first_sync_remote_desc": {
+    "message": "Die Lesezeichen dieses Browsers löschen und aus dem neuesten anderen Gerät wiederherstellen. Vorher wird ein Wiederherstellungspunkt gespeichert, aber nur hier vorhandene Lesezeichen gehen verloren."
+  },
+  "opt_first_sync_local": {
+    "message": "Die Kopie dieses Browsers verwenden"
+  },
+  "opt_first_sync_local_desc": {
+    "message": "Die Lesezeichendateien der anderen Geräte aus dem Speicher löschen, sodass nur dieser Baum angeboten wird. Schließe Kesonode auf den anderen Geräten zuerst, sonst laden sie ihre Lesezeichen erneut hoch."
+  },
+  "opt_first_sync_busy": {
+    "message": "In Arbeit…"
+  },
+  "popup_first_sync_notice": {
+    "message": "Erste Synchronisierung: Lesezeichen kombinieren"
+  },
+  "popup_first_sync_cta": {
+    "message": "Wählen"
   }
 }

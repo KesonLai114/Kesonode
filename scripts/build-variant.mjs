@@ -19,9 +19,153 @@
 // built output is read back, and a disagreement stops the run before anything is zipped.
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 
 export const VARIANTS = ["store", "source"];
+
+function readJson(path) {
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (err) {
+    throw new Error(`Cannot read ${path}: ${err.message}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error(`${path} is not valid JSON: ${err.message}`);
+  }
+}
+
+/**
+ * Stop a package whose NAME and CONTENT would disagree about the version.
+ *
+ * `package-chrome.mjs` / `package-firefox.mjs` build the zip filename from
+ * package.json, but copy manifest.json out of dist/ (or dist-firefox/) without
+ * touching its version. A `sync-version` bump followed by packaging a STALE build
+ * shipped `kesonode-chrome-1.5.5.zip` containing a 1.5.4 manifest — the browser
+ * shows the manifest's number, so a user reporting a bug in "1.5.5" was actually
+ * running older code. A wrong version is also how fixes appear "not to have worked".
+ *
+ * Exits rather than throws, like assertVariant: this is a last gate before a zip
+ * exists, and a plain sentence is easier to act on than a stack trace in npm output.
+ */
+export function versionProblems(repoRoot, distDir) {
+  const versions = [
+    ["package.json", readJson(join(repoRoot, "package.json")).version],
+    ["public/manifest.json", readJson(join(repoRoot, "public", "manifest.json")).version],
+    [`${basename(distDir)}/manifest.json`, existsSync(join(distDir, "manifest.json"))
+      ? readJson(join(distDir, "manifest.json")).version
+      : "(missing)"],
+  ];
+  const wanted = versions[0][1];
+  const problems = [];
+  if (typeof wanted !== "string" || !/^\d+\.\d+\.\d+$/.test(wanted)) {
+    problems.push(`package.json has an invalid version ${JSON.stringify(wanted)}.`);
+  }
+  for (const [file, v] of versions.slice(1)) {
+    if (v !== wanted) problems.push(`${file} is ${v}, expected ${wanted}.`);
+  }
+  return { versions, wanted, problems };
+}
+
+export function assertVersion(repoRoot, distDir) {
+  const { versions, wanted, problems } = versionProblems(repoRoot, distDir);
+  if (!problems.length) {
+    console.log(`Verified: version ${wanted} in package.json, public/manifest.json and ${basename(distDir)}/manifest.json.`);
+    return wanted;
+  }
+  console.error([
+    "Refusing to package: the version numbers disagree.",
+    "",
+    ...versions.map(([file, v]) => `  ${file.padEnd(34)} ${v}`),
+    "",
+    "The zip filename is built from package.json, but the manifest INSIDE the zip is",
+    `copied verbatim from ${basename(distDir)}/. A zip named kesonode-*-${wanted}.zip`,
+    "would therefore contain a different version, and the browser would show that",
+    "older number in the extension list. This is also how a source fix can look like",
+    "it never reached the installed build.",
+    "",
+    "Rebuild THIS target from the current source, then package again:",
+    "  npm run build            → dist/",
+    "  npm run build:firefox    → dist-firefox/",
+    "...or use package:source / package:source:pinned, which builds both in one run.",
+    "Do not just rename the zip. For a new release run npm run version:patch first.",
+  ].join("\n"));
+  process.exit(1);
+}
+
+/**
+ * Stop a package whose HTML and chunks came from different builds.
+ *
+ * Vite emits ES modules. If a `<script>` loses `type="module"`, or an HTML page
+ * references a content-hashed chunk that isn't in the folder, the browser tries to
+ * run an ESM chunk as a classic script and fails with `Unexpected token 'export'` —
+ * the symptom a 1.5.5 user reported, whose "error" was the entire lucide chunk.
+ * Mixing builds is what normally causes it: a new version extracted over an old
+ * unpacked folder keeps the old chunks while the HTML is new.
+ *
+ * Both halves are checked here, before a zip exists. The browser-side case (loading a
+ * new zip OVER an old folder) cannot be checked from disk, so the advice below says to
+ * use a fresh folder.
+ */
+export function bundleProblems(distDir) {
+  const problems = [];
+  const htmlFiles = readdirSync(distDir).filter((f) => f.endsWith(".html"));
+  if (!htmlFiles.length) problems.push("No HTML entry pages found in the build.");
+
+  for (const file of htmlFiles) {
+    const html = readFileSync(join(distDir, file), "utf8");
+    for (const tag of html.match(/<script\b[^>]*>/gi) ?? []) {
+      if (!/\btype\s*=\s*["']module["']/i.test(tag)) {
+        problems.push(`${file}: a <script> without type="module" would run an ESM chunk as a classic script: ${tag}`);
+      }
+    }
+    for (const m of html.matchAll(/(?:src|href)\s*=\s*["'](\/[^"']+)["']/gi)) {
+      // Vite writes root-relative URLs (/chunks/x.js); in an extension those resolve
+      // to the extension root, i.e. a path relative to the build directory.
+      const ref = m[1].replace(/^\/+/, "").split(/[?#]/)[0];
+      if (!existsSync(join(distDir, ref))) {
+        problems.push(`${file}: references ${m[1]}, which is missing from the build.`);
+      }
+    }
+  }
+
+  const manifestPath = join(distDir, "manifest.json");
+  if (!existsSync(manifestPath)) {
+    problems.push("manifest.json is missing from the build.");
+  } else {
+    const manifest = readJson(manifestPath);
+    const bg = manifest.background;
+    if (bg && bg.type !== "module") {
+      problems.push(`manifest.json: background.type is ${JSON.stringify(bg.type ?? null)}; bundled workers are ES modules and need "module".`);
+    }
+    const worker = bg?.service_worker ?? bg?.scripts?.[0];
+    if (worker && !existsSync(join(distDir, worker))) {
+      problems.push(`manifest.json: background script ${worker} is missing from the build.`);
+    }
+  }
+  return { problems, htmlFiles };
+}
+
+export function assertBundleComplete(distDir) {
+  const { problems, htmlFiles } = bundleProblems(distDir);
+  if (!problems.length) {
+    console.log(`Verified: ${htmlFiles.length} HTML pages, their module/chunk references and the background script are present.`);
+    return;
+  }
+  console.error([
+    "Refusing to package: the built bundle is not self-consistent.",
+    "",
+    ...problems.map((p) => `  - ${p}`),
+    "",
+    "Usually HTML and chunks from two different builds were mixed, e.g. a new version",
+    "extracted over an old unpacked folder. Delete the build directory and rebuild from",
+    "the current source, then package again. In the browser, load the new zip into a",
+    "FRESH folder rather than over the old one.",
+  ].join("\n"));
+  process.exit(1);
+}
 
 // Google OAuth client secrets are `GOCSPX-` followed by ~28 URL-safe characters.
 //

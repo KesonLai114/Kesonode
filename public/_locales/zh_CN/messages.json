@@ -553,7 +553,7 @@
     "message": "扩展列表，显示缺失的扩展及其安装链接。"
   },
   "extension_name": {
-    "message": "Kesonode | 私人书签与标签页同步"
+    "message": "Kesonode | 私人书签与标签页同步 v1.5.10"
   },
   "onb_err_perms_no_prompt": {
     "message": "此浏览器无法显示权限提示，因此 Kesonode 无法请求所需的访问权限。请在浏览器扩展设置的 Kesonode 权限页面上授予权限，然后再次点击完成。"
@@ -577,7 +577,7 @@
     "message": "密码/密钥"
   },
   "opt_webdav_http_warn": {
-    "message": "这是一个 $SCHEME$ URL，因此您的密码将以未加密的方式发送。",
+    "message": "Kesonode 不会通过 $SCHEME$ 连接（凭据会以明文传输）。请使用 https://，或仅限本机的 http://localhost。",
     "placeholders": {
       "scheme": {
         "content": "$1",
@@ -826,7 +826,7 @@
     "message": "设备名称"
   },
   "opt_device_name_desc": {
-    "message": "此设备在同步日志中的显示方式。"
+    "message": "此设备在同步日志和其它设备上的显示名称。浏览器不允许扩展读取电脑名称，请手动填写（例如 Mac mini M4pro）。"
   },
   "opt_device_name_placeholder": {
     "message": "我的笔记本电脑"
@@ -1623,6 +1623,25 @@
   "opt_cfg_import_desc": {
     "message": "升级或换浏览器后恢复配置，无需重新设置。导入会替换当前设置。"
   },
+  "opt_cfg_import_auth": {
+    "message": "导入的配置指向 WebDAV 服务器 $HOST$，但 Kesonode 尚未获得访问授权。请立即授权，否则同步会因权限不足而失败（Failed to fetch）。",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_auth_btn": {
+    "message": "点此授权"
+  },
+  "opt_cfg_import_auth_err": {
+    "message": "浏览器拒绝了授权请求。请在浏览器的扩展设置中为 $HOST$ 手动授予主机权限，然后重新同步。",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
   "opt_feedback_section": {
     "message": "反馈"
   },
@@ -1738,5 +1757,119 @@
   },
   "opt_guard_cap_desc": {
     "message": "单轮变动超过此条目数，或超过整树的 30%（取较大者）即视为大幅变动。若你经常导入或整理大型文件夹，可调高。"
+  },
+  "onb_welcome_device_name": {
+    "message": "给这台设备起个名字"
+  },
+  "onb_welcome_device_hint": {
+    "message": "浏览器不允许扩展读取电脑的名称，自动生成的只是通用标识（如 Mac · Chromium · b5fe8371）。请填写你能一眼认出的名字，例如「Mac mini M4pro」。"
+  },
+  "onb_import_title": {
+    "message": "已有配置备份？"
+  },
+  "onb_import_desc": {
+    "message": "导入之前导出的配置备份，可直接恢复同步设置，无需重新填写引导流程。"
+  },
+  "onb_import_button": {
+    "message": "选择备份文件并导入"
+  },
+  "onb_import_busy": {
+    "message": "正在导入…"
+  },
+  "onb_import_done_title": {
+    "message": "配置已导入"
+  },
+  "onb_import_done_desc": {
+    "message": "同步设置已恢复。若新版本需要新权限，请在下一步授权。"
+  },
+  "onb_import_failed": {
+    "message": "导入失败：$ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "Invalid backup file"
+      }
+    }
+  },
+  "onb_perm_title": {
+    "message": "新版本需要重新授权"
+  },
+  "onb_perm_desc": {
+    "message": "更新后需要你确认以下权限，同步才能继续。点击下方按钮，浏览器会弹出授权窗口。"
+  },
+  "onb_perm_grant": {
+    "message": "立即授权"
+  },
+  "onb_perm_granted": {
+    "message": "已授权，同步可以继续了。"
+  },
+  "onb_perm_denied": {
+    "message": "尚未获得授权。可以在浏览器的扩展设置里手动开启，或点此重试。"
+  },
+  "onb_perm_checking": {
+    "message": "正在检查权限…"
+  },
+  "import_confirm_overwrite": {
+    "message": "确定要导入这份配置文件吗？导入会覆盖当前设置。"
+  },
+  "import_confirm_new_device": {
+    "message": "这份配置来自另一台设备或另一个浏览器吗？\n\n【确定】作为新设备导入：重新生成设备 ID 和默认设备名（推荐）\n【取消】恢复本机身份：保留备份中的设备 ID 与设备名（同一台设备升级/重装时用）"
+  },
+  "import_risk_header": {
+    "message": "此配置文件将进行以下敏感更改：\n$LIST$\n\n是否仍要导入？",
+    "placeholders": {
+      "list": {
+        "content": "$1",
+        "example": "Turns off end-to-end encryption"
+      }
+    }
+  },
+  "import_risk_disables_e2ee": {
+    "message": "将关闭端到端加密（之后同步数据以明文上传）"
+  },
+  "import_risk_changes_backend": {
+    "message": "将更改同步后端（可能指向其他服务器）"
+  },
+  "import_risk_has_credentials": {
+    "message": "包含明文后端凭据（WebDAV 密码 / GitHub 令牌）"
+  },
+  "import_risk_has_gdrive_session": {
+    "message": "包含 Google Drive 登录令牌"
+  },
+  "opt_first_sync_head": {
+    "message": "首次同步：选择同步方向"
+  },
+  "opt_first_sync_head_sub": {
+    "message": "当本浏览器与其它设备都已有书签时，先决定以哪边为准。之后也可以随时回到这里重新选择。"
+  },
+  "opt_first_sync_pending": {
+    "message": "同步已暂停，等待你选择：云端已有其它设备的书签。"
+  },
+  "opt_first_sync_merge": {
+    "message": "合并（推荐）"
+  },
+  "opt_first_sync_merge_desc": {
+    "message": "保留本机书签，并补入其它设备的书签。结果是两边的并集，不会删除任何书签。"
+  },
+  "opt_first_sync_remote": {
+    "message": "以云端为准"
+  },
+  "opt_first_sync_remote_desc": {
+    "message": "清空本机书签，按云端最新那台设备的书签重建。会先自动保存还原点，但本机独有的书签将不再保留。"
+  },
+  "opt_first_sync_local": {
+    "message": "以本机为准"
+  },
+  "opt_first_sync_local_desc": {
+    "message": "删除云端其它设备的书签文件，只保留本机这份。其它设备若在线会重新上传自己的书签，请先关闭它们。"
+  },
+  "opt_first_sync_busy": {
+    "message": "处理中…"
+  },
+  "popup_first_sync_notice": {
+    "message": "首次同步：请选择如何合并书签"
+  },
+  "popup_first_sync_cta": {
+    "message": "去选择"
   }
 }

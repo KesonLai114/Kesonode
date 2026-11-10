@@ -553,7 +553,7 @@
     "message": "Lista de extensiones, en la que se muestran las faltantes con enlaces de instalación."
   },
   "extension_name": {
-    "message": "Kesonode | Sincronización privada de marcadores y pestañas"
+    "message": "Kesonode | Sincronización privada de marcadores y pestañas v1.5.10"
   },
   "onb_err_perms_no_prompt": {
     "message": "Este navegador no puede mostrar mensajes de solicitud de permisos, por lo que Kesonode no pudo solicitar el acceso que necesita. Concédelo en la pantalla de permisos de Kesonode, en la configuración de extensiones de tu navegador, y luego vuelve a presionar Finalizar."
@@ -826,7 +826,7 @@
     "message": "Nombre del dispositivo"
   },
   "opt_device_name_desc": {
-    "message": "Cómo aparece este dispositivo en los registros de sincronización."
+    "message": "How this device appears in sync logs and on your other devices. Browsers do not let extensions read the computer's own name, so set it yourself (e.g. Mac mini M4pro)."
   },
   "opt_device_name_placeholder": {
     "message": "Mi computadora portátil"
@@ -1738,5 +1738,138 @@
   },
   "opt_guard_cap_desc": {
     "message": "Un ciclo se considera un cambio grande por encima de esta cantidad de marcadores, o del 30 % del árbol, lo que sea mayor. Súbalo si importa o reorganiza carpetas grandes con frecuencia."
+  },
+  "opt_cfg_import_auth": {
+    "message": "The imported config points at the WebDAV server $HOST$, but Kesonode has no permission to reach it yet. Grant access now, or syncing will fail with \"Failed to fetch\".",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_auth_btn": {
+    "message": "Grant access"
+  },
+  "opt_cfg_import_auth_err": {
+    "message": "The browser refused the request. Grant the host permission for $HOST$ from your browser's extension settings, then sync again.",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "onb_welcome_device_name": {
+    "message": "Name this device"
+  },
+  "onb_welcome_device_hint": {
+    "message": "Browsers do not let extensions read your computer's name, so the automatic label is only a generic one. Enter a name you will recognise on your other devices, for example Mac mini M4pro."
+  },
+  "onb_import_title": {
+    "message": "Already have a backup?"
+  },
+  "onb_import_desc": {
+    "message": "Import a configuration backup you exported earlier to restore sync settings without filling in the wizard again."
+  },
+  "onb_import_button": {
+    "message": "Choose a backup file and import"
+  },
+  "onb_import_busy": {
+    "message": "Importing…"
+  },
+  "onb_import_done_title": {
+    "message": "Configuration imported"
+  },
+  "onb_import_done_desc": {
+    "message": "Your sync settings are restored. If this version needs new permissions, grant them in the next step."
+  },
+  "onb_import_failed": {
+    "message": "Import failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "Invalid backup file"
+      }
+    }
+  },
+  "onb_perm_title": {
+    "message": "This update needs your permission again"
+  },
+  "onb_perm_desc": {
+    "message": "After an update these permissions must be confirmed before sync can continue. Click the button and your browser will show the permission prompt."
+  },
+  "onb_perm_grant": {
+    "message": "Grant permissions"
+  },
+  "onb_perm_granted": {
+    "message": "Permissions granted. Sync can continue."
+  },
+  "onb_perm_denied": {
+    "message": "Permission was not granted. You can allow it in the browser's extension settings, or try again."
+  },
+  "onb_perm_checking": {
+    "message": "Checking permissions…"
+  },
+  "import_confirm_overwrite": {
+    "message": "Import this configuration file? It will overwrite your current settings."
+  },
+  "import_confirm_new_device": {
+    "message": "Is this backup from another device or browser?\n\n[OK] Import as a new device: generate a fresh device ID and default name (recommended)\n[Cancel] Restore this machine's identity: keep the backup's device ID and name (for an upgrade or reinstall of the same machine)"
+  },
+  "import_risk_header": {
+    "message": "This file will make the following sensitive changes:\n$LIST$\n\nImport it anyway?",
+    "placeholders": {
+      "list": {
+        "content": "$1",
+        "example": "Turns off end-to-end encryption"
+      }
+    }
+  },
+  "import_risk_disables_e2ee": {
+    "message": "Turns off end-to-end encryption (data is then uploaded in plaintext)"
+  },
+  "import_risk_changes_backend": {
+    "message": "Changes the sync backend (it may point at another server)"
+  },
+  "import_risk_has_credentials": {
+    "message": "Contains plaintext backend credentials (WebDAV password / GitHub token)"
+  },
+  "import_risk_has_gdrive_session": {
+    "message": "Contains a Google Drive sign-in token"
+  },
+  "opt_first_sync_head": {
+    "message": "Primera sincronización: elige una dirección"
+  },
+  "opt_first_sync_head_sub": {
+    "message": "Cuando este navegador y tus otros dispositivos ya tienen marcadores, decide primero qué lado prevalece. También puedes volver a elegir aquí cuando quieras."
+  },
+  "opt_first_sync_pending": {
+    "message": "La sincronización está en pausa hasta que elijas. Otros dispositivos ya tienen marcadores en el almacenamiento."
+  },
+  "opt_first_sync_merge": {
+    "message": "Combinar (recomendado)"
+  },
+  "opt_first_sync_merge_desc": {
+    "message": "Conserva los marcadores de este navegador y añade los de los demás dispositivos. El resultado es la unión de ambos; no se borra nada."
+  },
+  "opt_first_sync_remote": {
+    "message": "Usar la copia remota"
+  },
+  "opt_first_sync_remote_desc": {
+    "message": "Borra los marcadores de este navegador y los reconstruye a partir del dispositivo más reciente. Antes se guarda un punto de restauración, pero los marcadores exclusivos de este navegador se pierden."
+  },
+  "opt_first_sync_local": {
+    "message": "Usar la copia de este navegador"
+  },
+  "opt_first_sync_local_desc": {
+    "message": "Elimina del almacenamiento los archivos de marcadores de los demás dispositivos, dejando solo este árbol. Cierra Kesonode en los otros dispositivos antes, o volverán a subir sus marcadores."
+  },
+  "opt_first_sync_busy": {
+    "message": "Procesando…"
+  },
+  "popup_first_sync_notice": {
+    "message": "Primera sincronización: elige cómo combinar los marcadores"
+  },
+  "popup_first_sync_cta": {
+    "message": "Elegir"
   }
 }

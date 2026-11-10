@@ -84,6 +84,9 @@ const BRAND_NAMES: Record<string, string> = {
 };
 
 function chromiumName(ua: string, nav: NavigatorLike | undefined): string | undefined {
+  // QuarkPC sends Chrome's brand list word for word plus its own UA token, so the
+  // brands cannot name it. The token can, and it is what the user sees in the dock.
+  if (/\bQuarkPC\//.test(ua)) return "夸克浏览器";
   const brand = nav?.userAgentData?.brands
     ?.map((b) => b.brand)
     .find((b) => b && !UNTRUSTED_BRANDS.has(b) && !GREASE.test(b));

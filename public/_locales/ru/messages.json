@@ -22,7 +22,7 @@
     "message": "ru"
   },
   "extension_name": {
-    "message": "Kesonode | Синхронизация закладок и вкладок"
+    "message": "Kesonode | Синхронизация закладок и вкладок v1.5.10"
   },
   "extension_description": {
     "message": "Приватная синхронизация браузера с вашим собственным хранилищем: Google Drive, WebDAV, GitHub."
@@ -835,7 +835,7 @@
     "message": "Название устройства"
   },
   "opt_device_name_desc": {
-    "message": "Так это устройство отображается в журналах синхронизации."
+    "message": "How this device appears in sync logs and on your other devices. Browsers do not let extensions read the computer's own name, so set it yourself (e.g. Mac mini M4pro)."
   },
   "opt_device_name_placeholder": {
     "message": "Мой ноутбук"
@@ -1738,5 +1738,138 @@
   },
   "opt_guard_cap_desc": {
     "message": "Цикл считается большим изменением, если в нём больше этого числа закладок или 30% дерева — берётся большее. Поднимите порог, если регулярно импортируете или переупорядочиваете большие папки."
+  },
+  "opt_cfg_import_auth": {
+    "message": "The imported config points at the WebDAV server $HOST$, but Kesonode has no permission to reach it yet. Grant access now, or syncing will fail with \"Failed to fetch\".",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_auth_btn": {
+    "message": "Grant access"
+  },
+  "opt_cfg_import_auth_err": {
+    "message": "The browser refused the request. Grant the host permission for $HOST$ from your browser's extension settings, then sync again.",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "onb_welcome_device_name": {
+    "message": "Name this device"
+  },
+  "onb_welcome_device_hint": {
+    "message": "Browsers do not let extensions read your computer's name, so the automatic label is only a generic one. Enter a name you will recognise on your other devices, for example Mac mini M4pro."
+  },
+  "onb_import_title": {
+    "message": "Already have a backup?"
+  },
+  "onb_import_desc": {
+    "message": "Import a configuration backup you exported earlier to restore sync settings without filling in the wizard again."
+  },
+  "onb_import_button": {
+    "message": "Choose a backup file and import"
+  },
+  "onb_import_busy": {
+    "message": "Importing…"
+  },
+  "onb_import_done_title": {
+    "message": "Configuration imported"
+  },
+  "onb_import_done_desc": {
+    "message": "Your sync settings are restored. If this version needs new permissions, grant them in the next step."
+  },
+  "onb_import_failed": {
+    "message": "Import failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "Invalid backup file"
+      }
+    }
+  },
+  "onb_perm_title": {
+    "message": "This update needs your permission again"
+  },
+  "onb_perm_desc": {
+    "message": "After an update these permissions must be confirmed before sync can continue. Click the button and your browser will show the permission prompt."
+  },
+  "onb_perm_grant": {
+    "message": "Grant permissions"
+  },
+  "onb_perm_granted": {
+    "message": "Permissions granted. Sync can continue."
+  },
+  "onb_perm_denied": {
+    "message": "Permission was not granted. You can allow it in the browser's extension settings, or try again."
+  },
+  "onb_perm_checking": {
+    "message": "Checking permissions…"
+  },
+  "import_confirm_overwrite": {
+    "message": "Import this configuration file? It will overwrite your current settings."
+  },
+  "import_confirm_new_device": {
+    "message": "Is this backup from another device or browser?\n\n[OK] Import as a new device: generate a fresh device ID and default name (recommended)\n[Cancel] Restore this machine's identity: keep the backup's device ID and name (for an upgrade or reinstall of the same machine)"
+  },
+  "import_risk_header": {
+    "message": "This file will make the following sensitive changes:\n$LIST$\n\nImport it anyway?",
+    "placeholders": {
+      "list": {
+        "content": "$1",
+        "example": "Turns off end-to-end encryption"
+      }
+    }
+  },
+  "import_risk_disables_e2ee": {
+    "message": "Turns off end-to-end encryption (data is then uploaded in plaintext)"
+  },
+  "import_risk_changes_backend": {
+    "message": "Changes the sync backend (it may point at another server)"
+  },
+  "import_risk_has_credentials": {
+    "message": "Contains plaintext backend credentials (WebDAV password / GitHub token)"
+  },
+  "import_risk_has_gdrive_session": {
+    "message": "Contains a Google Drive sign-in token"
+  },
+  "opt_first_sync_head": {
+    "message": "Первая синхронизация: выберите направление"
+  },
+  "opt_first_sync_head_sub": {
+    "message": "Если в этом браузере и на других устройствах уже есть закладки, сначала решите, какие из них главнее. Здесь можно выбрать заново в любой момент."
+  },
+  "opt_first_sync_pending": {
+    "message": "Синхронизация приостановлена до вашего выбора. На других устройствах уже есть закладки в хранилище."
+  },
+  "opt_first_sync_merge": {
+    "message": "Объединить (рекомендуется)"
+  },
+  "opt_first_sync_merge_desc": {
+    "message": "Сохранить закладки этого браузера и добавить закладки других устройств. Получится объединение обоих наборов; ничего не удаляется."
+  },
+  "opt_first_sync_remote": {
+    "message": "Использовать копию из хранилища"
+  },
+  "opt_first_sync_remote_desc": {
+    "message": "Очистить закладки этого браузера и восстановить их с самого свежего устройства. Сначала создаётся точка восстановления, но закладки, которые есть только здесь, будут потеряны."
+  },
+  "opt_first_sync_local": {
+    "message": "Использовать копию этого браузера"
+  },
+  "opt_first_sync_local_desc": {
+    "message": "Удалить из хранилища файлы закладок других устройств, оставив только этот набор. Сначала закройте Kesonode на других устройствах, иначе они снова загрузят свои закладки."
+  },
+  "opt_first_sync_busy": {
+    "message": "Выполняется…"
+  },
+  "popup_first_sync_notice": {
+    "message": "Первая синхронизация: выберите, как объединить закладки"
+  },
+  "popup_first_sync_cta": {
+    "message": "Выбрать"
   }
 }

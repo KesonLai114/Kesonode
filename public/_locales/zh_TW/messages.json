@@ -34,7 +34,7 @@
     "message": "立即同步"
   },
   "extension_name": {
-    "message": "Kesonode | 私人書籤與分頁同步"
+    "message": "Kesonode | 私人書籤與分頁同步 v1.5.10"
   },
   "extension_description": {
     "message": "隱私優先的瀏覽器同步，資料存放在你自己的空間：Google Drive、WebDAV、GitHub。"
@@ -835,7 +835,7 @@
     "message": "裝置名稱"
   },
   "opt_device_name_desc": {
-    "message": "這台裝置在同步紀錄中顯示的名稱。"
+    "message": "此裝置在同步記錄與其它裝置上的顯示名稱。瀏覽器不允許擴充功能讀取電腦名稱，請手動填寫（例如 Mac mini M4pro）。"
   },
   "opt_device_name_placeholder": {
     "message": "我的筆電"
@@ -1738,5 +1738,138 @@
   },
   "opt_guard_cap_desc": {
     "message": "單輪變動超過此條目數，或超過整樹的 30%（取較大者）即視為大幅變動。若你常匯入或整理大型資料夾，可調高。"
+  },
+  "opt_cfg_import_auth": {
+    "message": "The imported config points at the WebDAV server $HOST$, but Kesonode has no permission to reach it yet. Grant access now, or syncing will fail with \"Failed to fetch\".",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_auth_btn": {
+    "message": "Grant access"
+  },
+  "opt_cfg_import_auth_err": {
+    "message": "The browser refused the request. Grant the host permission for $HOST$ from your browser's extension settings, then sync again.",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "onb_welcome_device_name": {
+    "message": "為這台裝置命名"
+  },
+  "onb_welcome_device_hint": {
+    "message": "瀏覽器不允許擴充功能讀取電腦名稱，自動產生的只是通用識別（如 Mac · Chromium · b5fe8371）。請填寫你能一眼認出的名字，例如「Mac mini M4pro」。"
+  },
+  "onb_import_title": {
+    "message": "已有設定備份？"
+  },
+  "onb_import_desc": {
+    "message": "匯入先前匯出的設定備份，可直接還原同步設定，不必重新填寫引導流程。"
+  },
+  "onb_import_button": {
+    "message": "選擇備份檔案並匯入"
+  },
+  "onb_import_busy": {
+    "message": "正在匯入…"
+  },
+  "onb_import_done_title": {
+    "message": "設定已匯入"
+  },
+  "onb_import_done_desc": {
+    "message": "同步設定已還原。若新版本需要新權限，請在下一步授權。"
+  },
+  "onb_import_failed": {
+    "message": "匯入失敗：$ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "Invalid backup file"
+      }
+    }
+  },
+  "onb_perm_title": {
+    "message": "新版本需要重新授權"
+  },
+  "onb_perm_desc": {
+    "message": "更新後需要你確認以下權限，同步才能繼續。點擊下方按鈕，瀏覽器會彈出授權視窗。"
+  },
+  "onb_perm_grant": {
+    "message": "立即授權"
+  },
+  "onb_perm_granted": {
+    "message": "已授權，同步可以繼續了。"
+  },
+  "onb_perm_denied": {
+    "message": "尚未取得授權。可以在瀏覽器的擴充功能設定裡手動開啟，或重試一次。"
+  },
+  "onb_perm_checking": {
+    "message": "正在檢查權限…"
+  },
+  "import_confirm_overwrite": {
+    "message": "確定要匯入這份設定檔嗎？匯入會覆蓋目前設定。"
+  },
+  "import_confirm_new_device": {
+    "message": "這份備份來自另一台裝置或另一個瀏覽器嗎？\n\n【確定】作為新裝置匯入：重新產生裝置 ID 與預設名稱（建議）\n【取消】還原本機身份：保留備份中的裝置 ID 與名稱（同一台裝置升級／重裝時使用）"
+  },
+  "import_risk_header": {
+    "message": "此設定檔將進行以下敏感變更：\n$LIST$\n\n是否仍要匯入？",
+    "placeholders": {
+      "list": {
+        "content": "$1",
+        "example": "Turns off end-to-end encryption"
+      }
+    }
+  },
+  "import_risk_disables_e2ee": {
+    "message": "將關閉端到端加密（之後同步資料以明文上傳）"
+  },
+  "import_risk_changes_backend": {
+    "message": "將變更同步後端（可能指向其他伺服器）"
+  },
+  "import_risk_has_credentials": {
+    "message": "包含明文後端憑證（WebDAV 密碼 / GitHub 權杖）"
+  },
+  "import_risk_has_gdrive_session": {
+    "message": "包含 Google Drive 登入權杖"
+  },
+  "opt_first_sync_head": {
+    "message": "首次同步：選擇同步方向"
+  },
+  "opt_first_sync_head_sub": {
+    "message": "當本瀏覽器與其它裝置都已有書籤時，先決定以哪邊為準。之後也可以隨時回到這裡重新選擇。"
+  },
+  "opt_first_sync_pending": {
+    "message": "同步已暫停，等待你選擇：雲端已有其它裝置的書籤。"
+  },
+  "opt_first_sync_merge": {
+    "message": "合併（建議）"
+  },
+  "opt_first_sync_merge_desc": {
+    "message": "保留本機書籤，並補入其它裝置的書籤。結果是兩邊的聯集，不會刪除任何書籤。"
+  },
+  "opt_first_sync_remote": {
+    "message": "以雲端為準"
+  },
+  "opt_first_sync_remote_desc": {
+    "message": "清空本機書籤，按雲端最新那台裝置的書籤重建。會先自動儲存還原點，但本機獨有的書籤將不再保留。"
+  },
+  "opt_first_sync_local": {
+    "message": "以本機為準"
+  },
+  "opt_first_sync_local_desc": {
+    "message": "刪除雲端其它裝置的書籤檔，只保留本機這份。其它裝置若在線會重新上傳自己的書籤，請先關閉它們。"
+  },
+  "opt_first_sync_busy": {
+    "message": "處理中…"
+  },
+  "popup_first_sync_notice": {
+    "message": "首次同步：請選擇如何合併書籤"
+  },
+  "popup_first_sync_cta": {
+    "message": "去選擇"
   }
 }

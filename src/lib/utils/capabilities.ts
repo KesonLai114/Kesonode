@@ -22,7 +22,7 @@
  */
 import { browser } from "@/lib/utils/ext";
 import { logger } from "@/lib/utils/logger";
-import type { DataType } from "@/lib/types";
+import type { DataType, SyncSettings } from "@/lib/types";
 
 /**
  * The optional permission a data type needs, for the types that need one.
@@ -371,6 +371,45 @@ export function permissionsToEnable(type: DataType, askTabGroups: boolean): stri
   const perm = PERMISSION_FOR_TYPE[type];
   if (!perm) return [];
   return type === "sessions" && askTabGroups ? [perm, "tabGroups"] : [perm];
+}
+
+/**
+ * What the CURRENT setup needs but this browser has not granted.
+ *
+ * An update can add an optional permission, or a settings import can bring a WebDAV
+ * server whose host permission was never requested. Nothing told the user: sync just
+ * quietly stopped for that data type. This is the one check both the worker (after an
+ * update, to decide whether to open the wizard) and the wizard's permission step (to
+ * build the request) use, so they cannot disagree about what is missing.
+ *
+ * Read-only. `permissions.request()` must be called from a user gesture in a page, so
+ * this never asks — it only reports.
+ */
+export async function missingPermissionsFor(
+  settings: Pick<SyncSettings, "enabled_types" | "active_backend" | "backends">,
+): Promise<{ permissions: string[]; origins: string[] }> {
+  const askGroups = await tabGroupsAskable();
+  const needed = new Set<string>();
+  for (const type of settings.enabled_types) {
+    for (const perm of permissionsToEnable(type, askGroups)) needed.add(perm);
+  }
+  const permissions: string[] = [];
+  for (const perm of needed) {
+    if (!(await hasPermission({ permissions: [perm] }))) permissions.push(perm);
+  }
+  const origins: string[] = [];
+  if (settings.active_backend === "webdav") {
+    const url = settings.backends.find((b) => b.type === "webdav")?.webdav?.url;
+    if (url) {
+      try {
+        const origin = new URL(url).origin + "/*";
+        if (!(await hasPermission({ origins: [origin] }))) origins.push(origin);
+      } catch {
+        // A malformed address is Storage's problem to report, not a permission to ask for.
+      }
+    }
+  }
+  return { permissions, origins };
 }
 
 let iosCache: boolean | undefined;

@@ -23,7 +23,7 @@
     "description": "NOT a sentence: the BCP 47 tag for THIS catalogue, written into <html lang> so the browser and screen readers know what language the page is in. Replace it with your own tag and nothing else, lowercase language and uppercase region: de, es, pt-BR, zh-CN. Do not translate the word."
   },
   "extension_name": {
-    "message": "Kesonode | Private Bookmark & Tab Sync",
+    "message": "Kesonode | Private Bookmark & Tab Sync v1.5.10",
     "description": "The extension's name. This IS the Chrome Web Store listing title, so it carries the search terms people actually type: bookmark, tab, sync. Keep 'Kesonode' first and keep the whole thing under 45 characters. Translate the part after the bar into what someone would search for in your language; leave 'Kesonode' alone, it is the product name."
   },
   "extension_description": {
@@ -154,14 +154,22 @@
     "message": "Active streams",
     "description": "Heading above the four data-type dots. The stylesheet displays it in capitals, so do not capitalise it here."
   },
-
   "popup_guard_detail": {
     "message": "$COUNT$ changed this cycle · cap $CAP$ · $ROUNDS$ cycles in a row",
     "description": "Shown under the guard banner with the live numbers: entries changed this cycle, the cap, and how many consecutive cycles the tree has been changing. Auto-filled, not translated.",
     "placeholders": {
-      "count": { "content": "$1", "example": "412" },
-      "cap": { "content": "$2", "example": "20" },
-      "rounds": { "content": "$3", "example": "3" }
+      "count": {
+        "content": "$1",
+        "example": "412"
+      },
+      "cap": {
+        "content": "$2",
+        "example": "20"
+      },
+      "rounds": {
+        "content": "$3",
+        "example": "3"
+      }
     }
   },
   "popup_guard_coexist": {
@@ -192,7 +200,6 @@
     "message": "A cycle is a large change above this many bookmark entries, or 30% of the tree — whichever is larger. Raise it if you routinely import or reorganize big folders.",
     "description": "Description for the guard threshold slider."
   },
-
   "popup_missing_extensions_one": {
     "message": "$COUNT$ missing extension",
     "description": "Exactly one extension is installed on another device but not on this one.",
@@ -705,8 +712,8 @@
     "description": "Most WebDAV servers want an app-specific token here rather than the account password, which is why both words appear."
   },
   "opt_webdav_http_warn": {
-    "message": "This is an $SCHEME$ URL, so your password would be sent unencrypted.",
-    "description": "Warning under a WebDAV card whose address would send credentials in the clear. $SCHEME$ is rendered as code and is never translated. Split around the placeholder with tParts, so word order stays yours.",
+    "message": "Kesonode does not connect over $SCHEME$: credentials would travel in the clear. Use https://, or http:// only on this computer.",
+    "description": "Warning under a WebDAV card whose address is refused. $SCHEME$ is rendered as code and is never translated. Split around the placeholder with tParts, so word order stays yours.",
     "placeholders": {
       "scheme": {
         "content": "$1",
@@ -987,7 +994,7 @@
     "message": "Device name"
   },
   "opt_device_name_desc": {
-    "message": "How this device appears in sync logs."
+    "message": "How this device appears in sync logs and on your other devices. Browsers do not let extensions read the computer's own name, so set it yourself (e.g. Mac mini M4pro)."
   },
   "opt_device_name_placeholder": {
     "message": "My Laptop",
@@ -1496,32 +1503,59 @@
     "message": "$COUNT$ of your $TOTAL$ bookmarks",
     "description": "How big the blocked deletion is. The proportion is the whole point, so both numbers stay in the sentence.",
     "placeholders": {
-      "count": { "content": "$1", "example": "1" },
-      "total": { "content": "$2", "example": "49" }
+      "count": {
+        "content": "$1",
+        "example": "1"
+      },
+      "total": {
+        "content": "$2",
+        "example": "49"
+      }
     }
   },
   "opt_blocked_headline_other": {
     "message": "$COUNT$ of your $TOTAL$ bookmarks",
     "description": "Plural of opt_blocked_headline_one.",
     "placeholders": {
-      "count": { "content": "$1", "example": "48" },
-      "total": { "content": "$2", "example": "49" }
+      "count": {
+        "content": "$1",
+        "example": "48"
+      },
+      "total": {
+        "content": "$2",
+        "example": "49"
+      }
     }
   },
   "opt_blocked_count_one": {
     "message": "$COUNT$ bookmark",
     "description": "Fallback headline for a notice saved by an older version, which recorded the count but not the size of the tree.",
-    "placeholders": { "count": { "content": "$1", "example": "1" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
   },
   "opt_blocked_count_other": {
     "message": "$COUNT$ bookmarks",
     "description": "Plural of opt_blocked_count_one.",
-    "placeholders": { "count": { "content": "$1", "example": "48" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "48"
+      }
+    }
   },
   "opt_blocked_from": {
     "message": "Asked for by $DEVICE$.",
     "description": "Names the peer device that sent the deletion. $DEVICE$ is a name the user chose.",
-    "placeholders": { "device": { "content": "$1", "example": "boxbox" } }
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
   },
   "opt_blocked_from_unknown": {
     "message": "Asked for by another device.",
@@ -1534,12 +1568,22 @@
   "opt_blocked_recent_one": {
     "message": "Other devices already removed $COUNT$ bookmark here in the last 24 hours, and this would take the total past your bulk-delete limit.",
     "description": "Under the blocked-deletion headline, only when earlier deletions from other devices are why a deletion smaller than the limit was held back: the guard adds up what peers removed here over a day (#41). The limit is the 'Max bulk delete from a peer' setting.",
-    "placeholders": { "count": { "content": "$1", "example": "1" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
   },
   "opt_blocked_recent_other": {
     "message": "Other devices already removed $COUNT$ bookmarks here in the last 24 hours, and this would take the total past your bulk-delete limit.",
     "description": "Plural of opt_blocked_recent_one.",
-    "placeholders": { "count": { "content": "$1", "example": "30" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "30"
+      }
+    }
   },
   "opt_blocked_apply": {
     "message": "Apply the deletion",
@@ -1852,6 +1896,25 @@
   "opt_cfg_import_desc": {
     "message": "Restore your configuration after an upgrade instead of setting everything up again. Replaces the current settings."
   },
+  "opt_cfg_import_auth": {
+    "message": "The imported config points at the WebDAV server $HOST$, but Kesonode has no permission to reach it yet. Grant access now, or syncing will fail with \"Failed to fetch\".",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_auth_btn": {
+    "message": "Grant access"
+  },
+  "opt_cfg_import_auth_err": {
+    "message": "The browser refused the request. Grant the host permission for $HOST$ from your browser's extension settings, then sync again.",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
   "opt_feedback_section": {
     "message": "Feedback"
   },
@@ -1903,5 +1966,119 @@
   "opt_devices_bad_reply": {
     "message": "Couldn't read the device list.",
     "description": "Reported through opt_devices_error when the extension replies in a shape the page did not expect. An empty list must never stand in for a list that failed to load."
+  },
+  "onb_welcome_device_name": {
+    "message": "Name this device"
+  },
+  "onb_welcome_device_hint": {
+    "message": "Browsers do not let extensions read your computer's name, so the automatic label is only a generic one. Enter a name you will recognise on your other devices, for example Mac mini M4pro."
+  },
+  "onb_import_title": {
+    "message": "Already have a backup?"
+  },
+  "onb_import_desc": {
+    "message": "Import a configuration backup you exported earlier to restore sync settings without filling in the wizard again."
+  },
+  "onb_import_button": {
+    "message": "Choose a backup file and import"
+  },
+  "onb_import_busy": {
+    "message": "Importing…"
+  },
+  "onb_import_done_title": {
+    "message": "Configuration imported"
+  },
+  "onb_import_done_desc": {
+    "message": "Your sync settings are restored. If this version needs new permissions, grant them in the next step."
+  },
+  "onb_import_failed": {
+    "message": "Import failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "Invalid backup file"
+      }
+    }
+  },
+  "onb_perm_title": {
+    "message": "This update needs your permission again"
+  },
+  "onb_perm_desc": {
+    "message": "After an update these permissions must be confirmed before sync can continue. Click the button and your browser will show the permission prompt."
+  },
+  "onb_perm_grant": {
+    "message": "Grant permissions"
+  },
+  "onb_perm_granted": {
+    "message": "Permissions granted. Sync can continue."
+  },
+  "onb_perm_denied": {
+    "message": "Permission was not granted. You can allow it in the browser's extension settings, or try again."
+  },
+  "onb_perm_checking": {
+    "message": "Checking permissions…"
+  },
+  "import_confirm_overwrite": {
+    "message": "Import this configuration file? It will overwrite your current settings."
+  },
+  "import_confirm_new_device": {
+    "message": "Is this backup from another device or browser?\n\n[OK] Import as a new device: generate a fresh device ID and default name (recommended)\n[Cancel] Restore this machine's identity: keep the backup's device ID and name (for an upgrade or reinstall of the same machine)"
+  },
+  "import_risk_header": {
+    "message": "This file will make the following sensitive changes:\n$LIST$\n\nImport it anyway?",
+    "placeholders": {
+      "list": {
+        "content": "$1",
+        "example": "Turns off end-to-end encryption"
+      }
+    }
+  },
+  "import_risk_disables_e2ee": {
+    "message": "Turns off end-to-end encryption (data is then uploaded in plaintext)"
+  },
+  "import_risk_changes_backend": {
+    "message": "Changes the sync backend (it may point at another server)"
+  },
+  "import_risk_has_credentials": {
+    "message": "Contains plaintext backend credentials (WebDAV password / GitHub token)"
+  },
+  "import_risk_has_gdrive_session": {
+    "message": "Contains a Google Drive sign-in token"
+  },
+  "opt_first_sync_head": {
+    "message": "First sync: choose a direction"
+  },
+  "opt_first_sync_head_sub": {
+    "message": "When this browser and your other devices both have bookmarks, decide which side wins first. You can also choose again here at any time."
+  },
+  "opt_first_sync_pending": {
+    "message": "Sync is paused while you choose. Your other devices already have bookmarks in the shared folder."
+  },
+  "opt_first_sync_merge": {
+    "message": "Merge (recommended)"
+  },
+  "opt_first_sync_merge_desc": {
+    "message": "Keep the bookmarks in this browser and add those from the other devices. The result is the union of both; nothing is deleted."
+  },
+  "opt_first_sync_remote": {
+    "message": "Use the remote copy"
+  },
+  "opt_first_sync_remote_desc": {
+    "message": "Clear the bookmarks in this browser and rebuild them from the newest other device. A restore point is saved first, but bookmarks that exist only here are lost."
+  },
+  "opt_first_sync_local": {
+    "message": "Use the copy in this browser"
+  },
+  "opt_first_sync_local_desc": {
+    "message": "Delete the bookmark files of the other devices from the storage and make the tree in this browser the only one on offer. Close Kesonode on the other devices first, or they will upload their own bookmarks again."
+  },
+  "opt_first_sync_busy": {
+    "message": "Working…"
+  },
+  "popup_first_sync_notice": {
+    "message": "First sync: choose how to combine bookmarks"
+  },
+  "popup_first_sync_cta": {
+    "message": "Choose"
   }
 }

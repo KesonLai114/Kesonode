@@ -28,9 +28,11 @@ export type { SnapshotMeta };
 import { exportBookmarkPayload, restoreBookmarks, normalizePayload } from "@/lib/handlers/bookmarks-handler";
 import { encrypt, decrypt } from "@/lib/crypto/encryption";
 import { browser } from "@/lib/utils/ext";
-import { KEYS } from "@/lib/utils/storage";
+import { KEYS, shortDeviceId } from "@/lib/utils/storage";
 import { logger } from "@/lib/utils/logger";
+import { t } from "@/lib/utils/i18n";
 import { UPSTREAM_PROTOCOL, snapshotFileName, snapshotTimestamp } from "@/lib/compat/protocol";
+import { HttpError } from "@/lib/utils/retry";
 
 // Restore points are shared upstream data, so their names stay in the upstream namespace
 // in every compat mode. The names come from the frozen contract, not from local copy.
@@ -41,6 +43,114 @@ const MAX_SNAPSHOTS = 10;
 // Kesonode-only. Keeping a point forever is a property of its FILE NAME, not of the index:
 // `pruneSnapshots` lists `PREFIX` only, so nothing that walks retention can reach it.
 const KEPT_PREFIX = "konode_snap_kept_";
+const MAX_LOCAL_ANNOTATIONS = 50;
+
+// ─── "Keep forever" requests the storage refused ───────────────────────────
+//
+// A kept point IS its FILE NAME, so honoring the click takes a PUT and a DELETE.
+// Nutstore answers its frequency cap with 403 on writes too, and one refused write
+// used to fail the whole click with a wall of text while the point stayed in the
+// rolling ten where retention could still prune it. Keep the intent locally instead,
+// show it at once, and finish the rename as soon as the storage answers again.
+
+type PendingPin = { name: string; pinned: boolean };
+
+async function readPendingPins(): Promise<PendingPin[]> {
+  try {
+    const r = await browser.storage.local.get(KEYS.SNAPSHOT_PENDING_PIN);
+    const v = r[KEYS.SNAPSHOT_PENDING_PIN];
+    return Array.isArray(v)
+      ? v.filter((p): p is PendingPin => !!p && typeof p.name === "string" && typeof p.pinned === "boolean")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writePendingPins(list: PendingPin[]): Promise<void> {
+  await browser.storage.local.set({ [KEYS.SNAPSHOT_PENDING_PIN]: list.slice(-MAX_LOCAL_ANNOTATIONS) });
+}
+
+async function queuePendingPin(name: string, pinned: boolean): Promise<void> {
+  const rest = (await readPendingPins()).filter((p) => p.name !== name);
+  await writePendingPins([...rest, { name, pinned }]);
+}
+
+async function clearPendingPin(name: string): Promise<void> {
+  const list = await readPendingPins();
+  if (list.some((p) => p.name === name)) await writePendingPins(list.filter((p) => p.name !== name));
+}
+
+/** A metered or offline server saying "not now", as opposed to a bad request of ours. */
+function isStorageRefusal(err: unknown): boolean {
+  if (err instanceof HttpError) return err.status === 403 || err.status === 429 || err.status >= 500;
+  return err instanceof TypeError && /fetch|network|load failed/i.test(err.message);
+}
+
+/**
+ * Finish queued renames. Stops at the first storage that still refuses, so a
+ * rate-limited account is not hit with another round of requests on this cycle.
+ */
+export async function flushPendingPins(backend: IBackend, settings: SyncSettings): Promise<void> {
+  for (const p of await readPendingPins()) {
+    let done: boolean;
+    try {
+      done = await setSnapshotPinned(backend, settings, p.name, p.pinned);
+    } catch {
+      // The point is gone or the name collides: it can never be moved, so drop it.
+      await clearPendingPin(p.name);
+      continue;
+    }
+    if (!done) break;
+  }
+}
+
+/** Annotations this device knows about, kept in chrome.storage.local. The shared index
+ *  is authoritative when it can be read; when it cannot (Nutstore's 403 frequency cap,
+ *  an encrypted index with no passphrase here), mergeIndex writes NOTHING, so a point
+ *  saved during that window has no name, device or count anywhere else. Keeping a local
+ *  copy means the list can still say which device saved it. Nothing here reaches the
+ *  backend, so the frozen wire contract is untouched. */
+type LocalIndex = Record<string, SnapshotMeta>;
+
+async function readLocalIndex(): Promise<LocalIndex> {
+  try {
+    const r = await browser.storage.local.get(KEYS.SNAPSHOT_LOCAL);
+    const v = r[KEYS.SNAPSHOT_LOCAL];
+    return v && typeof v === "object" && !Array.isArray(v) ? v as LocalIndex : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeLocalIndex(idx: LocalIndex): Promise<void> {
+  const entries = Object.entries(idx)
+    .filter(([, m]) => m && typeof m.name === "string")
+    .sort((a, b) => (b[1].timestamp ?? 0) - (a[1].timestamp ?? 0))
+    .slice(0, MAX_LOCAL_ANNOTATIONS);
+  await browser.storage.local.set({ [KEYS.SNAPSHOT_LOCAL]: Object.fromEntries(entries) });
+}
+
+async function rememberLocal(meta: SnapshotMeta): Promise<void> {
+  const idx = await readLocalIndex();
+  idx[meta.name] = { ...(idx[meta.name] ?? {}), ...meta };
+  await writeLocalIndex(idx);
+}
+
+async function moveLocal(from: string, to: string): Promise<void> {
+  const idx = await readLocalIndex();
+  if (!idx[from]) return;
+  idx[to] = { ...idx[from], name: to };
+  delete idx[from];
+  await writeLocalIndex(idx);
+}
+
+async function forgetLocal(name: string): Promise<void> {
+  const idx = await readLocalIndex();
+  if (!(name in idx)) return;
+  delete idx[name];
+  await writeLocalIndex(idx);
+}
 
 interface SnapshotFile {
   version: "1.0";
@@ -194,6 +304,50 @@ export interface CreateSnapshotOptions {
   origin?: "manual" | "auto";
 }
 
+type SnapshotNameMeta = Pick<SnapshotMeta, "label" | "device_label" | "device_id">;
+
+/**
+ * The ONE place a restore point's visible name is decided.
+ *
+ * The rule: `Bookmark restore point · <device label> · <short id>` (localized prefix),
+ * falling back to just `Bookmark restore point` when the shared index carries no device
+ * info, and always overridden by a name the user actually chose.
+ *
+ * Default names are computed at DISPLAY time and are never written into the shared
+ * index. That is the fix for this rule drifting again and again: older builds baked
+ * `"<device> <short id> restore point"` into `label`, which (a) froze the wording in
+ * whichever language happened to save it, (b) made an automatic name look like a
+ * user's own, and (c) left the UI with a second, different fallback for points whose
+ * index had no label. Changing the rule could never reach those points. Now there is
+ * one function to change.
+ */
+export function snapshotDisplayName(meta: SnapshotNameMeta): string {
+  const label = meta.label?.trim();
+  if (label && !snapshotIsUnnamed(meta)) return label;
+  const parts = [t("opt_snap_unknown")];
+  const device = meta.device_label?.trim();
+  const short = shortDeviceId(meta.device_id);
+  if (device) parts.push(device);
+  // A default device label minted by this build already ends in the short id.
+  if (short && !device?.includes(short)) parts.push(short);
+  return parts.join(" · ");
+}
+
+/** True when the row has no name the USER chose. Older builds persisted an automatic
+ *  label (`"<device> <short id> restore point"`); those count as unnamed too, so a
+ *  corrected rule also reaches points written by those builds. */
+export function snapshotIsUnnamed(meta: SnapshotNameMeta): boolean {
+  const label = meta.label?.trim();
+  if (!label) return true;
+  const short = shortDeviceId(meta.device_id);
+  if (!short) return false;
+  const device = meta.device_label?.trim();
+  // Match on the full device label AND the 8-char id, not on a localized suffix: a
+  // name the user typed ("Macmini 升级前还原点") must never be swallowed, and a point
+  // saved under a different UI language has a different suffix anyway.
+  return device ? label.startsWith(device) && label.includes(short) : label.startsWith(short);
+}
+
 /** Write a snapshot of the current bookmark tree, then prune the rolling points to N. */
 export async function createSnapshot(
   backend: IBackend, settings: SyncSettings, opts: CreateSnapshotOptions = {},
@@ -220,6 +374,10 @@ export async function createSnapshot(
   const meta: SnapshotMeta = {
     name, timestamp: ts, count,
     device_label: settings.device_label || undefined,
+    device_id: settings.device_id || undefined,
+    // No `label`: only a name the user chooses is stored. The default name is built by
+    // snapshotDisplayName() when the row is drawn, so one rule covers every point and
+    // every language (see the comment above that function).
     ...(opts.origin ? { origin: opts.origin } : {}),
     ...(pinned ? { pinned: true } : {}),
   };
@@ -229,6 +387,9 @@ export async function createSnapshot(
   const rolling = await pruneSnapshots(backend);
   const kept = await backend.listFiles(KEPT_PREFIX);
   await mergeIndex(backend, settings, [meta], [...rolling, ...kept, name]);
+  // The merge writes NOTHING when the shared index is unreadable. Keep our own annotations
+  // anyway, or this point would have no name, device or count anywhere at all.
+  await rememberLocal(meta);
   logger.event("Snapshots", `Created ${name} (${count} bookmarks)`);
   return meta;
 }
@@ -262,6 +423,9 @@ async function migrateLegacyIndex(
 
 /** List restore points on the backend, newest first, annotated with known counts and names. */
 export async function listSnapshots(backend: IBackend, settings: SyncSettings): Promise<SnapshotMeta[]> {
+  // A "keep forever" the storage refused earlier gets its rename here, on the first
+  // visit that can reach the backend again. Refusals are swallowed inside the flush.
+  await flushPendingPins(backend, settings);
   const names = await allSnapshotNames(backend);
   // An unreadable index costs the annotations, nothing more — the file list below is what
   // says which restore points exist, so the list still works.
@@ -269,15 +433,32 @@ export async function listSnapshots(backend: IBackend, settings: SyncSettings): 
     ?? (await getIndex(backend, settings))
     ?? [];
   const byName = new Map(idx.map((m) => [m.name, m]));
+  const local = await readLocalIndex();
+  const live = new Set(names);
+  const stale = Object.keys(local).filter((n) => !live.has(n));
+  if (stale.length) {
+    for (const n of stale) delete local[n];
+    await writeLocalIndex(local);
+  }
+  // A queued "keep forever" has not been renamed yet, but the click already counted:
+  // show it as kept here rather than leaving the button looking ignored for 30 minutes.
+  const pendingPinned = new Set((await readPendingPins()).filter((p) => p.pinned).map((p) => p.name));
   const metas: SnapshotMeta[] = [];
   for (const name of names) {
     const ts = tsFromName(name);
     if (ts == null) continue;
     // Trust the filename's timestamp AND its kept-forever mark over the index — the file
     // list is canonical, and an older build's index has no `pinned` field at all.
+    // The readable shared index wins; the local copy only fills in what a refused index
+    // never let us publish.
     const known = byName.get(name);
-    const meta: SnapshotMeta = { ...(known ?? {}), name, timestamp: ts };
-    if (isPinnedName(name)) meta.pinned = true;
+    const meta: SnapshotMeta = { ...(local[name] ?? {}), ...(known ?? {}), name, timestamp: ts };
+    // No annotation anywhere and the shared index is unreadable: leave the origin
+    // UNKNOWN. Guessing "the device that happens to be viewing the list" used to relabel
+    // every older point with the CURRENT device name — after a rename or a settings import
+    // the user's restore points looked silently renamed. A readable index, and this
+    // device's own local copy merged above, are the real answers; a guess is not one.
+    if (isPinnedName(name) || pendingPinned.has(name)) meta.pinned = true;
     else delete meta.pinned;
     metas.push(meta);
   }
@@ -320,13 +501,18 @@ export async function restoreSnapshot(backend: IBackend, name: string, settings:
  *  Only the ROLLING prefix is walked. `konode_snap_kept_*` is deliberately invisible
  *  here: those are the points the user asked to keep forever. */
 export async function pruneSnapshots(backend: IBackend): Promise<string[]> {
+  // A point whose "keep forever" is still queued must not be pruned here: the storage
+  // refused the rename, not the user's intent. Otherwise a click made during a 403
+  // window could lose the very point it was meant to protect.
+  const protectedNames = new Set((await readPendingPins()).filter((p) => p.pinned).map((p) => p.name));
   const named = (await backend.listFiles(PREFIX))
     .map((name) => ({ name, ts: tsFromName(name) }))
     .filter((x): x is { name: string; ts: number } => x.ts != null)
     .sort((a, b) => b.ts - a.ts);
-  const keep = named.slice(0, MAX_SNAPSHOTS);
-  for (const { name } of named.slice(MAX_SNAPSHOTS)) {
-    try { await backend.deleteFile(name); } catch { /* best effort — retried next time */ }
+  const keep = named.filter((x, i) => i < MAX_SNAPSHOTS || protectedNames.has(x.name));
+  for (const x of named) {
+    if (keep.includes(x)) continue;
+    try { await backend.deleteFile(x.name); } catch { /* best effort — retried next time */ }
   }
   return keep.map((x) => x.name);
 }
@@ -342,12 +528,23 @@ export async function renameSnapshot(
   const live = await allSnapshotNames(backend);
   if (!live.includes(name)) throw new Error("Restore point not found on the backend.");
   const remote = await getIndex(backend, settings);
-  if (remote === null) throw new Error("The shared restore-point index cannot be read here.");
+  const ts = tsFromName(name)!;
+  const clean = label.trim().slice(0, 120);
+  if (remote === null) {
+    // A refused index is never overwritten. Keep the name on this device instead, so a
+    // 403 does not make the pencil button fail with "cannot be read here".
+    const local = await readLocalIndex();
+    const next: SnapshotMeta = { ...(local[name] ?? {}), name, timestamp: ts };
+    if (clean) next.label = clean;
+    else delete next.label;
+    local[name] = next;
+    await writeLocalIndex(local);
+    logger.warn("Snapshots", `Shared index unreadable; kept the name of ${name} on this device only`);
+    return;
+  }
 
   const byName = new Map(remote.map((m) => [m.name, m]));
-  const ts = tsFromName(name)!;
   const next: SnapshotMeta = { ...(byName.get(name) ?? {}), name, timestamp: ts };
-  const clean = label.trim().slice(0, 120);
   if (clean) next.label = clean;
   else delete next.label;
   byName.set(name, next);
@@ -355,32 +552,37 @@ export async function renameSnapshot(
   await putIndex(backend, settings, [...byName.values()]
     .filter((m) => alive.has(m.name))
     .sort((a, b) => b.timestamp - a.timestamp));
+  await rememberLocal(next);
   logger.event("Snapshots", `Renamed ${name}`);
 }
 
-/** Keep a restore point forever, or put it back into the rolling ten. The mark is the
- *  FILE NAME: moving between the two prefixes is a read + write + delete of one file,
- *  done only when the user asks. The index read happens BEFORE the move, so an index we
- *  cannot read leaves both the file and everybody else's annotations untouched. */
-export async function setSnapshotPinned(
-  backend: IBackend, settings: SyncSettings, name: string, pinned: boolean,
+/**
+ * Move one point between the rolling and the kept-forever file names.
+ *
+ * Idempotent on purpose: an earlier attempt may have written the new file and been
+ * refused only at the delete, so a target that already exists is FINISHED rather than
+ * rejected. The shared index is best effort — one we cannot read is left untouched.
+ */
+async function moveSnapshotFile(
+  backend: IBackend, settings: SyncSettings, name: string, target: string,
+  pinned: boolean, ts: number,
 ): Promise<void> {
-  const ts = tsFromName(name);
-  if (ts == null) throw new Error("Not a restore point.");
-  if (isPinnedName(name) === pinned) return; // already in the requested state
-
   const live = await allSnapshotNames(backend);
-  if (!live.includes(name)) throw new Error("Restore point not found on the backend.");
-  const raw = await backend.getFile(name);
-  if (!raw) throw new Error("Restore point not found on the backend.");
-  const target = nameFor(ts, pinned);
-  if (live.includes(target)) throw new Error("A restore point with this timestamp already exists.");
-
+  if (!live.includes(name) && !live.includes(target)) {
+    throw new Error("Restore point not found on the backend.");
+  }
   const remote = await getIndex(backend, settings);
-  if (remote === null) throw new Error("The shared restore-point index cannot be read here.");
-
-  await backend.putFile(target, raw);
-  await backend.deleteFile(name);
+  if (!live.includes(target)) {
+    const raw = await backend.getFile(name);
+    if (!raw) throw new Error("Restore point not found on the backend.");
+    await backend.putFile(target, raw);
+  }
+  if (live.includes(name)) await backend.deleteFile(name);
+  await moveLocal(name, target);
+  if (remote === null) {
+    logger.warn("Snapshots", `Shared index unreadable; kept ${target} on this device only`);
+    return;
+  }
 
   const byName = new Map(remote.map((m) => [m.name, m]));
   const next: SnapshotMeta = { ...(byName.get(name) ?? {}), name: target, timestamp: ts };
@@ -395,10 +597,38 @@ export async function setSnapshotPinned(
   logger.event("Snapshots", `${pinned ? "Kept" : "Returned"} ${target}`);
 }
 
+/** Keep a restore point forever, or put it back into the rolling ten.
+ *
+ *  Returns false only when the storage refused the write: the intent is queued locally
+ *  and the list shows it as kept right away. A real error still throws, so a bad name or
+ *  a missing file is never mistaken for a rate limit.
+ */
+export async function setSnapshotPinned(
+  backend: IBackend, settings: SyncSettings, name: string, pinned: boolean,
+): Promise<boolean> {
+  const ts = tsFromName(name);
+  if (ts == null) throw new Error("Not a restore point.");
+  if (isPinnedName(name) === pinned) {
+    await clearPendingPin(name);
+    return true;
+  }
+  try {
+    await moveSnapshotFile(backend, settings, name, nameFor(ts, pinned), pinned, ts);
+    await clearPendingPin(name);
+    return true;
+  } catch (err) {
+    if (!isStorageRefusal(err)) throw err;
+    await queuePendingPin(name, pinned);
+    logger.warn("Snapshots", `Storage refused the change; ${name} is marked ${pinned ? "kept forever" : "rolling"} on this device and will be moved as soon as the storage answers again`);
+    return false;
+  }
+}
+
 /** Delete one restore point, then drop it from the shared index. */
 export async function deleteSnapshot(backend: IBackend, settings: SyncSettings, name: string): Promise<void> {
   if (tsFromName(name) == null) throw new Error("Not a restore point.");
   await backend.deleteFile(name);
+  await forgetLocal(name);
   const live = await allSnapshotNames(backend);
   // mergeIndex drops entries with no file behind them, which now includes this one.
   await mergeIndex(backend, settings, [], live);

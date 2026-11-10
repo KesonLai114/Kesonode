@@ -6,6 +6,10 @@ dist-firefox/
 .DS_Store
 *.zip
 
+# Published install packages are part of the release history and are mirrored to GitHub.
+# Keep every zip under 插件版本/ tracked; all other zips (e.g. the upstream snapshot) stay ignored.
+!插件版本/**/*.zip
+
 # Internal working docs. Kept locally, not published to the public repo.
 BRAND.md
 CLAUDE.md

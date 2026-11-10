@@ -28,6 +28,11 @@ describe("detectBrowser on Chromium", () => {
     expect(await detectBrowser()).toEqual({ engine: "chromium", name: "Brave" });
   });
 
+  it("names QuarkPC from its own token, not Chrome's brand list", async () => {
+    as({ userAgent: `${CHROME_UA} QuarkPC/7.4.7.1036`, userAgentData: brands("Not:A-Brand", "Chromium", "Google Chrome") });
+    expect(await detectBrowser()).toEqual({ engine: "chromium", name: "夸克浏览器" });
+  });
+
   it("falls back to what Brave, Edge and Opera say elsewhere when no brand names them", async () => {
     as({ userAgent: CHROME_UA, userAgentData: brands("Chromium"), brave: {} });
     expect((await detectBrowser())?.name).toBe("Brave");

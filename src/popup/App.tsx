@@ -21,6 +21,10 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────
 
+// Shown in the popup footer so a user running several Kesonode copies side by side can
+// tell them apart at a glance (the extension list in the browser only shows the name).
+const APP_VERSION = browser.runtime.getManifest().version;
+
 // Icons are static; the labels are looked up per render so they follow the browser's
 // language. Same for STATUS_CONFIG below: the colour classes stay in the table, the
 // wording moves out of it.
@@ -442,7 +446,7 @@ export default function PopupApp() {
       )}
 
       {/* ── Banners ── */}
-      {(loadError || actionError || state?.last_error || state?.recovery_notice || state?.guard_notice || (state?.pending_conflicts?.length ?? 0) > 0 || showNoBackend) && (
+      {(loadError || actionError || state?.last_error || state?.first_sync_pending || state?.recovery_notice || state?.guard_notice || (state?.pending_conflicts?.length ?? 0) > 0 || showNoBackend) && (
         <div className="mt-3 space-y-2">
           {/* With nothing turned on, the error the button gives back ends by telling you to
               turn one on in Data Types, and the popup cannot get you there. So the banner
@@ -466,6 +470,19 @@ export default function PopupApp() {
               <span className="text-[12px] text-sk-danger">{actionError}</span>
             </div>
           ))}
+          {/* The three answers and their consequences need more room than 360px, so the
+              popup points at Settings → Activity, where the same choice is offered even
+              when nothing is pending (so it can be made again later). */}
+          {state?.first_sync_pending && (
+            <button
+              onClick={openActivityLog}
+              className="flex w-full items-center gap-2 rounded-box border border-sk-warn bg-sk-raised px-3 py-2 text-left transition-colors hover:bg-sk-tint"
+            >
+              <GitMerge size={12} className="shrink-0 text-sk-warn" />
+              <span className="min-w-0 flex-1 text-[12px] text-sk-warn">{t("popup_first_sync_notice")}</span>
+              <span className="shrink-0 text-[12px] text-sk-warn">{t("popup_first_sync_cta")} <ChevronRight size={12} className="inline" /></span>
+            </button>
+          )}
           {state?.recovery_notice && (
             <button
               onClick={openActivityLog}
@@ -782,6 +799,7 @@ export default function PopupApp() {
           >
             {t("popup_activity_log")}
           </button>
+          <span className="font-mono text-[11px] text-sk-subtle">v{APP_VERSION}</span>
         </div>
       </footer>
       </div>

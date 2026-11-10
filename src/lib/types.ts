@@ -7,6 +7,17 @@ export type BackendType = "gdrive" | "webdav" | "github";
 export type SyncStatus = "idle" | "syncing" | "success" | "error" | "conflict";
 export type ConflictStrategy = "lww" | "prefer-local" | "prefer-remote" | "manual";
 
+/**
+ * How a device that ALREADY has bookmarks joins a sync group whose peers also have some.
+ *
+ * "merge" is the historical behaviour (non-destructive union). "remote" clears this
+ * device's tree and rebuilds it from the newest peer's packet. "local" deletes the
+ * peers' bookmark files so this device's tree becomes the only one on offer.
+ *
+ * This is a LOCAL decision, never a field in SyncPacket: the wire contract stays v1.0.
+ */
+export type FirstSyncChoice = "merge" | "remote" | "local";
+
 // ─── Sync Packet ───────────────────────────────────────────────────────────
 
 export interface SyncPacket {
@@ -522,6 +533,19 @@ export interface SyncState {
     /** Consecutive large-change cycles that led to the hold. */
     unstableRounds: number;
   } | null;
+  /**
+   * A first-sync direction decision is waiting. While set, sync() neither merges nor
+   * publishes bookmarks, so neither side is changed behind the user's back. Optional
+   * because a state written by an older build cannot carry it.
+   *
+   * Metadata only: the peer packets are re-read when the user answers, never parked in
+   * `konode_state` (which setState() rewrites and STATE_UPDATE broadcasts in full).
+   */
+  first_sync_pending?: {
+    at: string;
+    /** How many other devices currently have a bookmark file in the sync folder. */
+    peer_count: number;
+  } | null;
 }
 
 /**
@@ -607,6 +631,14 @@ export interface IBackend {
   // newest-first by packet timestamp (`orderPeersByTime`), so backends may return
   // files in any order (e.g. directory-listing order).
   downloadAll(data_type: DataType, excludeDeviceId?: string): Promise<SyncPacket[]>;
+  /**
+   * Peer files downloadAll could not read, as short descriptions. A backend skips such a
+   * peer on purpose (one unreadable file must not stop the whole sync), but the engine
+   * reads this afterwards and turns it into a VISIBLE problem instead of reporting a
+   * clean sync with fewer devices than the folder holds. Per-instance working state,
+   * never part of the wire format.
+   */
+  failedPeers?: string[];
   // `listVersions` used to sit here, returning [] from all three backends because none of
   // them can answer it: Drive, GitHub and WebDAV expose file history in three unrelated
   // ways and we never called it. Restore points are ordinary files we write ourselves
@@ -643,6 +675,10 @@ export interface SnapshotMeta {
   count?: number;    // bookmark count, from the shared index; absent if unreadable
   /** The device that saved it, as `SyncSettings.device_label`. Absent on older index entries. */
   device_label?: string;
+  /** The id of the device that saved it (`SyncSettings.device_id`), shorted for display.
+   *  Absent on older index entries; paired with `device_label` so a point can name its
+   *  origin device even when the label was left empty. */
+  device_id?: string;
   /** The name the user gave this restore point. Absent or empty means unnamed. */
   label?: string;
   /** Kept forever: outside the rolling 10-point retention. Derived from the filename. */
@@ -661,7 +697,7 @@ export type ExtensionMessage =
   // Carry configuration across an extension-ID change. EXPORT answers SETTINGS_BACKUP;
   // IMPORT takes a parsed (untrusted) JSON value and validates it in utils/storage.ts.
   | { type: "EXPORT_SETTINGS" }
-  | { type: "IMPORT_SETTINGS"; payload: unknown; confirmImport?: boolean }
+  | { type: "IMPORT_SETTINGS"; payload: unknown; confirmImport?: boolean; asNewDevice?: boolean }
   | { type: "RESOLVE_CONFLICT"; payload: { id: string; resolution: "local" | "remote" } }
   // What differs on one pending conflict (#35). Read-only: opens the parked packet, applies nothing.
   | { type: "GET_CONFLICT_DIFF"; payload: { id: string } }
@@ -680,7 +716,10 @@ export type ExtensionMessage =
   // `blocked` is the count the UI actually showed, not a number re-read in the worker:
   // sync() clears recovery_notice as it starts, so a click landing mid-sync would have
   // found nothing pending and refused. It also pins the approval to what the user saw.
-  | { type: "APPROVE_BULK_DELETE"; payload: { blocked: number } };
+  | { type: "APPROVE_BULK_DELETE"; payload: { blocked: number } }
+  // Which side wins when a device with bookmarks first joins peers that also have some.
+  // Also the manual "choose the sync direction again" entry point in Settings → Activity.
+  | { type: "FIRST_SYNC_CHOICE"; payload: { choice: FirstSyncChoice } };
 
 /**
  * One device with files in the sync folder.

@@ -10,7 +10,7 @@ import { logger, setLoggerDebug } from "@/lib/utils/logger";
 import { BADGE_COLORS, BADGE_TEXT, STATE_UPDATE } from "@/lib/constants";
 import { browser } from "@/lib/utils/ext";
 import { ensureSyncAlarm, SYNC_ALARM, BOOKMARK_ALARM } from "@/lib/utils/alarms";
-import { eventPresent } from "@/lib/utils/capabilities";
+import { eventPresent, missingPermissionsFor } from "@/lib/utils/capabilities";
 import { clearExpiredDraft } from "@/lib/onboarding-draft";
 import { openConflictFromNotification } from "@/lib/sync/conflict-resolver";
 
@@ -192,8 +192,11 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       // Await the sync so the pending message response keeps the MV3 worker alive
       // for its whole duration — otherwise a mid-sync suspension can skip the
       // lock's finally and strand the persisted lock until its TTL (C2).
+      // A manual press is never gated by the rate-limit cooldown: it is the user's
+      // way to try again (and to resume automatic sync once a cycle gets through).
       const outcome = await syncEngine.sync(
-        message.payload?.data_type ? [message.payload.data_type] : undefined
+        message.payload?.data_type ? [message.payload.data_type] : undefined,
+        { force: true }
       );
       // Don't answer OK for a sync that never started. This used to be a blanket OK, so
       // a stranded lock made "Sync now" a no-op that reported success.
@@ -208,6 +211,8 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       if (outcome === "nothing-enabled") {
         return { type: "ERROR", payload: "No data types are turned on, so there is nothing to sync. Turn one on in Data Types." };
       }
+      // "first-sync-pending" is deliberately not an error: nothing was meant to move
+      // this cycle, and the direction card reached the popup/options via STATE_UPDATE.
       return { type: "OK" };
     }
 
@@ -276,7 +281,9 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
           throw new Error("IMPORT_SETTINGS_NEEDS_CONFIRM:" + risks.join(","));
         }
       }
-      const updated = await importSettingsBackup(message.payload);
+      const updated = await importSettingsBackup(message.payload, {
+        asNewDevice: (message as { asNewDevice?: boolean }).asNewDevice === true,
+      });
       setLoggerDebug(updated.debug_mode);
       await syncEngine?.updateSettings(updated);
       if (updated.auto_sync) {
@@ -300,6 +307,14 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
     case "RESOLVE_CONFLICT": {
       if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
       await syncEngine.resolveConflict(message.payload.id, message.payload.resolution);
+      return { type: "OK" };
+    }
+
+    case "FIRST_SYNC_CHOICE": {
+      if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
+      // Awaited: the pending message response is what keeps the MV3 worker alive through
+      // the replace/delete and the sync that publishes the answer.
+      await syncEngine.chooseFirstSync(message.payload.choice);
       return { type: "OK" };
     }
 
@@ -360,7 +375,7 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
         return { type: "ERROR", payload: "There is no blocked deletion to apply." };
       }
       await setBulkDeleteApproval(pending);
-      const outcome = await syncEngine.sync(["bookmarks"]);
+      const outcome = await syncEngine.sync(["bookmarks"], { force: true });
       if (outcome === "no-backend") {
         await setBulkDeleteApproval(0);
         return { type: "ERROR", payload: "No storage backend is set up yet." };
@@ -495,6 +510,21 @@ on("runtime", "onInstalled", () => browser.runtime.onInstalled.addListener(async
     browser.tabs.create({ url: browser.runtime.getURL("onboarding.html") });
   }
   await ensureInit();
+  if (details.reason === "update") {
+    // A new version may need an optional permission, or an imported WebDAV config may
+    // have brought a host permission nobody granted. Nothing in a worker can ask for it:
+    // permissions.request() needs a user gesture, so open a page with one real button.
+    try {
+      const settings = await getSettings();
+      const missing = await missingPermissionsFor(settings);
+      if (missing.permissions.length || missing.origins.length) {
+        logger.event("Update", "Opening the permission guide for permissions this setup still needs");
+        browser.tabs.create({ url: browser.runtime.getURL("onboarding.html?reason=permissions") });
+      }
+    } catch (err) {
+      logger.warn("Update", `Could not check permissions after the update: ${err instanceof Error ? err.message : err}`);
+    }
+  }
 }));
 
 on("runtime", "onStartup", () => browser.runtime.onStartup.addListener(async () => {

@@ -12,8 +12,9 @@ import type { BackendType, BookmarkExclusion, DataType, SyncSettings } from "@/l
 import { BookmarkExclusionTree } from "@/lib/ui/bookmark-exclusion-tree";
 import {
   allDataTypeAvailability, ensurePermissionWatched, unsupportedReason,
-  permissionsToEnable, tabGroupsAskable, type Availability,
+  permissionsToEnable, tabGroupsAskable, missingPermissionsFor, type Availability,
 } from "@/lib/utils/capabilities";
+import { importSettingsBackupFromFile } from "@/lib/utils/settings-import";
 import {
   Bookmark,
   Clock, Puzzle, Globe, CheckCircle2, ArrowRight,
@@ -44,9 +45,14 @@ import { ProviderLogo } from "@/lib/provider-logos";
 
 // ─── Steps ────────────────────────────────────────────────────────────────
 
-type Step = "welcome" | "backend" | "data" | "encrypt" | "syncing" | "done";
+type Step = "welcome" | "backend" | "data" | "encrypt" | "syncing" | "done" | "permissions" | "imported";
 
 const STEPS: Step[] = ["welcome", "backend", "data", "encrypt", "done"];
+const SETUP_STEPS: readonly Step[] = ["welcome", "backend", "data", "encrypt"];
+// An update opens this page just to re-grant permissions (see service-worker.ts). That
+// is a separate entry mode, not a setup to resume, so no draft is read back.
+const PERMISSION_MODE = typeof window !== "undefined"
+  && new URLSearchParams(window.location.search).get("reason") === "permissions";
 
 // Icon for the live sync-progress list (#3) — matches the data-types step. The label is
 // the shared `datatype_*` message, looked up at render.
@@ -61,6 +67,15 @@ const TYPE_META: Record<"bookmarks" | "extensions" | "history" | "sessions", { I
 
 export default function OnboardingApp() {
   const [step, setStep] = useState<Step>("welcome");
+  // The first page can restore a previously exported backup instead of walking through
+  // setup, and an update can open this page only to re-grant permissions.
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const importRef = useRef<HTMLInputElement | null>(null);
+  const [missingPerms, setMissingPerms] = useState<{ permissions: string[]; origins: string[] }>({ permissions: [], origins: [] });
+  const [permissionPhase, setPermissionPhase] = useState<"checking" | "needed" | "done" | "failed">("checking");
+  const [permBusy, setPermBusy] = useState(false);
+  const [permSlowHere, setPermSlowHere] = useState(false);
   // Pre-filled from the auto-detected name, so this is a field to correct rather than a
   // question to answer. Left alone it costs the user nothing.
   const [deviceLabel, setDeviceLabel] = useState("");
@@ -258,7 +273,22 @@ export default function OnboardingApp() {
   // Pick up where the wizard was (#38): the draft if there is one, the Drive session if a
   // sign-in already completed, and otherwise the name the extension detected for this
   // device, so the field starts filled.
+  // A version update opens this page just to re-grant permissions. Ask what the CURRENT
+  // setup needs, not what the manifest declares: the request is built from the answer.
   useEffect(() => {
+    if (!PERMISSION_MODE) return;
+    setStep("permissions");
+    void (async () => {
+      const res = await request({ type: "GET_SETTINGS" });
+      if (!res.ok || res.res.type !== "SETTINGS") { setPermissionPhase("failed"); return; }
+      const missing = await missingPermissionsFor(res.res.payload);
+      setMissingPerms(missing);
+      setPermissionPhase(missing.permissions.length || missing.origins.length ? "needed" : "done");
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (PERMISSION_MODE) { setRestored(true); return; }
     void (async () => {
       try {
         const [res, draft, driveUser] = await Promise.all([
@@ -353,6 +383,64 @@ export default function OnboardingApp() {
   const next = () => {
     const idx = STEPS.indexOf(step);
     if (idx < STEPS.length - 1) setStep(STEPS[idx + 1]);
+  };
+
+  /** Restore a settings backup from the FIRST page, so a reinstall never has to close
+   *  the wizard and hunt for Settings → Advanced. */
+  const importBackup = async (file: File) => {
+    setImporting(true);
+    setImportError(null);
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      const outcome = await importSettingsBackupFromFile(parsed, (message) => window.confirm(message));
+      if (!outcome.ok) {
+        if (outcome.reason === "failed") setImportError(t("onb_import_failed", outcome.error ?? ""));
+        return;
+      }
+      // The worker already saved the imported settings. Mark setup done explicitly (a
+      // backup taken mid-setup may carry false), and drop the draft with its credentials.
+      await request({ type: "SAVE_SETTINGS", payload: { onboarding_completed: true } });
+      draftClosed.current = true;
+      await clearDraft().catch(() => {});
+      // An imported setup may enable history/tabs/extensions that this browser has never
+      // granted, and a WebDAV server whose host permission was never requested. Check the
+      // settings as they stand now, with the reported origin as a belt.
+      const after = await request({ type: "GET_SETTINGS" });
+      const missing: { permissions: string[]; origins: string[] } = after.ok && after.res.type === "SETTINGS"
+        ? await missingPermissionsFor(after.res.payload)
+        : { permissions: [], origins: [] };
+      if (outcome.hostOrigin && !missing.origins.includes(outcome.hostOrigin)) {
+        missing.origins.push(outcome.hostOrigin);
+      }
+      if (missing.permissions.length || missing.origins.length) {
+        setMissingPerms(missing);
+        setPermissionPhase("needed");
+        setStep("permissions");
+      } else {
+        setStep("imported");
+      }
+    } catch (err) {
+      setImportError(t("onb_import_failed", err instanceof Error ? err.message : String(err)));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  /** The browser only grants permissions from a user gesture, so this page — not the
+   *  worker — is where the request happens. Nothing is awaited before the request. */
+  const grantMissing = async () => {
+    setPermBusy(true);
+    setPermSlowHere(false);
+    const outcome = await ensurePermissionWatched(
+      {
+        ...(missingPerms.permissions.length ? { permissions: missingPerms.permissions } : {}),
+        ...(missingPerms.origins.length ? { origins: missingPerms.origins } : {}),
+      },
+      () => setPermSlowHere(true),
+    );
+    setPermBusy(false);
+    setPermSlowHere(false);
+    setPermissionPhase(outcome === "granted" ? "done" : "failed");
   };
 
   const canProceedBackend = () => {
@@ -581,8 +669,17 @@ export default function OnboardingApp() {
     <div style={S.root}>
       <style>{CSS}</style>
 
+      {/* One file picker for every screen that offers a backup import (welcome and the
+          update permission page), so neither has to send the user into Settings. */}
+      <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void importBackup(file);
+        }} />
+
       {/* Progress */}
-      {step !== "done" && step !== "syncing" && (
+      {SETUP_STEPS.includes(step) && (
         <div style={S.progress}>
           {STEPS.filter(s => s !== "done").map((s, i) => (
             <div key={s} style={{
@@ -613,6 +710,29 @@ export default function OnboardingApp() {
                 <span style={{ color: "var(--text-secondary)", fontSize: 14 }}>{t(key)}</span>
               </div>
             ))}
+          </div>
+          {/* Browsers do not expose the computer's own name ("Mac mini M4pro") to an
+              extension: the auto-detected label is only "Mac · Chromium · <id>". Ask for
+              a real name on the FIRST page, before two machines end up looking alike. */}
+          <div style={{ marginBottom: 18, textAlign: "left" }}>
+            <div style={S.backendName}>{t("onb_welcome_device_name")}</div>
+            <div style={{ ...S.backendDesc, marginBottom: 8 }}>{t("onb_welcome_device_hint")}</div>
+            <input style={S.input} dir="auto" value={deviceLabel}
+              onChange={(e) => setDeviceLabel(e.target.value)}
+              placeholder={t("onb_device_name_placeholder")}
+              aria-label={t("onb_welcome_device_name")} />
+          </div>
+          {/* A reinstall should not have to close the wizard and hunt through Settings. */}
+          <div style={{ ...S.featureList, gap: 8, marginBottom: 20, padding: 14,
+                        borderRadius: 14, border: "1px solid var(--border)" }}>
+            <div style={S.backendName}>{t("onb_import_title")}</div>
+            <div style={S.backendDesc}>{t("onb_import_desc")}</div>
+            <button style={{ ...S.btnSecondary, width: "100%", justifyContent: "center" }}
+              disabled={importing} onClick={() => importRef.current?.click()}>
+              {importing && <Loader2 size={14} className="spin" />}
+              {importing ? t("onb_import_busy") : t("onb_import_button")}
+            </button>
+            {importError && <div style={S.errorRow}><XCircle size={12} /> {importError}</div>}
           </div>
           <button style={S.btnPrimary} onClick={next}>
             {t("onb_get_started")} <ArrowRight size={16} />
@@ -1101,6 +1221,72 @@ export default function OnboardingApp() {
           >
             {t("common_open_settings")}
           </button>
+        </div>
+      )}
+
+      {/* ── After an update: re-grant permissions ── */}
+      {step === "permissions" && (
+        <div style={S.card}>
+          <h1 style={S.h1}>{t("onb_perm_title")}</h1>
+          <p style={S.subtitle}>{t("onb_perm_desc")}</p>
+          {permissionPhase === "checking" && (
+            <div style={S.featureRow}><Loader2 size={14} className="spin" /> {t("onb_perm_checking")}</div>
+          )}
+          {(permissionPhase === "needed" || permissionPhase === "failed") && (
+            <>
+              <div style={{ ...S.featureList, marginBottom: 18 }}>
+                {missingPerms.permissions.map((p) => (
+                  <div key={p} style={S.featureRow}><span>•</span>
+                    <span style={{ fontFamily: "monospace", fontSize: 13 }}>{p}</span></div>
+                ))}
+                {missingPerms.origins.map((o) => (
+                  <div key={o} style={S.featureRow}><span>•</span>
+                    <span style={{ fontFamily: "monospace", fontSize: 13 }}>{o}</span></div>
+                ))}
+              </div>
+              {permissionPhase === "failed" && (
+                <div style={{ ...S.errorRow, marginBottom: 12 }}><XCircle size={12} /> {t("onb_perm_denied")}</div>
+              )}
+              {permSlowHere && <div style={S.backendDesc}>{t("onb_err_perms_no_prompt")}</div>}
+              <button style={S.btnPrimary} disabled={permBusy} onClick={() => void grantMissing()}>
+                {permBusy ? <Loader2 size={16} className="spin" /> : <Key size={16} />} {t("onb_perm_grant")}
+              </button>
+            </>
+          )}
+          {permissionPhase === "done" && (
+            <>
+              <div style={{ ...S.featureRow, marginBottom: 18 }}>
+                <CheckCircle2 size={16} color="var(--success)" /> {t("onb_perm_granted")}
+              </div>
+              <button style={S.btnPrimary} onClick={() => window.close()}>
+                {t("common_close")} <ArrowRight size={16} />
+              </button>
+              <button style={{ ...S.btnSecondary, marginTop: 8, width: "100%", justifyContent: "center" }}
+                onClick={() => browser.runtime.openOptionsPage()}>{t("common_open_settings")}</button>
+            </>
+          )}
+          {/* An update is exactly when someone may be restoring a backup: keep the same
+              option on THIS first page too, instead of sending them into Settings. */}
+          <button style={{ ...S.btnSecondary, marginTop: 12, width: "100%", justifyContent: "center" }}
+            disabled={importing} onClick={() => importRef.current?.click()}>
+            {importing && <Loader2 size={14} className="spin" />}
+            {t("onb_import_button")}
+          </button>
+          {importError && <div style={{ ...S.errorRow, marginTop: 8 }}><XCircle size={12} /> {importError}</div>}
+        </div>
+      )}
+
+      {/* ── Backup restored, no setup needed ── */}
+      {step === "imported" && (
+        <div style={{ ...S.card, textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+          <h1 style={S.h1}>{t("onb_import_done_title")}</h1>
+          <p style={S.subtitle}>{t("onb_import_done_desc")}</p>
+          <button style={S.btnPrimary} onClick={() => browser.runtime.openOptionsPage()}>
+            {t("common_open_settings")} <ArrowRight size={16} />
+          </button>
+          <button style={{ ...S.btnSecondary, marginTop: 8, width: "100%", justifyContent: "center" }}
+            onClick={() => window.close()}>{t("common_close")}</button>
         </div>
       )}
     </div>

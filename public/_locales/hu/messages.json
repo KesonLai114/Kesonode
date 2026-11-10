@@ -22,7 +22,7 @@
     "message": "hu"
   },
   "extension_name": {
-    "message": "Kesonode | Privát könyvjelző- és lapszinkron"
+    "message": "Kesonode | Privát könyvjelző- és lapszinkron v1.5.10"
   },
   "extension_description": {
     "message": "Adatvédelem-központú böngésző-szinkronizálás a saját tárhelyedre: Google Drive, WebDAV, GitHub."
@@ -835,7 +835,7 @@
     "message": "Eszköz neve"
   },
   "opt_device_name_desc": {
-    "message": "Így jelenik meg ez az eszköz a szinkronizálási naplókban."
+    "message": "How this device appears in sync logs and on your other devices. Browsers do not let extensions read the computer's own name, so set it yourself (e.g. Mac mini M4pro)."
   },
   "opt_device_name_placeholder": {
     "message": "A laptopom"
@@ -1738,5 +1738,138 @@
   },
   "opt_guard_cap_desc": {
     "message": "Egy ciklus akkor számít nagy változásnak, ha ennél több könyvjelző változik meg benne, vagy a fa 30%-a — a nagyobbik érték számít. Növelje, ha rendszeresen importál vagy rendez át nagy mappákat."
+  },
+  "opt_cfg_import_auth": {
+    "message": "The imported config points at the WebDAV server $HOST$, but Kesonode has no permission to reach it yet. Grant access now, or syncing will fail with \"Failed to fetch\".",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_auth_btn": {
+    "message": "Grant access"
+  },
+  "opt_cfg_import_auth_err": {
+    "message": "The browser refused the request. Grant the host permission for $HOST$ from your browser's extension settings, then sync again.",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "onb_welcome_device_name": {
+    "message": "Name this device"
+  },
+  "onb_welcome_device_hint": {
+    "message": "Browsers do not let extensions read your computer's name, so the automatic label is only a generic one. Enter a name you will recognise on your other devices, for example Mac mini M4pro."
+  },
+  "onb_import_title": {
+    "message": "Already have a backup?"
+  },
+  "onb_import_desc": {
+    "message": "Import a configuration backup you exported earlier to restore sync settings without filling in the wizard again."
+  },
+  "onb_import_button": {
+    "message": "Choose a backup file and import"
+  },
+  "onb_import_busy": {
+    "message": "Importing…"
+  },
+  "onb_import_done_title": {
+    "message": "Configuration imported"
+  },
+  "onb_import_done_desc": {
+    "message": "Your sync settings are restored. If this version needs new permissions, grant them in the next step."
+  },
+  "onb_import_failed": {
+    "message": "Import failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "Invalid backup file"
+      }
+    }
+  },
+  "onb_perm_title": {
+    "message": "This update needs your permission again"
+  },
+  "onb_perm_desc": {
+    "message": "After an update these permissions must be confirmed before sync can continue. Click the button and your browser will show the permission prompt."
+  },
+  "onb_perm_grant": {
+    "message": "Grant permissions"
+  },
+  "onb_perm_granted": {
+    "message": "Permissions granted. Sync can continue."
+  },
+  "onb_perm_denied": {
+    "message": "Permission was not granted. You can allow it in the browser's extension settings, or try again."
+  },
+  "onb_perm_checking": {
+    "message": "Checking permissions…"
+  },
+  "import_confirm_overwrite": {
+    "message": "Import this configuration file? It will overwrite your current settings."
+  },
+  "import_confirm_new_device": {
+    "message": "Is this backup from another device or browser?\n\n[OK] Import as a new device: generate a fresh device ID and default name (recommended)\n[Cancel] Restore this machine's identity: keep the backup's device ID and name (for an upgrade or reinstall of the same machine)"
+  },
+  "import_risk_header": {
+    "message": "This file will make the following sensitive changes:\n$LIST$\n\nImport it anyway?",
+    "placeholders": {
+      "list": {
+        "content": "$1",
+        "example": "Turns off end-to-end encryption"
+      }
+    }
+  },
+  "import_risk_disables_e2ee": {
+    "message": "Turns off end-to-end encryption (data is then uploaded in plaintext)"
+  },
+  "import_risk_changes_backend": {
+    "message": "Changes the sync backend (it may point at another server)"
+  },
+  "import_risk_has_credentials": {
+    "message": "Contains plaintext backend credentials (WebDAV password / GitHub token)"
+  },
+  "import_risk_has_gdrive_session": {
+    "message": "Contains a Google Drive sign-in token"
+  },
+  "opt_first_sync_head": {
+    "message": "Első szinkronizálás: irány választása"
+  },
+  "opt_first_sync_head_sub": {
+    "message": "Ha ebben a böngészőben és a többi eszközön is vannak már könyvjelzők, előbb döntsd el, melyik legyen a meghatározó. Itt később bármikor újra választhatsz."
+  },
+  "opt_first_sync_pending": {
+    "message": "A szinkronizálás szünetel, amíg nem választasz. A többi eszköznek már vannak könyvjelzői a tárolóban."
+  },
+  "opt_first_sync_merge": {
+    "message": "Összefésülés (ajánlott)"
+  },
+  "opt_first_sync_merge_desc": {
+    "message": "Megtartja a böngésző könyvjelzőit, és hozzáadja a többi eszközét. Az eredmény a kettő uniója; semmi nem törlődik."
+  },
+  "opt_first_sync_remote": {
+    "message": "A tárolóbeli példány használata"
+  },
+  "opt_first_sync_remote_desc": {
+    "message": "Törli a böngésző könyvjelzőit, és a legfrissebb másik eszközéből építi újra. Előtte visszaállítási pont készül, de az csak itt meglévő könyvjelzők elvesznek."
+  },
+  "opt_first_sync_local": {
+    "message": "A böngésző példányának használata"
+  },
+  "opt_first_sync_local_desc": {
+    "message": "Törli a többi eszköz könyvjelzőfájljait a tárolóból, így csak ez a fa marad. Előbb zárd be a Kesonode-ot a többi eszközön, különben újra feltöltik a sajátjukat."
+  },
+  "opt_first_sync_busy": {
+    "message": "Folyamatban…"
+  },
+  "popup_first_sync_notice": {
+    "message": "Első szinkronizálás: válaszd ki a könyvjelzők összefésülését"
+  },
+  "popup_first_sync_cta": {
+    "message": "Választás"
   }
 }

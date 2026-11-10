@@ -6,6 +6,7 @@ import type {
   PeerRemovalRecord,
   DataType,
   SyncPacket,
+  FirstSyncChoice,
   FolderDeleteRecord,
   FolderMoveRecord,
   FolderRenameRecord,
@@ -55,6 +56,9 @@ export function detectDeviceName(): string {
   let browser = "";
   if ((navigator as any).brave) browser = " · Brave";
   else if (ua.includes("Edg/")) browser = " · Edge";
+  // QuarkPC sends Chrome's user agent plus its own token. Without this it reads
+  // "Chromium" on a machine its owner calls 夸克浏览器 (field report, 2026-11-08).
+  else if (ua.includes("QuarkPC/")) browser = " · 夸克浏览器";
   // "Chrome/" is in every Chromium build's user agent, Helium's, Vivaldi's and
   // ungoogled-chromium's included, so it proves the engine and nothing more. Calling that
   // Chrome named a fresh Helium "Linux · Chrome" (2026-11-05).
@@ -62,6 +66,28 @@ export function detectDeviceName(): string {
   else if (ua.includes("Firefox")) browser = " · Firefox";
 
   return `${os}${browser}`;
+}
+
+/** First 8 hex chars of a device id: enough to tell two installs apart, adds no data
+ *  about the machine beyond the random id the extension already mints for itself. */
+export function shortDeviceId(deviceId: string | undefined): string {
+  return (deviceId ?? "").replace(/-/g, "").slice(0, 8);
+}
+
+/**
+ * Default label for a freshly minted device identity: `<OS> · <browser> · <short id>`.
+ *
+ * OS + browser alone is identical on two identical machines and on two profiles of one
+ * browser, so the device list (and every restore point named after it) could not say
+ * which one it was looking at. The short id makes the label unique without recording
+ * a version, a hostname, a hardware id or an install id — nothing beyond the random
+ * device id Kesonode already needs for its file names. A name the user typed is never
+ * overwritten by this.
+ */
+export function defaultDeviceLabel(deviceId: string): string {
+  const short = shortDeviceId(deviceId);
+  const readable = detectDeviceName();
+  return short ? `${readable} · ${short}` : readable;
 }
 
 // ─── Default Settings ──────────────────────────────────────────────────────
@@ -134,6 +160,14 @@ export const KEYS = {
   // read. Kept only so the one-time migration in sync/snapshots.ts can drain the
   // counts this device recorded before dropping the key.
   LEGACY_SNAPSHOTS: "konode_bm_snapshots",
+  // Device-local copy of the annotations for restore points THIS install created or
+  // renamed. A rate-limited WebDAV server can refuse the shared index for hours; the
+  // copy keeps names, counts and device info visible here without ever writing a file
+  // we could not read. Never exported to the backend.
+  SNAPSHOT_LOCAL: "konode_snap_local",
+  // "Keep forever" requests the storage refused (Nutstore 403). Retried as soon as the
+  // backend answers again. Device-local only; never published in a SyncPacket.
+  SNAPSHOT_PENDING_PIN: "konode_snap_pending_pin",
   HIST_IMPORTED: "konode_hist_imported",
   HIST_REJECTED: "konode_hist_rejected",
   HIST_VISITTIME_OK: "konode_hist_visittime_ok",
@@ -146,6 +180,10 @@ export const KEYS = {
   RECOVERY_SNAPSHOT: "konode_recovery_snap",
   BULK_DELETE_APPROVAL: "konode_bulk_delete_ok",
   LIST_FAILURE_NOTED: "konode_list_fail_noted",
+  // Per-install first-sync decision. Deliberately NOT part of SettingsBackup: a device
+  // restored from another browser's config MUST make its own choice, not inherit one.
+  // Never travels in a SyncPacket.
+  FIRST_SYNC: "konode_first_sync",
   // Local change guard (lib/sync/change-guard.ts): the last bookmark tree this device
   // published, and a once-per-incident latch for its restore point. Both are per-install
   // working state and never travel in a SyncPacket.
@@ -155,6 +193,9 @@ export const KEYS = {
   // Set by the popup, read there; the guard itself never touches it.
   GUARD_WARNED: "konode_guard_warned",
   SYNC_LOCK: "konode_sync_lock",
+  // Automatic sync is parked until this timestamp after the storage meters us (429, or
+  // Nutstore's 403). Device-local working state only; never travels in a SyncPacket.
+  SYNC_COOLDOWN_UNTIL: "konode_sync_cooldown_until",
   GDRIVE_SESSION: "konode_gdrive_session",
   GDRIVE_FOLDER: "konode_gdrive_folder",
   ONBOARDING_DRAFT: "konode_onboarding_draft",
@@ -258,7 +299,17 @@ export async function getSettings(): Promise<SyncSettings> {
   if (stored.device_id) return ensureActiveBackendConfig({ ...DEFAULT_SETTINGS, ...stored });
   const settled = await updateKey<Partial<SyncSettings>>(
     KEYS.SETTINGS,
-    (cur) => (cur.device_id ? cur : { ...cur, device_id: crypto.randomUUID() }),
+    (cur) => {
+      if (cur.device_id) return cur;
+      const device_id = crypto.randomUUID();
+      // Keep a label the user already chose; otherwise give this identity a default
+      // that cannot collide with another machine of the same make.
+      return {
+        ...cur,
+        device_id,
+        device_label: cur.device_label?.trim() || defaultDeviceLabel(device_id),
+      };
+    },
     {}
   );
   return ensureActiveBackendConfig({ ...DEFAULT_SETTINGS, ...settled });
@@ -475,7 +526,18 @@ async function readBackup(input: unknown): Promise<SettingsBackup> {
   return doc as unknown as SettingsBackup;
 }
 
-export async function importSettingsBackup(input: unknown): Promise<SyncSettings> {
+export interface ImportSettingsOptions {
+  /**
+   * The file came from a DIFFERENT browser or device. Mint a fresh identity instead of
+   * copying the old one. Left false (the historical behaviour) only for restoring the
+   * SAME device after an extension-ID change or a reinstall.
+   */
+  asNewDevice?: boolean;
+}
+
+export async function importSettingsBackup(
+  input: unknown, options: ImportSettingsOptions = {},
+): Promise<SyncSettings> {
   const backup = await readBackup(input);
   const raw = backup.keys.settings as unknown as Record<string, unknown>;
   const defaults = DEFAULT_SETTINGS as unknown as Record<string, unknown>;
@@ -503,6 +565,18 @@ export async function importSettingsBackup(input: unknown): Promise<SyncSettings
   // An imported configuration is by definition already set up. Without this the wizard
   // would open on top of restored accounts and ask for them a second time.
   partial.onboarding_completed = true;
+
+  // device_id names this install's `konode_<type>_<device_id>.json` files in the shared
+  // backend. Copying a config to another browser must NOT copy the id: both installs
+  // would then write the same file, each overwriting the other's upload, and the device
+  // list would show them as one device. Mint a new id and a label derived from THIS
+  // browser, while leaving every account, token, passphrase and preference untouched.
+  // The same-device upgrade/reinstall path opts out with { asNewDevice: false }.
+  if (options.asNewDevice) {
+    const device_id = crypto.randomUUID();
+    partial.device_id = device_id;
+    partial.device_label = defaultDeviceLabel(device_id);
+  }
 
   const updated = await saveSettings(partial as Partial<SyncSettings>);
 
@@ -571,6 +645,28 @@ export async function setState(partial: Partial<SyncState>): Promise<SyncState> 
   const next = { ...current, ...partial };
   await set(KEYS.STATE, next);
   return next;
+}
+
+// ─── First-sync direction ─────────────────────────────────────────────────
+
+/**
+ * Whether this install has already answered the "which side wins" question, and what it
+ * chose. Per-install working state: it is NOT in SETTINGS_BACKUP_KEYS, so importing a
+ * config from another browser leaves a fresh install undecided, which is exactly the
+ * point — that device has its own bookmarks and its own decision to make.
+ */
+export interface FirstSyncRecord {
+  done: boolean;
+  choice?: FirstSyncChoice;
+  at?: string;
+}
+
+export async function getFirstSync(): Promise<FirstSyncRecord | null> {
+  return get<FirstSyncRecord | null>(KEYS.FIRST_SYNC, null);
+}
+
+export async function setFirstSync(record: FirstSyncRecord): Promise<void> {
+  await set(KEYS.FIRST_SYNC, record);
 }
 
 // ─── Audit Log ─────────────────────────────────────────────────────────────
@@ -1090,6 +1186,36 @@ export async function setListFailureNoted(noted: boolean): Promise<void> {
 // which only guards within a single worker instance). A stale lock (older than the
 // TTL) is ignored, so a crashed sync self-heals rather than blocking forever.
 
+// ─── Rate-limit cooldown ────────────────────────────────────────────────────
+
+/**
+ * How long automatic sync stays parked after a storage meters us.
+ *
+ * Nutstore counts 600 WebDAV requests per 30 minutes across EVERY app on the account
+ * and answers 403 once the window is gone. Polling every minute through that window
+ * spends the next window before it opens, so the advice to "wait for the window to
+ * pass" could never actually work (QuarkPC field report, 2026-11-08). One window is
+ * enough: the first cycle after it expires tries again, and "Sync now" is never gated.
+ */
+export const SYNC_COOLDOWN_MS = 30 * 60 * 1000;
+
+/** Milliseconds left in the cooldown; 0 when there is none or it has passed. */
+export async function syncCooldownRemaining(now = Date.now()): Promise<number> {
+  const until = await get<number>(KEYS.SYNC_COOLDOWN_UNTIL, 0);
+  return Math.max(0, until - now);
+}
+
+/** Start a cooldown without extending one that is already running. */
+export async function startSyncCooldown(now = Date.now()): Promise<boolean> {
+  if (await syncCooldownRemaining(now) > 0) return false;
+  await set(KEYS.SYNC_COOLDOWN_UNTIL, now + SYNC_COOLDOWN_MS);
+  return true;
+}
+
+export async function clearSyncCooldown(): Promise<void> {
+  await set(KEYS.SYNC_COOLDOWN_UNTIL, 0);
+}
+
 export async function acquireSyncLock(ttlMs: number): Promise<boolean> {
   const now = Date.now();
   const lockedAt = await get<number>(KEYS.SYNC_LOCK, 0);
@@ -1329,6 +1455,37 @@ export async function setLastUploadChecksum(dataType: DataType, checksum: string
  */
 export async function clearUploadChecksums(): Promise<void> {
   await browser.storage.local.remove(KEYS.UPLOAD_CHECKSUMS);
+}
+
+/**
+ * Forget everything the bookmark MERGE has learned locally, after the user replaced the
+ * whole tree with a peer's ("sync direction → use the remote copy").
+ *
+ * `importBookmarks(..., "replace")` folds the peer's tombstones/moves/rename logs into
+ * this device BEFORE clearing the tree. Leaving those behind would make the very next
+ * merge apply the peer's old deletions and moves to the tree we just imported, so
+ * "use the remote copy" would quietly not be the remote copy. These keys are all
+ * reconstructible working state; the next sync rebuilds what it needs.
+ */
+export async function resetBookmarkMergeState(): Promise<void> {
+  await browser.storage.local.remove([
+    KEYS.BOOKMARK_CACHE,
+    KEYS.BOOKMARK_TOMBSTONES,
+    KEYS.BOOKMARK_MOVES,
+    KEYS.BOOKMARK_FOLDER_MOVES,
+    KEYS.BOOKMARK_TITLES,
+    KEYS.BOOKMARK_FOLDER_RENAMES,
+    KEYS.BOOKMARK_FOLDER_DELETES,
+    KEYS.BOOKMARK_APPEARED,
+    KEYS.BOOKMARK_KEPT_SHELLS,
+    KEYS.BOOKMARK_CREATED,
+    KEYS.BOOKMARK_PEER_REMOVED,
+    KEYS.GUARD_STATE,
+    KEYS.GUARD_SNAPSHOT,
+    KEYS.RESOLVED_CONFLICTS,
+    KEYS.CONFLICT_PACKETS,
+    KEYS.UPLOAD_CHECKSUMS,
+  ]);
 }
 
 // ─── Pending-conflict packets (parked OUTSIDE konode_state) ─────────────────

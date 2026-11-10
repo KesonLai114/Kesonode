@@ -2,7 +2,16 @@
 
 /** Error carrying an HTTP status so retry logic can tell transient from terminal. */
 export class HttpError extends Error {
-  constructor(public readonly status: number, message?: string) {
+  /**
+   * The server is metering us, not refusing this one request: a 429 anywhere, or
+   * Nutstore's 403 standing in for one. Automatic sync parks itself for a whole
+   * window when it sees this, instead of spending the next window's quota too.
+   */
+  constructor(
+    public readonly status: number,
+    message?: string,
+    public readonly rateLimited = false,
+  ) {
     super(message ?? `HTTP ${status}`);
     this.name = "HttpError";
   }
@@ -83,6 +92,19 @@ export async function withRetry<T>(
   }
 
   throw lastError;
+}
+
+/**
+ * One short extra attempt for a SINGLE peer-file GET.
+ *
+ * The listing already has its own full retry (withRetry around downloadAll), but a peer
+ * file that answered 503 used to be dropped on the first try, and the sync still reported
+ * success. A 503 from a NAS or a metered WebDAV is often a one-off; retrying just this
+ * file costs a fraction of a second and does not re-run the whole listing. Terminal
+ * statuses (401/403/404) are not retried — defaultShouldRetry already excludes them.
+ */
+export function withPeerRetry<T>(fn: () => Promise<T>): Promise<T> {
+  return withRetry(fn, { maxAttempts: 2, baseDelayMs: 200, maxDelayMs: 500, jitter: false });
 }
 
 export function sleep(ms: number): Promise<void> {

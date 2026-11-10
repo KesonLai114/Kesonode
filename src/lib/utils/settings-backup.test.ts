@@ -95,6 +95,29 @@ describe("settings backup", () => {
     expect(lock).toBeUndefined();
   });
 
+  it("importing onto a DIFFERENT device mints a new identity but keeps every account", async () => {
+    await seedOldInstall();
+    const file = JSON.parse(JSON.stringify(await exportSettingsBackup("1.5.2")));
+    await browser.storage.local.clear();
+
+    const restored = await importSettingsBackup(file, { asNewDevice: true });
+
+    // Two browsers writing konode_<type>_<the same id>.json would overwrite one
+    // another and appear as a single device in the device list.
+    expect(restored.device_id).not.toBe("device-from-old-id");
+    expect(restored.device_id).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(restored.device_label).not.toBe("Old laptop");
+    expect(restored.device_label).toMatch(/ · [0-9a-f]{8}$/);
+    // Configuration, credentials and the setup flag are unaffected by the new identity.
+    expect(restored.active_backend).toBe("webdav");
+    expect(restored.backends[0].webdav?.password).toBe("secret");
+    expect(restored.encryption_passphrase).toBe("correct horse battery staple");
+    expect(restored.compat_mode).toBe("isolated");
+    expect(restored.onboarding_completed).toBe(true);
+    const session = (await browser.storage.local.get(KEYS.GDRIVE_SESSION))[KEYS.GDRIVE_SESSION];
+    expect(session.refresh_token).toBe("refresh");
+  });
+
   it("refuses a foreign file, a future version, and one with no device ID", async () => {
     await expect(importSettingsBackup(null)).rejects.toThrow();
     await expect(importSettingsBackup({ version: "1.0", data: {} })).rejects.toThrow();

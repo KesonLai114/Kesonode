@@ -4,6 +4,38 @@ Common issues and how to fix them. This fork is distributed locally and has no i
 tracker of its own; when asking for help elsewhere, include your browser, the backend
 you use, the compatibility mode under Settings → Advanced, and what you saw.
 
+## Loading the extension
+
+**The extension page shows `Unexpected token 'export'`, or a wall of minified
+`lucide-react` code, and the popup / options page is blank.**
+
+That text is not the error message — it is the source line the browser choked on:
+`chunks/puzzle-*.js`, an ES module. It fails when a module is executed as a classic
+script, which happens when HTML from one build is mixed with chunks from another.
+The usual cause is extracting a newer zip **over** the folder the old version is
+loaded from. Vite content-hashes chunk filenames, so unzipping adds the new files
+but never removes the old ones; the folder ends up holding two builds at once.
+
+Fix it on the browser side (the build itself is fine):
+
+1. Remove the extension in `chrome://extensions` / `about:debugging`.
+2. Delete the whole extracted folder — do not unzip on top of it.
+3. Extract the new zip into a **brand-new** folder and load that folder.
+4. Click ↻ on the extension card so the MV3 service worker is replaced.
+
+From 1.5.3 on the extension ID is pinned by the manifest `key`, so a new folder does
+NOT lose settings. Overwriting the old folder was needed only for the one-time
+1.5.1 → 1.5.2 migration. If a clean install still fails, note the *first* line of the
+error and which surface shows it (popup, options, or the extension list) — that is
+what distinguishes a stale install from a genuine module-loading bug.
+
+**The version shown in the extension list is older than the zip's filename.** The zip
+name comes from `package.json` while the manifest inside is copied from `dist/`.
+Early 1.5.5 packages were built from a stale `dist/` and contained a 1.5.4 manifest,
+so fixes made in source were not actually in them. Packaging now refuses to produce
+such a zip; rebuild with `npm run package:source:pinned` and check that the version
+inside the extracted `manifest.json` matches the filename.
+
 ## Sync
 
 **Changes take a while to show up on my other device.**

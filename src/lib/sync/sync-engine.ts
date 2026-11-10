@@ -1,9 +1,9 @@
 import type { SyncSettings, SyncState, DataType, SyncPacket, SyncSession, SyncExtension, ConflictItem, BackendConfig,
-  DeviceInfo, DeviceBrowser, ConflictDiff, ListedFile, BookmarkPayload,
+  DeviceInfo, DeviceBrowser, ConflictDiff, ListedFile, BookmarkPayload, FirstSyncChoice,
 } from "@/lib/types";
 import { createBackend } from "@/lib/backends/abstract-backend";
 import { normalizeRepoSlug } from "@/lib/backends/github-backend";
-import { createSnapshot as writeSnapshot, listSnapshots as readSnapshots, restoreSnapshot as applySnapshot, deleteSnapshot as dropSnapshot, renameSnapshot as renameSnapshotFile, setSnapshotPinned as pinSnapshotFile, type SnapshotMeta, type CreateSnapshotOptions } from "@/lib/sync/snapshots";
+import { createSnapshot as writeSnapshot, listSnapshots as readSnapshots, restoreSnapshot as applySnapshot, deleteSnapshot as dropSnapshot, renameSnapshot as renameSnapshotFile, setSnapshotPinned as pinSnapshotFile, flushPendingPins, type SnapshotMeta, type CreateSnapshotOptions } from "@/lib/sync/snapshots";
 import {
   bookmarkContent, exportBookmarkPayload, importBookmarks, peerTreeAsMerged, type BulkDeleteBlock,
 } from "@/lib/handlers/bookmarks-handler";
@@ -13,6 +13,7 @@ import { exportHistory, importHistory, buildLocalHistoryIndex } from "@/lib/hand
 import { exportExtensions } from "@/lib/handlers/extensions-handler";
 import { dataTypeAvailability, unsupportedReason, hasPermission } from "@/lib/utils/capabilities";
 import { detectBrowser, readDeviceBrowser } from "@/lib/utils/browser-identity";
+import { readPeerLabels, rememberPeerLabels } from "@/lib/utils/peer-labels";
 import { HttpError, rateLimitMessage } from "@/lib/utils/retry";
 import {
   getState,
@@ -39,9 +40,16 @@ import {
   setGuardSnapshotTaken,
   acquireSyncLock,
   releaseSyncLock,
+  syncCooldownRemaining,
+  startSyncCooldown,
+  clearSyncCooldown,
+  SYNC_COOLDOWN_MS,
   dropRemoteDevice,
   getRemoteDeviceIds,
   dropRemoteDevices,
+  getFirstSync,
+  setFirstSync,
+  resetBookmarkMergeState,
 } from "@/lib/utils/storage";
 import { logger } from "@/lib/utils/logger";
 import { noteCleanSync } from "@/lib/rate-prompt";
@@ -56,10 +64,11 @@ import {
   listPrefixes,
   packetFileName,
   peerDeviceIdFromName,
+  isPeerFileName,
   readPrefixes,
   setCompatMode,
 } from "@/lib/compat/protocol";
-import { ConflictResolver, notifyConflict, orderPeersByTime } from "./conflict-resolver";
+import { ConflictResolver, notifyConflict, notifyFirstSync, orderPeersByTime } from "./conflict-resolver";
 import { evaluateLocalDrift, GUARD_ABSOLUTE_FLOOR } from "./change-guard";
 
 // How long the persisted sync lock stays valid before it's treated as stale, so a
@@ -173,7 +182,8 @@ export class EncryptionMismatchError extends Error {
  * `ran` covers a sync that failed too: the failure is recorded in the state, which is a
  * different thing from never having started.
  */
-export type SyncOutcome = "ran" | "no-backend" | "already-running" | "nothing-enabled";
+export type SyncOutcome = "ran" | "no-backend" | "already-running" | "nothing-enabled" | "cooling-down"
+  | "first-sync-pending";
 
 /**
  * The status a finished sync should report. `sync()` used to hard-code
@@ -295,6 +305,15 @@ export class SyncEngine {
    * kind of failure actually means.
    */
   private failedTypes = new Set<DataType>();
+  /**
+   * Types already warned about for a missing optional permission. The condition lasts
+   * until the user grants it, so warning every cycle only grew the log's ×N counter
+   * (×1276 over one night in a QuarkPC field report) and rewrote the same error. One
+   * warning per incident, cleared as soon as the type is usable again.
+   */
+  private permissionWarned = new Set<DataType>();
+  // The storage metered us this cycle; a clean cycle must not clear the cooldown it set.
+  private rateLimitedThisSync = false;
   // Bytes moved over the wire this sync (peer payloads pulled + our packets pushed),
   // accumulated across data types and folded into the cumulative `bytes_transferred`
   // stat at the end. Reset per sync so it's a per-run tally, not a running double-count.
@@ -424,7 +443,7 @@ export class SyncEngine {
 
   // ─── Main Entry Point ─────────────────────────────────────────────────
 
-  async sync(types?: DataType[]): Promise<SyncOutcome> {
+  async sync(types?: DataType[], options: { force?: boolean } = {}): Promise<SyncOutcome> {
     if (this.isSyncing) {
       logger.warn("SyncEngine", "Already syncing, skipping");
       return "already-running";
@@ -434,6 +453,19 @@ export class SyncEngine {
     // (It used to be set only after `await acquireSyncLock`, leaving that window
     // open.) Reset on every early return below so a no-op sync doesn't wedge it on.
     this.isSyncing = true;
+
+    // A metered server keeps refusing requests for a whole window (Nutstore: 30 min),
+    // so polling every minute through it spends the NEXT window before it opens and
+    // "wait for the window to pass" can never work. Only automatic sync is parked:
+    // "Sync now" passes force and always runs.
+    if (!options.force) {
+      const remaining = await syncCooldownRemaining();
+      if (remaining > 0) {
+        logger.info("SyncEngine", `Automatic sync paused for another ${Math.ceil(remaining / 60000)} min after a rate limit`);
+        this.isSyncing = false;
+        return "cooling-down";
+      }
+    }
 
     if (!this.settings.active_backend) {
       // Console only. This is every device before setup finishes, with the alarm already
@@ -498,6 +530,7 @@ export class SyncEngine {
     // factory over a config we just found in settings, so the window holds no await at all.
     this.encryptionWarnings.clear();
     this.failedTypes.clear();
+    this.rateLimitedThisSync = false;
     this.bytesThisSync = 0;
     this.peersThisSync.clear();
     this.bulkBlockedThisSync = null;
@@ -518,6 +551,30 @@ export class SyncEngine {
       this.onStateChange(state);
 
       await backend.connect();
+
+      // Ask BEFORE anything is merged or published. A device that already has its own
+      // bookmarks must not have a peer's tree folded in (or its own tree published) until
+      // the user says which side wins. Inside the try, so the lock is always given back;
+      // idempotent, so the next alarm does not rewrite the state and wake the popup again.
+      const firstSyncPeers = await this.detectFirstSync(backend, typesToSync).catch((err) => {
+        // The question is an addition to syncing, not a precondition for it: a probe
+        // that cannot run must fall through to the ordinary merge, never fail a cycle.
+        logger.info("FirstSync", `Direction check could not run, continuing with the normal merge: ${err instanceof Error ? err.message : err}`);
+        return null;
+      });
+      if (firstSyncPeers !== null) {
+        const prev = await getState();
+        if (!prev.first_sync_pending) {
+          const pending = await setState({
+            status: "idle",
+            first_sync_pending: { at: new Date().toISOString(), peer_count: firstSyncPeers },
+          });
+          this.onStateChange(pending);
+          if (this.settings.notifications_enabled) notifyFirstSync();
+          logger.event("FirstSync", `Waiting for a sync direction: this device has bookmarks and ${firstSyncPeers} peer(s) already have some`);
+        }
+        return "first-sync-pending";
+      }
 
       const typeErrors = await this.syncAllTypes(typesToSync, backend, state);
 
@@ -542,6 +599,17 @@ export class SyncEngine {
       // Each distinct message once. The encryption ones are kept per peer but name no
       // device, so a folder with two encrypted peers printed the same sentence twice.
       const problems = [...new Set([...this.encryptionWarnings.values(), ...typeErrors])];
+
+      // A backend deliberately skips a peer whose file it cannot read (one bad file must
+      // not stop the whole merge), but that used to look like a CLEAN sync: we published
+      // our own packet and reported success with fewer devices than the folder holds —
+      // the exact "both browsers mind their own business" report. Surface it as an error.
+      const unreadable = [...new Set(backend.failedPeers ?? [])];
+      if (unreadable.length) {
+        problems.push(
+          `Couldn't read ${unreadable.length} device file(s) from the storage (${unreadable.slice(0, 2).join(", ")}${unreadable.length > 2 ? ", …" : ""}). Their data was NOT merged this sync — check that the storage is reachable; Settings → Activity shows the HTTP status for each file.`
+        );
+      }
       const prevState = await getState();
       // Drop a queued conflict for a type that cannot have one. Before CONFLICTABLE_TYPES
       // narrowed the gate, sessions and extensions went through it like bookmarks, so a
@@ -577,12 +645,23 @@ export class SyncEngine {
       });
       this.onStateChange(newState);
       logger.info("SyncEngine", problems.length ? `Sync complete with ${problems.length} problem(s)` : "Sync complete");
+      // A cycle that got through unmetered means the window has passed, so automatic
+      // sync resumes on its normal interval right away instead of waiting out the rest.
+      if (!this.rateLimitedThisSync) await clearSyncCooldown();
+      // A "keep forever" the storage refused during a 403 window gets its file renamed
+      // on the first cycle that reaches the backend again, without waiting for Settings.
+      try {
+        await flushPendingPins(backend, this.settings);
+      } catch (e) {
+        logger.warn("SyncEngine", `Could not finish queued restore-point renames: ${e instanceof Error ? e.message : e}`);
+      }
       // `noteCleanSync` never throws, so it cannot turn this sync into a failed one.
       if (!this.rateCountDone && newState.status === "success" && !recovery && !guardNotice && this.peersThisSync.size > 0) {
         this.rateCountDone = await noteCleanSync();
       }
 
     } catch (err) {
+      await this.noteRateLimit(err);
       const msg = await explainSyncFailure(err, backendConfig);
       // No `failed_types` here on purpose, cleared rather than collected: a sync that died
       // before or around the per-type loop (the backend refused, the config is gone) has
@@ -599,6 +678,21 @@ export class SyncEngine {
     // Reached whether the sync succeeded or was recorded as an error — either way it
     // ran, which is what the caller needs to distinguish from bailing at the door.
     return "ran";
+  }
+
+  /**
+   * Park automatic sync for one window when the storage meters us.
+   *
+   * A 429, or Nutstore's 403 standing in for one, means the server will keep refusing
+   * until its window rolls over. Retrying every minute spends that window's quota too,
+   * which is why the advice to "wait for the window to pass" never worked. One notice
+   * per cooldown, and a manual "Sync now" is never gated.
+   */
+  private async noteRateLimit(err: unknown): Promise<void> {
+    if (!(err instanceof HttpError) || (err.status !== 429 && !err.rateLimited)) return;
+    this.rateLimitedThisSync = true;
+    if (!(await startSyncCooldown())) return;
+    logger.warn("SyncEngine", `Automatic sync paused for ${SYNC_COOLDOWN_MS / 60000} minutes: the storage is refusing requests for a rate-limit window. "Sync now" still works; raise Sync interval in Settings → Device so the next window stays clear.`);
   }
 
   /**
@@ -668,11 +762,21 @@ export class SyncEngine {
     const runnable: DataType[] = [];
     for (const t of types) {
       const state = await dataTypeAvailability(t);
-      if (state.state === "ready") runnable.push(t);
-      else if (state.state === "unsupported") logger.info("SyncEngine", `Skipping ${t}: ${unsupportedReason(t)}`);
-      else {
-        const msg = `${t}: Kesonode doesn't have the "${state.permission}" permission any more, so this can't sync. Open Settings, Data Types, and switch it off and on again to restore it.`;
-        logger.warn("SyncEngine", msg);
+      if (state.state === "ready") {
+        this.permissionWarned.delete(t);
+        runnable.push(t);
+      } else if (state.state === "unsupported") {
+        this.permissionWarned.delete(t);
+        logger.info("SyncEngine", `Skipping ${t}: ${unsupportedReason(t)}`);
+      } else {
+        // "any more" was a guess: on QuarkPC the permission was never granted at all,
+        // and no amount of toggling produced a prompt. Name the button that re-asks,
+        // and warn ONCE per incident rather than every minute for as long as it lasts.
+        const msg = `${t}: Kesonode doesn't have the "${state.permission}" permission, so this can't sync. Open Settings → Data Types and press "Grant access"; if no prompt appears, grant it in your browser's extension settings.`;
+        if (!this.permissionWarned.has(t)) {
+          this.permissionWarned.add(t);
+          logger.warn("SyncEngine", msg);
+        }
         errors.push(msg);
         this.failedTypes.add(t);
       }
@@ -683,6 +787,7 @@ export class SyncEngine {
       try {
         await this.syncType(dataType, backend, state);
       } catch (err) {
+        await this.noteRateLimit(err);
         // syncType already logged it — just collect the message.
         // A rate limit is said without the type: it is one fact about the storage, so every
         // type hitting it folds into a single sentence instead of one per type.
@@ -924,6 +1029,11 @@ export class SyncEngine {
     const cfg = this.activeBackendConfig();
     if (!cfg) return [];
     return this.withBackend(async (b) => {
+      // Names learned from packets this device has already downloaded. A packet we can
+      // read now wins; the cache is only there for a failed read or an old packet that
+      // never carried a name.
+      const known = await readPeerLabels();
+      const learned: { device_id: string; device_label: string }[] = [];
       // Where the listing carries modification times, a device's last upload is the newest of
       // them across its files (#30). The packet read below still names the device, but its
       // timestamp is only the date of whichever file was cheapest to read, and an extension
@@ -976,19 +1086,30 @@ export class SyncEngine {
             const raw = await b.getFile(name);
             if (raw === null) {
               // The listing named this file a moment ago, so a null here is a real fetch
-              // problem, not an old peer. Without saying so, an unreadable file and a
-              // pre-name build look identical: both just show up as unnamed.
-              logger.warn("listDevices", `${name} is in the folder listing but came back empty, so that device has no name here`);
-              break;
+              // problem, not an old peer. Try the device's OTHER files before giving up:
+              // one refused extensions file must not cost a named device its name when
+              // its bookmarks file is perfectly readable.
+              logger.warn("listDevices", `${name} is in the folder listing but came back empty; trying another file`);
+              continue;
             }
             p = JSON.parse(raw) as Partial<SyncPacket>;
           } catch (err) {
-            logger.warn("listDevices", `Couldn't read ${name} (${err instanceof Error ? err.message : err}), so that device has no name here`);
-            break;
+            logger.warn("listDevices", `Couldn't read ${name} (${err instanceof Error ? err.message : err}); trying another file`);
+            continue;
           }
           if (!lastSeen) lastSeen = p.timestamp ?? null;
           browserInfo ??= readDeviceBrowser(p.device_browser);
-          if (p.device_label) { label = p.device_label; break; }
+          if (p.device_label) {
+            label = p.device_label;
+            learned.push({ device_id, device_label: label });
+            break;
+          }
+        }
+        // Nothing readable on the backend (or a pre-name build): use the name learned on
+        // an earlier sync instead of calling a machine we know "Unnamed device".
+        if (!label && !isSelf) {
+          label = known[device_id]?.label ?? null;
+          if (label) logger.info("listDevices", `${device_id.slice(0, 8)} is named from the local cache; its files could not be read this time`);
         }
         if (!label && !isSelf) {
           logger.info("listDevices", `${device_id.slice(0, 8)} has no device name in any of its files; it will once that device syncs on a build that sends one`);
@@ -1012,6 +1133,9 @@ export class SyncEngine {
         if (a.isSelf !== c.isSelf) return a.isSelf ? -1 : 1;
         return (c.lastSeen ?? "").localeCompare(a.lastSeen ?? "");
       });
+      // The list is a reader too: a name it found is worth keeping for the next time
+      // the backend refuses every file. No-op when nothing changed.
+      await rememberPeerLabels(learned);
       return out;
     });
   }
@@ -1048,6 +1172,117 @@ export class SyncEngine {
     await dropRemoteDevice(deviceId);
     logger.event("forgetDevice", `Removed ${removed} file(s) for a device that is no longer in use`);
     return removed;
+  }
+
+  // ─── First-sync direction ──────────────────────────────────────────────
+
+  /**
+   * Does this install need to answer "which side wins" before bookmarks are touched?
+   *
+   * Deliberately cheap and read-only: one file listing, no payload download, no decrypt.
+   * Four things have to hold — it has not answered before, it has never published a
+   * bookmark packet (so it really is new to this group), its own tree is not empty, and
+   * at least one peer has a bookmark file in the folder.
+   *
+   * A FAILURE here must never park an ordinary sync. A WebDAV answering 503 to the
+   * listing is a storage problem, not a reason to silently stop syncing while a card
+   * waits for a click; fall through to the normal merge.
+   */
+  private async detectFirstSync(
+    backend: ReturnType<typeof createBackend>,
+    types: DataType[]
+  ): Promise<number | null> {
+    if (!types.includes("bookmarks")) return null;
+    const record = await getFirstSync();
+    if (record?.done) return null;
+    if ((await getLastUploadChecksum("bookmarks")) !== null) return null;
+    const local = await this.buildPayload("bookmarks");
+    if (await this.isPayloadEmpty("bookmarks", local)) return null;
+
+    let names: string[];
+    try {
+      names = (await Promise.all(listPrefixes("bookmarks").map((p) => backend.listFiles(p)))).flat();
+    } catch (err) {
+      logger.info(
+        "FirstSync",
+        `Couldn't list peer bookmark files, continuing with the normal merge: ${err instanceof Error ? err.message : err}`
+      );
+      return null;
+    }
+    const peers = new Set<string>();
+    for (const name of names) {
+      const id = peerDeviceIdFromName(name, "bookmarks");
+      if (id && id !== this.settings.device_id) peers.add(id);
+    }
+    return peers.size || null;
+  }
+
+  /**
+   * Apply the user's answer and publish immediately — an answer that waits out the sync
+   * interval reads as a dead button. The two destructive answers get a restore point first.
+   *
+   * Nothing here invents a new shared file type: "remote" only rewrites THIS browser's
+   * bookmarks, "local" only deletes peers' existing bookmark files, and both then publish
+   * this device's ordinary v1.0 packet. The frozen wire contract is untouched.
+   */
+  async chooseFirstSync(choice: FirstSyncChoice): Promise<void> {
+    if (this.isSyncing) throw new Error("A sync is already running — try again in a moment.");
+
+    if (choice !== "merge") {
+      try { await this.snapshotNow({ origin: "manual" }); }
+      catch (err) {
+        logger.warn("FirstSync", `Couldn't save a restore point before the ${choice} choice: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
+    if (choice === "remote") {
+      const peers = orderPeersByTime(
+        await this.withBackend((b) => b.downloadAll("bookmarks", this.settings.device_id))
+      );
+      if (!peers.length) {
+        throw new Error("No other device's bookmarks could be read from the storage. Nothing was changed; try again once it is reachable.");
+      }
+      // openPacket() enforces the packet version, E2EE agreement and the SHA-256 checksum.
+      const payload = await this.openPacket(peers[0]);
+      await importBookmarks(payload, "replace", this.settings.conflict_strategy, this.settings.bulk_delete_percent, 0);
+      // importBookmarks folds the peer's deletion/move/rename logs in BEFORE replacing
+      // the tree. Dropping them is what makes "use the remote copy" actually stick:
+      // otherwise the very next merge would re-apply that peer's old deletions.
+      await resetBookmarkMergeState();
+      await setState({ pending_conflicts: [] });
+      logger.event("FirstSync", "Replaced this device's bookmarks with the newest peer's tree");
+    } else if (choice === "local") {
+      const { removed, failed } = await this.withBackend(async (b) => {
+        const names = (await Promise.all(listPrefixes("bookmarks").map((p) => b.listFiles(p)))).flat();
+        let removed = 0, failed = 0;
+        for (const name of names) {
+          const id = peerDeviceIdFromName(name, "bookmarks");
+          if (!id || id === this.settings.device_id || !isPeerFileName(name, "bookmarks")) continue;
+          try { await b.deleteFile(name); removed++; }
+          catch (err) {
+            failed++;
+            logger.warn("FirstSync", `Couldn't remove ${name}: ${err instanceof Error ? err.message : err}`);
+          }
+        }
+        return { removed, failed };
+      });
+      // A 503 must not look like a successful "reset". Nothing is marked done yet, so the
+      // choice stays available for a retry. Files already removed will come back on their
+      // own when their device next syncs, so a partial attempt is safe to repeat.
+      if (failed > 0) {
+        throw new Error(`${failed} device file(s) could not be removed from the storage (${removed} were removed). Check the connection and choose again; Settings → Activity has the details.`);
+      }
+      // The local tree did not change, so the upload checksum would otherwise still
+      // match and our own file would never be (re)published.
+      await clearUploadChecksums();
+      logger.event("FirstSync", `Removed ${removed} peer bookmark file(s); this device's tree is now the only one offered`);
+      logger.event("FirstSync", "To adopt this tree on the other devices, choose 'Use the remote copy' in their Settings → Activity; if their Kesonode is still running they will re-upload their own bookmarks instead");
+    }
+
+    await setFirstSync({ done: true, choice, at: new Date().toISOString() });
+    const cleared = await setState({ first_sync_pending: null });
+    this.onStateChange(cleared);
+    await this.sync(["bookmarks"], { force: true });
   }
 
   /** Write a snapshot of the current bookmark tree to the backend. */
@@ -1187,6 +1422,9 @@ export class SyncEngine {
       // Count pulled bytes (the serialized peer payloads) toward the transfer stat.
       for (const p of peers) this.bytesThisSync += p.payload?.length ?? 0;
       for (const p of peers) this.peersThisSync.add(p.device_id);
+      // Keep the names we actually saw. A later rate limit or unreadable packet then
+      // costs nothing: the device list can still name the machine from this copy.
+      await rememberPeerLabels(peers);
 
       // A device we hold a cached session / extension list for, that did NOT arrive here,
       // may simply be gone from the folder — someone forgot it on another machine. Runs

@@ -141,3 +141,64 @@ describe("downloadAll — a peer we can't fetch must not vanish quietly", () => 
     expect(await auditText()).toContain(PEER); // and the one we lost is named
   });
 });
+
+const GOOD_PACKET = {
+  version: "1.0", device_id: "bdacfda8", timestamp: "2026-07-28T10:00:00.000Z",
+  data_type: "extensions", checksum: "a".repeat(64), encrypted: false, payload: "[]",
+};
+const LISTING = `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">
+   <d:response><d:href>/dav/konode/${PEER}</d:href></d:response>
+ </d:multistatus>`;
+const webdavCfg: BackendConfig = {
+  type: "webdav", label: "WebDAV", enabled: true,
+  webdav: { url: "https://dav.example.com/dav/", username: "u", password: "p" },
+};
+
+describe("downloadAll — transient storage errors", () => {
+  it("retries a single 503 and keeps the peer when the retry succeeds", async () => {
+    let attempts = 0;
+    vi.stubGlobal("fetch", (_url: string, init?: { method?: string }) => {
+      if (init?.method === "PROPFIND") {
+        return Promise.resolve({ ok: true, status: 207, text: () => Promise.resolve(LISTING) } as Response);
+      }
+      attempts++;
+      if (attempts === 1) {
+        return Promise.resolve({ ok: false, status: 503, text: () => Promise.resolve("") } as Response);
+      }
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(GOOD_PACKET)) } as Response);
+    });
+
+    const backend = new WebDAVBackend(webdavCfg);
+    const packets = await backend.downloadAll("extensions", "me");
+
+    expect(attempts).toBe(2);
+    expect(packets).toHaveLength(1);
+    expect(backend.failedPeers).toEqual([]); // recovered, so nothing to report
+  });
+
+  it("records a persistent 503 for the engine, so the sync is reported as degraded", async () => {
+    listOkDownloadFails(503, LISTING);
+    const backend = new WebDAVBackend(webdavCfg);
+
+    expect(await backend.downloadAll("extensions", "me")).toEqual([]);
+    const reported = backend.failedPeers.join(" ");
+    expect(reported).toContain(PEER);
+    expect(reported).toContain("503");
+  });
+
+  it("does NOT retry a terminal 403", async () => {
+    let attempts = 0;
+    vi.stubGlobal("fetch", (_url: string, init?: { method?: string }) => {
+      if (init?.method === "PROPFIND") {
+        return Promise.resolve({ ok: true, status: 207, text: () => Promise.resolve(LISTING) } as Response);
+      }
+      attempts++;
+      return Promise.resolve({ ok: false, status: 403, text: () => Promise.resolve("") } as Response);
+    });
+
+    const backend = new WebDAVBackend(webdavCfg);
+    await backend.downloadAll("extensions", "me");
+    expect(attempts).toBe(1);
+    expect(backend.failedPeers).toHaveLength(1);
+  });
+});

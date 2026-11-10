@@ -1,5 +1,5 @@
 import type { IBackend, BackendConfig, DataType, ListedFile, SyncPacket } from "@/lib/types";
-import { withRetry, HttpError, rateLimitMessage } from "@/lib/utils/retry";
+import { withRetry, withPeerRetry, HttpError, rateLimitMessage } from "@/lib/utils/retry";
 import { logger } from "@/lib/utils/logger";
 import { isSecureBackendUrl } from "@/lib/utils/url";
 import { utf8ToBase64 } from "@/lib/utils/base64";
@@ -23,6 +23,29 @@ function hrefBasename(href: string): string {
 }
 
 /**
+ * What to say about a 403 Forbidden from a WebDAV server.
+ *
+ * A 403 is "authenticated, then refused", and on Nutstore the standing cause is the
+ * WebDAV frequency limit: 600 requests per 30 minutes on a free account, 1500 on paid,
+ * counted across EVERY app that uses the account's WebDAV, not just Kesonode. Nutstore
+ * answers that refusal with 403 rather than 429, so it reached a QuarkPC user as a bare
+ * "WebDAV GET failed: 403" repeated every sync, with nothing anywhere to act on
+ * (field report, 2026-11-08). Name the limit where it is the known answer; elsewhere a
+ * 403 really is the path or the account's rights, so say that instead.
+ */
+/** The hosts whose 403 means "over your request quota" rather than "wrong path". */
+export function isNutstoreHost(host: string): boolean {
+  return /jianguoyun\.com|nutstore\.(com|net)/i.test(host);
+}
+
+export function forbiddenMessage(host: string): string {
+  if (isNutstoreHost(host)) {
+    return `Forbidden (403): ${host} refused the request. Nutstore (坚果云) limits WebDAV by frequency — 600 requests per 30 minutes on a free account, 1500 on paid — counted across EVERY app using this account, and it answers with 403 rather than 429. Wait for the window to pass, or raise Sync interval in Settings → Device; another device or app syncing against this same account can use the quota up on its own.`;
+  }
+  return `Forbidden (403): ${host} refused the request. The login was accepted, so this is the path or the account's rights: check the URL path and what the account may access.`;
+}
+
+/**
  * The files in a PROPFIND multistatus, each with its `getlastmodified` where the server sent
  * one. Servers disagree on the namespace prefix (`d:`, `D:`, `lp1:` on Apache, none at all),
  * so every element is matched with any prefix. The collection itself comes back as an href
@@ -42,6 +65,8 @@ export function parsePropfindListing(xml: string): ListedFile[] {
 
 export class WebDAVBackend implements IBackend {
   readonly type = "webdav" as const;
+  /** Peer files this sync could not read; the engine surfaces these as a visible problem. */
+  readonly failedPeers: string[] = [];
 
   constructor(private config: BackendConfig) {}
 
@@ -81,6 +106,23 @@ export class WebDAVBackend implements IBackend {
       Authorization: this.authHeader(),
       "Content-Type": "application/json",
     };
+  }
+
+  /**
+   * The HttpError for a failed request, with a 403 explained (see `forbiddenMessage`):
+   * a bare "WebDAV GET failed: 403" told someone it failed and not what to do, while the
+   * one server that 403s for a fixable reason was left undescribed. Other statuses keep
+   * the plain form — 401 already has `authFailureMessage` at the doors that need it.
+   */
+  private fail(res: Response, verb: string): never {
+    if (res.status === 403) {
+      const host = new URL(this.w.url).host;
+      // A Nutstore 403 IS a rate limit, so the sync loop has to back off for a whole
+      // window; a 403 from any other server is the path or the account's rights and
+      // must not park sync for half an hour.
+      throw new HttpError(403, forbiddenMessage(host), isNutstoreHost(host));
+    }
+    throw new HttpError(res.status, `WebDAV ${verb} failed: ${res.status}`, res.status === 429);
   }
 
   /**
@@ -196,7 +238,7 @@ export class WebDAVBackend implements IBackend {
         headers: this.headers(),
         body: JSON.stringify(packet, null, 2),
       });
-      if (!res.ok) throw new HttpError(res.status, `WebDAV PUT failed: ${res.status}`);
+      if (!res.ok) this.fail(res, "PUT");
       // Log the FILE NAME, never the URL. `baseUrl` carries the account username on
       // Nextcloud/ownCloud (…/remote.php/dav/files/<user>/…) and the audit log is
       // persisted to disk — connect() already logs the hostname only for exactly this
@@ -220,7 +262,7 @@ export class WebDAVBackend implements IBackend {
       // throw so withRetry retries and a persistent failure surfaces, instead of
       // silently masquerading as "no peers" (which would hide the peers' data).
       if (res.status === 404) return [];
-      if (!res.ok) throw new HttpError(res.status, `WebDAV list failed: ${res.status}`);
+      if (!res.ok) this.fail(res, "list");
 
       const xml = await res.text();
       // Extract hrefs from PROPFIND response. Match any namespace prefix
@@ -266,20 +308,30 @@ export class WebDAVBackend implements IBackend {
           );
           break;
         }
-        const r = await fetch(fullUrl, {
-          headers: { Authorization: this.authHeader() },
-          cache: "no-store", // avoid a stale peer file from the browser HTTP cache
-        });
-        if (!r.ok) {
-          // NOT silent. A peer whose file we can't fetch drops out of this sync entirely —
-          // its bookmarks aren't merged, its extensions aren't listed — and with no log
-          // line the sync just reported success with fewer devices than the folder holds.
-          // A field report showed exactly that: three extensions files on the server, one
-          // peer folded in, nothing anywhere saying why. Degraded, not fatal: we keep the
-          // other peers, because one unreadable file must not stop syncing altogether.
+        let r: Response;
+        try {
+          // A 503 from a NAS/metered WebDAV is often a one-off. Retry just THIS file,
+          // without re-running the whole listing.
+          r = await withPeerRetry(async () => {
+            const res = await fetch(fullUrl, {
+              headers: { Authorization: this.authHeader() },
+              cache: "no-store", // avoid a stale peer file from the browser HTTP cache
+            });
+            if (!res.ok) throw new HttpError(res.status, `HTTP ${res.status}`);
+            return res;
+          });
+        } catch (err) {
+          // NOT silent, and no longer just a log line: record it so the engine reports a
+          // degraded sync as an ERROR instead of "Synced" with fewer devices than the
+          // folder holds. Degraded, not fatal — one unreadable file must not stop the
+          // other peers from being merged.
+          const detail = err instanceof HttpError
+            ? `HTTP ${err.status}`
+            : err instanceof Error ? err.message : String(err);
+          this.failedPeers.push(`${basename(href)} (${detail})`);
           logger.warn(
             "WebDAV.downloadAll",
-            `Couldn't download ${basename(href)} (HTTP ${r.status}) — that device is left out of this sync`
+            `Couldn't download ${basename(href)} (${detail}) — that device is left out of this sync`
           );
           continue;
         }
@@ -318,7 +370,7 @@ export class WebDAVBackend implements IBackend {
   async putFile(name: string, content: string): Promise<void> {
     await withRetry(async () => {
       const res = await fetch(`${this.baseUrl}/${name}`, { method: "PUT", headers: this.headers(), body: content });
-      if (!res.ok) throw new HttpError(res.status, `WebDAV PUT failed: ${res.status}`);
+      if (!res.ok) this.fail(res, "PUT");
     });
   }
 
@@ -326,7 +378,7 @@ export class WebDAVBackend implements IBackend {
     return withRetry(async () => {
       const res = await fetch(`${this.baseUrl}/${name}`, { headers: this.headers(), cache: "no-store" });
       if (res.status === 404) return null;
-      if (!res.ok) throw new HttpError(res.status, `WebDAV GET failed: ${res.status}`);
+      if (!res.ok) this.fail(res, "GET");
       return res.text();
     });
   }
@@ -340,7 +392,7 @@ export class WebDAVBackend implements IBackend {
         cache: "no-store",
       });
       if (res.status === 404) return [];
-      if (!res.ok) throw new HttpError(res.status, `WebDAV list failed: ${res.status}`);
+      if (!res.ok) this.fail(res, "list");
       const xml = await res.text();
       return [...xml.matchAll(/<(?:[a-z0-9]+:)?href>([^<]+)<\/(?:[a-z0-9]+:)?href>/gi)]
         .map(m => hrefBasename(m[1]))
@@ -357,7 +409,7 @@ export class WebDAVBackend implements IBackend {
         cache: "no-store",
       });
       if (res.status === 404) return [];
-      if (!res.ok) throw new HttpError(res.status, `WebDAV list failed: ${res.status}`);
+      if (!res.ok) this.fail(res, "list");
       return parsePropfindListing(await res.text()).filter(f => f.name.startsWith(prefix));
     });
   }
@@ -365,7 +417,7 @@ export class WebDAVBackend implements IBackend {
   async deleteFile(name: string): Promise<void> {
     await withRetry(async () => {
       const res = await fetch(`${this.baseUrl}/${name}`, { method: "DELETE", headers: this.headers() });
-      if (!res.ok && res.status !== 404) throw new HttpError(res.status, `WebDAV DELETE failed: ${res.status}`);
+      if (!res.ok && res.status !== 404) this.fail(res, "DELETE");
     });
   }
 
@@ -383,6 +435,7 @@ export class WebDAVBackend implements IBackend {
       }
       if (res.status === 401) return { ok: false, message: this.authFailureMessage(res) };
       if (res.status === 429) return { ok: false, message: rateLimitMessage(new URL(this.w.url).host) };
+      if (res.status === 403) return { ok: false, message: forbiddenMessage(new URL(this.w.url).host) };
       return { ok: false, message: `Server returned HTTP ${res.status}` };
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : "Connection failed" };

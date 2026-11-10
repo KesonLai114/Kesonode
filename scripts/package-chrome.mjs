@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { pruneUnshippedLocales } from "./prune-locales.mjs";
-import { variantFromArgv, assertVariant, artifactDir } from "./build-variant.mjs";
+import { variantFromArgv, assertVariant, assertVersion, assertBundleComplete, artifactDir } from "./build-variant.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -48,14 +48,16 @@ if (!existsSync(resolve(distDir, "manifest.json"))) {
 
 const variant = variantFromArgv();
 assertVariant(distDir, variant);
+// The zip NAME comes from package.json but its manifest is copied out of dist/.
+// Refuse to write a package whose name and content disagree, or whose HTML points
+// at chunks from another build (see build-variant.mjs for both failure modes).
+const version = assertVersion(repoRoot, distDir);
+assertBundleComplete(distDir);
 // A store upload must never carry a key, even if the flag was passed by mistake.
 const keepKey = variant !== "store" && process.argv.includes("--keep-key");
 
 const artifactsDir = resolve(repoRoot, "web-ext-artifacts", artifactDir("chrome", variant));
 
-const { version } = JSON.parse(
-  readFileSync(resolve(repoRoot, "package.json"), "utf8")
-);
 const outPath = resolve(artifactsDir, `kesonode-chrome-${version}.zip`);
 
 mkdirSync(artifactsDir, { recursive: true });

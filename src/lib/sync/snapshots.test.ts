@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { createSnapshot, listSnapshots, restoreSnapshot, pruneSnapshots, deleteSnapshot, renameSnapshot, setSnapshotPinned } from "@/lib/sync/snapshots";
-import { DEFAULT_SETTINGS, KEYS } from "@/lib/utils/storage";
+import { createSnapshot, listSnapshots, restoreSnapshot, pruneSnapshots, deleteSnapshot, renameSnapshot, setSnapshotPinned, flushPendingPins, snapshotDisplayName, snapshotIsUnnamed } from "@/lib/sync/snapshots";
+import { HttpError } from "@/lib/utils/retry";
+import { DEFAULT_SETTINGS, KEYS, shortDeviceId } from "@/lib/utils/storage";
+import { t } from "@/lib/utils/i18n";
 import type { IBackend, SyncSettings } from "@/lib/types";
 
 // A minimal in-memory backend exposing just the named-file ops snapshots use.
@@ -404,6 +406,44 @@ describe("restoreSnapshot only accepts one of our own filenames", () => {
 describe("snapshots — device, name and keeping forever", () => {
   const mine = () => settings({ device_label: "Macmini M4pro" });
 
+  it("uses one rule for the default name and never stores it as a user label", async () => {
+    const backend = new FileFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const s = settings({
+      device_label: "Macmini M4pro",
+      device_id: "b3f1c2d4-0000-4000-8000-000000000001",
+    });
+    const meta = await createSnapshot(asBackend(backend), s, { origin: "manual" });
+
+    // The default name is computed when the row is drawn. Freezing it into the shared
+    // index is what made the rule drift across releases and languages.
+    expect(meta.label).toBeUndefined();
+    expect(snapshotIsUnnamed(meta)).toBe(true);
+    expect(snapshotDisplayName(meta)).toBe(
+      `${t("opt_snap_unknown")} · Macmini M4pro · b3f1c2d4`
+    );
+
+    // A name the user actually chose always wins.
+    const named = { ...meta, label: "  改版前  " };
+    expect(snapshotDisplayName(named)).toBe("改版前");
+
+    // An automatic label written by an older build is still recognised as unnamed,
+    // so the corrected rule reaches points those builds already saved. The suffix is a
+    // literal here: it was dropped from the catalogues when default names stopped being
+    // stored, and this is only a fixture for data such a build could have written.
+    const legacy = {
+      ...meta,
+      label: `Macmini M4pro ${shortDeviceId(meta.device_id)} restore point`,
+    };
+    expect(snapshotIsUnnamed(legacy)).toBe(true);
+    expect(snapshotDisplayName(legacy)).toBe(
+      `${t("opt_snap_unknown")} · Macmini M4pro · b3f1c2d4`
+    );
+
+    // No device info in the index: the bare, still meaningful fallback.
+    expect(snapshotDisplayName({})).toBe(t("opt_snap_unknown"));
+  });
+
   it("records which device saved a point and the name the user gave it", async () => {
     const backend = new FileFake();
     await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
@@ -503,7 +543,7 @@ describe("snapshots — device, name and keeping forever", () => {
     expect(list[0].device_label).toBeUndefined();
   });
 
-  it("never overwrites an index it cannot read, for a rename or for a pin", async () => {
+  it("never overwrites an index it cannot read, even when renaming or pinning locally", async () => {
     const backend = new FileFake();
     await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
     const created = await createSnapshot(asBackend(backend), e2ee("the real passphrase"));
@@ -511,10 +551,147 @@ describe("snapshots — device, name and keeping forever", () => {
 
     await otherDevice();
     const wrong = e2ee("a different passphrase");
-    await expect(renameSnapshot(asBackend(backend), wrong, created.name, "Nope")).rejects.toThrow(/cannot be read/i);
-    await expect(setSnapshotPinned(asBackend(backend), wrong, created.name, true)).rejects.toThrow(/cannot be read/i);
+    // A refused index is never rewritten. Renaming and pinning now act on the LOCAL
+    // annotation / the file name instead of failing with "cannot be read here".
+    await renameSnapshot(asBackend(backend), wrong, created.name, "Local name");
+    expect((await listSnapshots(asBackend(backend), wrong))[0].label).toBe("Local name");
+    await setSnapshotPinned(asBackend(backend), wrong, created.name, true);
 
     expect(backend.blobs.get(INDEX_NAME)).toBe(before);
-    expect(backend.blobs.has(created.name)).toBe(true); // not moved either
+    expect(backend.blobs.has(created.name)).toBe(false); // moved to the kept prefix
+    const kept = (await listSnapshots(asBackend(backend), wrong)).find((m) => m.pinned)!;
+    expect(kept.label).toBe("Local name");
+  });
+});
+
+// Nutstore answers its WebDAV frequency cap with 403, sometimes for hours. The shared
+// index is then unreadable AND unwritable — the state that made every default-name
+// change look like it never shipped.
+class ForbiddenIndexFake extends FileFake {
+  getFile(n: string): Promise<string | null> {
+    if (n === INDEX_NAME) return Promise.reject(new Error("WebDAV GET failed: 403"));
+    return super.getFile(n);
+  }
+}
+
+describe("snapshots — shared index refused (Nutstore 403)", () => {
+  const device = () => settings({
+    device_label: "Macmini M4pro",
+    device_id: "b3f1c2d4-0000-4000-8000-000000000001",
+  });
+  const expected = `${t("opt_snap_unknown")} · Macmini M4pro · b3f1c2d4`;
+
+  it("still builds the default name from this device's own annotations", async () => {
+    const backend = new ForbiddenIndexFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    await createSnapshot(asBackend(backend), device(), { origin: "manual" });
+
+    // Nothing was written over an index we could not read.
+    expect(backend.blobs.has(INDEX_NAME)).toBe(false);
+    const list = await listSnapshots(asBackend(backend), device());
+    expect(list).toHaveLength(1);
+    expect(list[0].count).toBe(1);
+    expect(snapshotDisplayName(list[0])).toBe(expected);
+
+    // Renaming this device must not rename a point that is already on the backend.
+    const renamedViewer = await listSnapshots(asBackend(backend), settings({
+      device_label: "改名之后", device_id: "b3f1c2d4-0000-4000-8000-000000000001",
+    }));
+    expect(snapshotDisplayName(renamedViewer[0])).toBe(expected);
+
+    // Another device has no local copy and no readable index. It must NOT borrow its
+    // own identity to label somebody else's point: that guess silently relabelled
+    // every older restore point after a device rename or a settings import. No
+    // invented device info and no invented bookmark count.
+    await otherDevice();
+    const other = await listSnapshots(asBackend(backend), settings({
+      device_label: "Laptop", device_id: "aaaaaaaa-0000-4000-8000-000000000002",
+    }));
+    expect(snapshotDisplayName(other[0])).toBe(t("opt_snap_unknown"));
+    expect(other[0].device_label).toBeUndefined();
+    expect(other[0].count).toBeUndefined();
+  });
+
+  it("lets the user rename and keep a point while the index is refused", async () => {
+    const backend = new ForbiddenIndexFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const created = await createSnapshot(asBackend(backend), device(), { origin: "manual" });
+
+    await renameSnapshot(asBackend(backend), device(), created.name, "  改版前  ");
+    const named = await listSnapshots(asBackend(backend), device());
+    expect(named[0].label).toBe("改版前");
+    expect(snapshotDisplayName(named[0])).toBe("改版前");
+
+    await renameSnapshot(asBackend(backend), device(), created.name, "");
+    expect(snapshotDisplayName((await listSnapshots(asBackend(backend), device()))[0])).toBe(expected);
+
+    await setSnapshotPinned(asBackend(backend), device(), created.name, true);
+    const kept = (await listSnapshots(asBackend(backend), device())).find((m) => m.pinned)!;
+    expect(kept).toBeDefined();
+    expect(snapshotDisplayName(kept)).toBe(expected);
+    expect(backend.blobs.has(INDEX_NAME)).toBe(false);
+  });
+});
+
+// Nutstore's frequency cap refuses WRITES too. "Keep forever" used to fail the whole
+// click with a wall of 403 text because the mark is a file name (PUT + DELETE), while
+// renaming a point has a local fallback and kept working.
+class RefusingWritesFake extends FileFake {
+  refuse = true;
+  putFile(n: string, c: string): Promise<void> {
+    if (this.refuse) return Promise.reject(new HttpError(403, "Forbidden (403)"));
+    return super.putFile(n, c);
+  }
+  deleteFile(n: string): Promise<void> {
+    if (this.refuse) return Promise.reject(new HttpError(403, "Forbidden (403)"));
+    return super.deleteFile(n);
+  }
+}
+
+class RefusingDeleteFake extends FileFake {
+  refuse = true;
+  deleteFile(n: string): Promise<void> {
+    if (this.refuse) return Promise.reject(new HttpError(403, "Forbidden (403)"));
+    return super.deleteFile(n);
+  }
+}
+
+describe("snapshots — keep forever while the storage refuses writes", () => {
+  it("shows the click as kept at once and finishes the rename when the storage answers", async () => {
+    await otherDevice();
+    const backend = new RefusingWritesFake();
+    backend.refuse = false;
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const created = await createSnapshot(asBackend(backend), settings());
+    backend.refuse = true;
+
+    await expect(setSnapshotPinned(asBackend(backend), settings(), created.name, true)).resolves.toBe(false);
+    expect(backend.blobs.has(created.name)).toBe(true);
+    const during = await listSnapshots(asBackend(backend), settings());
+    expect(during.find((m) => m.name === created.name)?.pinned).toBe(true);
+
+    backend.refuse = false;
+    await flushPendingPins(asBackend(backend), settings());
+    expect(backend.blobs.has(created.name)).toBe(false);
+    const kept = (await listSnapshots(asBackend(backend), settings())).find((m) => m.pinned);
+    expect(kept?.name).toMatch(/^konode_snap_kept_/);
+  });
+
+  it("finishes an attempt whose write succeeded but delete was refused, without a duplicate", async () => {
+    await otherDevice();
+    const backend = new RefusingDeleteFake();
+    backend.refuse = false;
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const created = await createSnapshot(asBackend(backend), settings());
+    backend.refuse = true;
+
+    await expect(setSnapshotPinned(asBackend(backend), settings(), created.name, true)).resolves.toBe(false);
+    expect(backend.blobs.has(created.name)).toBe(true);
+    expect([...backend.blobs.keys()].filter((n) => n.startsWith("konode_snap_kept_"))).toHaveLength(1);
+
+    backend.refuse = false;
+    await flushPendingPins(asBackend(backend), settings());
+    expect(backend.blobs.has(created.name)).toBe(false);
+    expect([...backend.blobs.keys()].filter((n) => n.startsWith("konode_snap_kept_"))).toHaveLength(1);
   });
 });

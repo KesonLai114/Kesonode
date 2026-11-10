@@ -39,7 +39,7 @@ Kesonode 让**书签、打开的标签页、历史记录、已安装扩展列表
 | **分发方式** | 只通过本仓库的 [Release](https://github.com/KesonLai114/Kesonode/releases) 和源码里的 [`插件版本/`](插件版本/) 目录提供本地安装包；**没有商店版本**，浏览器里需要「加载已解压的扩展程序」 |
 | **构建变体** | 发布的包是不含内置 Google OAuth 密钥的 `source` 构建：GitHub、WebDAV 开箱即用；要用 Google Drive 需自己创建 OAuth 客户端（`drive.file` 权限） |
 | **三种兼容模式** | 上游兼容 / 自有文件名 / 完全独立，决定数据写到哪个文件夹、用哪种文件名前缀；默认模式沿用上游，保证旧数据可读 |
-| **设置导入 / 导出** | 「设置 → 高级 → 导入/导出」可把后端账号、设备 ID、加密口令、Drive 授权导出成 JSON 并在新安装里恢复；备份格式带版本号与迁移链 |
+| **设置导入 / 导出** | 「设置 → 高级 → 导入/导出」可把后端账号、加密口令、Drive 授权导出成 JSON 并在新安装里恢复；导入时会选择「作为新设备导入」（推荐，重新生成设备 ID 与默认设备名）或「恢复本机身份」（同一台设备重装时用）。备份格式带版本号与迁移链 |
 | **冲突与设备信息** | 手动解决冲突前可看到双方差异；设备列表显示最近上传时间、浏览器引擎与不活跃标记；被阻止的批量删除会列出具体书签 |
 | **链接与文案** | 界面、日志、图标与文档统一为 Kesonode；指向上游商店、评分、反馈和站点的链接已移除（集中在一个空的 `FORK_LINKS` 常量里，等有自己的地址再填） |
 | **协议契约** | **冻结不变**：`konode_*` 文件前缀、`Konode` 文件夹名、SyncPacket v1.0、SHA-256 校验、AES-256-GCM / PBKDF2 参数、扩展 ID 与 OAuth 配置。改这些会破坏已有数据 |
@@ -149,6 +149,9 @@ Kesonode 让**书签、打开的标签页、历史记录、已安装扩展列表
   再点刷新，不要新建文件夹直接加载，否则扩展 ID 变化会导致设置读不到。稳妥做法是先到
   「设置 → 高级 → 导入/导出」导出配置，必要时再导入。用
   `npm run package:source:pinned` 自建的包带固定 ID，可避免这个迁移步骤。
+- **从 1.5.3 起，升级请解压到全新文件夹，不要再覆盖旧目录**（上面那次 1.5.1 → 1.5.2
+  的一次性迁移除外）。`chunks/` 文件名带内容哈希，覆盖解压不会删掉旧文件，新旧构建混在
+  一起会出现 `Unexpected token 'export'`、弹窗或设置页空白。固定扩展 ID 后换文件夹不会丢设置。
 - **Firefox 临时加载在浏览器重启后会失效**，需要重新载入一次；本分支没有上架商店，因此没有签名版。
 - 导出的配置是**明文**（含令牌与口令），只保存在本机，不要上传或分享。
 - 如果已经装过旧包，保留原安装即可；再装一份会被当成一台新设备加入同步组。
@@ -160,12 +163,20 @@ Kesonode 让**书签、打开的标签页、历史记录、已安装扩展列表
 
 ```bash
 npm ci
-npm run check            # type-check + lint + 测试
-npm run build            # → dist/           (Chromium)
-npm run build:firefox    # → dist-firefox/  (Firefox)
-npm run package:source   # → web-ext-artifacts/source/ 下两个可分发 zip
+npm run check                  # type-check + lint + 测试
+npm run version:patch          # 发新版本时手动 +1；同步 manifest、扩展名、lock
+npm run package:source:pinned  # → web-ext-artifacts/source/ 下两个带固定扩展 ID 的 zip
 ```
 
+- **版本号只在 `package.json` 里改，且必须显式 `version:patch`**（也有
+  `version:minor` / `version:major`）。`sync-version` 现在是幂等的，不再每次构建自动 +1；
+  以前 `build`、`build:firefox`、`package:source` 各调用一次会让同一个版本连跳三次。
+- **用 `package:source:pinned` 一条命令产出两个包**，不要分别跑 `npm run build` 和
+  `npm run build:firefox` 再打包，否则两个目标可能来自不同版本。
+- 打包前会自动校验：`package.json`、`public/manifest.json`、`dist*/manifest.json` 三处版本
+  必须一致（zip 文件名取 `package.json`，包内 manifest 直接复制 `dist/`，不一致就会产出
+  「文件名 1.5.5、内容 1.5.4」的包）；同时检查各 HTML 引用的 module/chunk 与 background
+  脚本是否齐全、是否声明为 ES module。任何一项不符都会拒绝打包并给出重建命令。
 - **Chromium**：打开 `chrome://extensions` → 开启开发者模式 → 「加载已解压的扩展程序」→ 选 `dist/`。
   每次重新构建后要点扩展卡片上的 ↻ 刷新（MV3 不会自动替换运行中的 service worker）。
 - **Firefox**：打开 `about:debugging` → 「此 Firefox」→ 「临时载入附加组件」→ 选 `dist-firefox/manifest.json`。
