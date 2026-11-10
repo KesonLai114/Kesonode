@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   DEFAULT_SETTINGS, getState, getFirstSync, setFirstSync,
   setLastUploadChecksum, exportSettingsBackup,
+  syncCooldownRemaining, clearSyncCooldown,
 } from "@/lib/utils/storage";
 import { sha256 } from "@/lib/crypto/encryption";
 import type { SyncSettings, SyncPacket, SyncBookmark, BookmarkPayload } from "@/lib/types";
@@ -17,6 +18,8 @@ const h = vi.hoisted(() => ({
   // Set to make downloadAll answer [] while failedPeers already names the reason, which
   // is exactly what a backend does when a peer file exists and cannot be read.
   downloadFails: false,
+  // Stands in for the storage refusing this cycle's requests (Nutstore's 403).
+  rateLimited: false,
 }));
 
 vi.mock("@/lib/backends/abstract-backend", () => ({
@@ -24,6 +27,7 @@ vi.mock("@/lib/backends/abstract-backend", () => ({
     type: "webdav",
     isConfigured: () => true,
     failedPeers: h.peerFailures,
+    get rateLimited() { return h.rateLimited; },
     connect: async () => {},
     disconnect: async () => {},
     listFiles: async (prefix: string) => {
@@ -118,13 +122,15 @@ function engine() {
   return new SyncEngine(settings(), () => {});
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   h.blobs.clear();
   h.uploads.length = 0;
   h.listFails = false;
   h.peerFailures.length = 0;
   h.deleteFails = false;
   h.downloadFails = false;
+  h.rateLimited = false;
+  await clearSyncCooldown();
 });
 
 describe("first sync chooses a direction before anything is merged", () => {
@@ -269,5 +275,37 @@ describe("first sync chooses a direction before anything is merged", () => {
     await expect(e.chooseFirstSync("remote")).rejects.toThrow(/no longer holds another device's bookmark file/);
     expect((await getFirstSync())?.done ?? false).toBe(false);
     expect(await localUrls()).toEqual(["https://local.example/"]);
+  });
+
+  it("remote leaves no restore point behind when the download is refused", async () => {
+    await seedLocal();
+    await putPeer("peer", ["https://peer.example/"]);
+    const e = engine();
+    await e.sync();
+
+    h.downloadFails = true;
+    h.peerFailures.push("konode_bookmarks_peer.json (HTTP 403)");
+
+    await expect(e.chooseFirstSync("remote")).rejects.toThrow(/HTTP 403/);
+    // A restore point for a replacement that never happened is clutter the user has to
+    // tidy up, and it costs a PUT inside the very window that refused the read. A field
+    // report had two identical ones from two clicks, neither of which changed anything.
+    expect([...h.blobs.keys()].filter((n) => n.includes("konode_snap_manual_"))).toEqual([]);
+  });
+
+  it("remote parks automatic sync when the storage is metering, not merely failing", async () => {
+    await seedLocal();
+    await putPeer("peer", ["https://peer.example/"]);
+    const e = engine();
+    await e.sync();
+
+    h.downloadFails = true;
+    h.rateLimited = true;
+    h.peerFailures.push("konode_bookmarks_peer.json (HTTP 403)");
+
+    // The message invites the user to choose again; without the cooldown that retry lands
+    // in a window with nothing left in it and is refused identically.
+    await expect(e.chooseFirstSync("remote")).rejects.toThrow(/rate limit/i);
+    expect(await syncCooldownRemaining()).toBeGreaterThan(0);
   });
 });

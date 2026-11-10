@@ -26,25 +26,31 @@ async function init(): Promise<void> {
   const settings = await getSettings();
   setLoggerDebug(settings.debug_mode);
 
-  // ── Reset stuck "syncing" state from previous session ──
+  // ── Recover the stranded "syncing" state and the sync lock it left behind ──
+  // Both halves of one interruption, and the LOCK is the evidence: a timestamp means a
+  // sync was running when this worker's predecessor was torn down, whether or not the
+  // status write made it out. MV3 runs one worker at a time, so on a fresh worker
+  // nothing can still hold it.
+  //
+  // This recovery is routine, NOT history, and it used to write an audited EVENT on
+  // every wake. A sync that outran the 60-second alarm — the shape a rate-limited cycle
+  // takes, because every refused request is retried with backoff — woke the worker once a
+  // minute and logged this line once a minute: 120 of the 200 entries in one field report
+  // were this single sentence. That is exactly the condition that hides the 403s the
+  // popup sends people into Activity to read. Console only, like every other routine
+  // operational detail (see logger.ts).
   const currentState = await getState();
+  const hadStaleLock = await clearStaleSyncLock();
   if (currentState.status === "syncing") {
     const repaired = await setState({ status: "idle", last_error: null });
-    logger.event("ServiceWorker", "Reset stuck syncing state");
+    logger.info("ServiceWorker", "Reset stuck syncing state");
     // Tell any ALREADY-OPEN popup. It reads the state once on mount, so without this it
     // sat on "Syncing…" with the Sync-now button disabled for its whole lifetime — the
     // repair happened in storage where nobody was looking.
     broadcastState(repaired);
   }
-
-  // ── Drop a sync lock left behind by a worker that died mid-sync ──
-  // The other half of that same stranded state, and it was missing: a worker torn down
-  // mid-sync skips sync()'s finally, so konode_sync_lock kept a timestamp and every
-  // sync for the next 2 minutes — the manual "Sync now" included — returned early while
-  // still answering OK. Safe unconditionally: MV3 runs one worker at a time, so on a
-  // fresh worker nothing can still be holding it.
-  if (await clearStaleSyncLock()) {
-    logger.event("ServiceWorker", "Cleared a sync lock left by an interrupted sync");
+  if (hadStaleLock) {
+    logger.info("ServiceWorker", "Cleared a sync lock left by an interrupted sync");
   }
 
   // A setup abandoned more than a day ago can still hold a GitHub token or a WebDAV password

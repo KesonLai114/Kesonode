@@ -320,11 +320,22 @@ export class WebDAVBackend implements IBackend {
     }
     // A metered server refuses the MKCOL too, and that refusal must park the sync —
     // not just be described. Flag it here, where the first 403 of a cycle lands.
-    if (res.status === 429) this.rateLimited = true;
-    if (res.status === 403 && isNutstoreHost(new URL(this.w.url).host)) this.rateLimited = true;
+    //
+    // Nutstore answers a spent window with 503 on some methods rather than its usual 403
+    // (a field report showed `MKCOL 503` repeated once a minute for six minutes). Treating
+    // that as an ordinary server error was wrong twice: it told the user to check a path
+    // and a write permission that were both fine, and it never parked the sync, so the
+    // next cycle spent more of a window that had nothing left in it.
+    const host = new URL(this.w.url).host;
+    const nut = isNutstoreHost(host);
+    if (res.status === 429 || (nut && (res.status === 403 || res.status >= 500))) {
+      this.rateLimited = true;
+    }
     throw new HttpError(
       res.status,
-      `Couldn't create the sync folder on the WebDAV server (MKCOL ${res.status}, and it isn't there: ${check.status}). Check the path and that the account may write to it.`,
+      this.rateLimited
+        ? `The storage is refusing requests (MKCOL ${res.status}), so the sync folder could not be reached. ${nut ? forbiddenMessage(host) : "This is usually a quota or an outage at the provider rather than a setting — automatic sync will pause and try again later."}`
+        : `Couldn't create the sync folder on the WebDAV server (MKCOL ${res.status}, and it isn't there: ${check.status}). Check the path and that the account may write to it.`,
       this.rateLimited
     );
   }

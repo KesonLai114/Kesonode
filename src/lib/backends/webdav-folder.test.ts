@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { WebDAVBackend, forbiddenMessage } from "./webdav-backend";
+import { HttpError } from "@/lib/utils/retry";
 import { KEYS } from "@/lib/utils/storage";
 import type { BackendConfig } from "@/lib/types";
 
@@ -100,5 +101,44 @@ describe("WebDAV: what a 403 says", () => {
     };
     await expect(new WebDAVBackend(nutstore).getFile("x.json")).rejects.toThrow(/Forbidden \(403\)/);
     await expect(new WebDAVBackend(nutstore).getFile("x.json")).rejects.toThrow(/Sync interval/);
+  });
+});
+
+describe("WebDAV: a metered MKCOL is a rate limit, not a wrong path", () => {
+  // A field report (2026-11-10) showed `MKCOL 503` once a minute for six minutes against
+  // Nutstore, each time as "Check the path and that the account may write to it" — a path
+  // and a permission that were both fine. Nutstore answers a spent window with 503 on some
+  // methods rather than its usual 403, so it was wrong twice: the advice was wrong, and
+  // nothing parked the sync, which is how the window stayed spent.
+  const NUTSTORE: BackendConfig = {
+    ...cfg,
+    webdav: { url: "https://dav.jianguoyun.com/dav/", username: "u", password: "p" },
+  };
+
+  it("flags Nutstore's 503 so automatic sync parks instead of retrying every minute", async () => {
+    server(503, 503);
+    const backend = new WebDAVBackend(NUTSTORE);
+
+    const err = await backend.connect().catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(HttpError);
+    expect((err as HttpError).status).toBe(503);
+    expect((err as HttpError).rateLimited).toBe(true);
+    expect(backend.rateLimited).toBe(true);
+    expect((err as Error).message).toContain("600 requests");
+    expect((err as Error).message).not.toContain("Check the path");
+  });
+
+  it("keeps the path advice for a store that merely had a bad moment", async () => {
+    server(503, 503);
+    const backend = new WebDAVBackend(cfg);
+
+    const err = await backend.connect().catch((e: unknown) => e);
+
+    // Not every 503 is a meter. Parking a self-hosted NAS for 30 minutes on one bad
+    // moment would be worse than the retry it replaces.
+    expect((err as HttpError).rateLimited).toBe(false);
+    expect(backend.rateLimited).toBe(false);
+    expect((err as Error).message).toContain("Check the path");
   });
 });

@@ -1391,26 +1391,6 @@ export class SyncEngine {
   async chooseFirstSync(choice: FirstSyncChoice): Promise<void> {
     if (this.isSyncing) throw new Error("A sync is already running — try again in a moment.");
 
-    if (choice !== "merge") {
-      try { await this.snapshotNow({ origin: "manual" }); }
-      catch (err) {
-        const why = err instanceof Error ? err.message : String(err);
-        // "remote" REPLACES this browser's bookmark tree, so everything the chosen peer
-        // does not hold is gone from here — the one answer in Kesonode that can destroy
-        // local data with a single click. It must not run without the restore point it can
-        // be undone from: a line in the log is not a backup. Nothing has been touched at
-        // this point, the question stays open, and the user can retry or pick again.
-        // "local" only deletes PEER files, which their owners re-upload, so a refused
-        // snapshot there is noise rather than a hazard.
-        if (choice === "remote") {
-          throw new Error(
-            `Couldn't save a restore point before replacing this device's bookmarks, so nothing was changed. ${why}`
-          );
-        }
-        logger.warn("FirstSync", `Couldn't save a restore point before the ${choice} choice: ${why}`);
-      }
-    }
-
     if (choice === "remote") {
       const read = await this.withBackend(async (b) => {
         const peers = orderPeersByTime(await b.downloadAll("bookmarks", this.settings.device_id));
@@ -1435,7 +1415,29 @@ export class SyncEngine {
         return { peers, failed, rateLimited: b.rateLimited === true, peerFileThere };
       });
       const peers = read.peers;
-      if (!peers.length) throw new Error(this.explainNoRemoteCopy(read));
+      if (!peers.length) {
+        // A refused download is the storage METERING us, not a bad answer. Parking here is
+        // what stops the retry the message invites from arriving inside a window that has
+        // nothing left in it — a field report showed two "use the remote copy" clicks 96
+        // seconds apart, two restore points, and the same 403 twice.
+        if (read.rateLimited) await this.noteRateLimit();
+        throw new Error(this.explainNoRemoteCopy(read));
+      }
+
+      // The restore point is taken AFTER the read and is still a PRECONDITION: "remote"
+      // replaces this browser's whole bookmark tree, the one answer in Kesonode that can
+      // destroy local data with a single click, so it must not run without the point it can
+      // be undone from. Taking it first was the same guarantee read backwards: a download
+      // that is then refused leaves a restore point for a replacement that never happened,
+      // which is how two identical points appeared for two clicks that changed nothing.
+      try { await this.snapshotNow({ origin: "manual" }); }
+      catch (err) {
+        const why = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `Couldn't save a restore point before replacing this device's bookmarks, so nothing was changed. ${why}`
+        );
+      }
+
       // openPacket() enforces the packet version, E2EE agreement and the SHA-256 checksum.
       const payload = await this.openPacket(peers[0]);
       await importBookmarks(payload, "replace", this.settings.conflict_strategy, this.settings.bulk_delete_percent, 0);
@@ -1446,25 +1448,41 @@ export class SyncEngine {
       await setState({ pending_conflicts: [] });
       logger.event("FirstSync", "Replaced this device's bookmarks with the newest peer's tree");
     } else if (choice === "local") {
-      const { removed, failed } = await this.withBackend(async (b) => {
+      // "local" only deletes PEER files, which their owners re-upload on their next sync,
+      // so a refused snapshot here is noise rather than a hazard — the opposite of the
+      // "remote" branch above, where it is the whole safety net.
+      try { await this.snapshotNow({ origin: "manual" }); }
+      catch (err) {
+        logger.warn("FirstSync", `Couldn't save a restore point before the local choice: ${err instanceof Error ? err.message : err}`);
+      }
+      const { removed, failed, rateLimited } = await this.withBackend(async (b) => {
         const names = (await Promise.all(listPrefixes("bookmarks").map((p) => b.listFiles(p)))).flat();
         let removed = 0, failed = 0;
         for (const name of names) {
           const id = peerDeviceIdFromName(name, "bookmarks");
           if (!id || id === this.settings.device_id || !isPeerFileName(name, "bookmarks")) continue;
+          // Every further DELETE in a metered window is refused too, so stop asking.
+          if (b.rateLimited) { failed++; continue; }
           try { await b.deleteFile(name); removed++; }
           catch (err) {
             failed++;
             logger.warn("FirstSync", `Couldn't remove ${name}: ${err instanceof Error ? err.message : err}`);
           }
         }
-        return { removed, failed };
+        return { removed, failed, rateLimited: b.rateLimited === true };
       });
       // A 503 must not look like a successful "reset". Nothing is marked done yet, so the
       // choice stays available for a retry. Files already removed will come back on their
       // own when their device next syncs, so a partial attempt is safe to repeat.
       if (failed > 0) {
-        throw new Error(`${failed} device file(s) could not be removed from the storage (${removed} were removed). Check the connection and choose again; Settings → Activity has the details.`);
+        if (rateLimited) await this.noteRateLimit();
+        throw new Error(
+          `${failed} device file(s) could not be removed from the storage (${removed} were removed). ` +
+          (rateLimited
+            ? "The storage is refusing requests for now (quota or rate limit), so choosing again will not help until that window passes."
+            : "Check the connection and choose again.") +
+          " Settings → Activity has the details."
+        );
       }
       // The local tree did not change, so the upload checksum would otherwise still
       // match and our own file would never be (re)published.
