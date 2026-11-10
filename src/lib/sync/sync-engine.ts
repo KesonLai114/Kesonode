@@ -1156,7 +1156,18 @@ export class SyncEngine {
           browserInfo = cached.browser ?? null;
         }
 
-        if (!label) {
+        // This device needs no request either: its name is in settings, its browser is the
+        // browser asking, and its last upload is the newest time in the listing. Reading
+        // its own packet back was one GET per device-list refresh for facts we hold.
+        if (isSelf) {
+          label = this.settings.device_label || null;
+          browserInfo = await detectBrowser();
+        }
+        // …except where the listing carries no times at all (GitHub): then one packet is
+        // still the only way to say when this device last uploaded.
+        const needsTimestamp = isSelf && !newestUpload.has(device_id);
+
+        if (!label || needsTimestamp) {
           // The smallest file is often the OLDEST: an extension list that never changes was
           // written by whichever build first set the device up, before packets carried a
           // name. Try the next smallest before calling the device unnamed. A history packet
