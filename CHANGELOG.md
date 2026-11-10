@@ -10,7 +10,96 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+## [1.5.14] - 2026-11-10
+
+### Added
+
+- **Settings → Activity now shows whether sync is working, not just how much moved.** The
+  page had three numbers (transferred, runs, last sync) while the actual status and reason
+  for failure lived only in the popup banner. A persistent status bar now shows the state,
+  how long ago the last sync ran (hover for the exact time), when the next one is due —
+  read from the real `chrome.alarms` schedule instead of inferring it from
+  last-sync + interval — and the last error when there is one. A row of per-type totals
+  follows, with disabled types dimmed but still counted, which answers "why is history
+  always 0". The popup's timestamp is now "3 minutes ago", the same wording as the device
+  list.
+
 ### Fixed
+
+- **A bulk-delete approval no longer outlives the sync that read it.** The allowance the
+  safety guard consumes is one cycle's budget, but it stayed on the engine instance after
+  the sync finished. Any later operation that consulted it — most visibly "Use remote"
+  on a conflict card seconds later — inherited a consent the user gave for a different
+  run. It is now reset in the same `finally` that releases the sync flag and passed to
+  the bookmark merge as an explicit argument.
+
+- **"Use remote" on a conflict now says when the safety guard stopped it.** Applying the
+  remote side could block a mass deletion, but the card was still removed and the
+  resolution remembered, so the conflict looked resolved while nothing had been deleted.
+  The resolution now throws with the numbers (how many of how many bookmarks, the cap and
+  the percentage), leaves the conflict pending, and points at Settings → Safety.
+
+- **Turning automatic sync off actually stops it, including after a restart.** The periodic
+  alarm ignored `auto_sync`: a window that was open before the setting changed, or an
+  alarm left over from an older build, kept syncing. The worker now clears the alarm at
+  startup when the setting is off and re-checks it each time the alarm fires.
+
+- **Two windows saving settings at the same moment no longer lose one change.** Settings,
+  sync state and the sync lock were read-modify-write of the whole object, so the options
+  page changing the passphrase while the popup disconnected a backend could drop one of
+  the two writes. All three now run through the same serialized `updateKey` as the
+  bookmark logs; a settings backup imported at the same time goes through the same path.
+
+- **A restore point can no longer lose its annotation to a race or a cached listing.** The
+  shared index is written only conditionally on every attempt; exhausting the retries
+  leaves the remote index untouched instead of overwriting another device's work. An entry
+  is dropped only when this device successfully deleted that file — a name missing from a
+  cached listing (WebDAV) is not proof of deletion. A pending pin rename that fails for an
+  unknown reason is kept for retry with its retention protection, and moving a point reads
+  the actual files rather than a listing before deciding the source is gone.
+
+- **A rate-limit window no longer feeds itself, and Nutstore's 503 is recognised as one.**
+  The "Reset stuck syncing state" recovery wrote to the audit log on every worker wake, so
+  a 200-entry log could fill with 120+ of them and push the real 403s out. It is now a
+  console line. Nutstore answers 503 (not 403) for some methods when the window is
+  exhausted; that used to be reported as "check the path and that the account may write"
+  and did not start the cool-down, so the worker kept spending an empty window every
+  minute. Other hosts keep the path explanation for a 5xx, so one blip does not park a NAS
+  for 30 minutes.
+
+- **"Use remote" on the first sync no longer leaves a restore point that replaced
+  nothing.** The point was written before the download; a refused download then left a
+  point with identical content and no cool-down, so the next click failed the same way.
+  The peer is read first, the restore point written only after that succeeds, and a
+  refusal now starts the rate-limit cool-down. The "use this browser" branch also stops
+  deleting peer files once the account is meter-limited.
+
+- **Overlapping bookmark import and restore no longer record each other's writes as user
+  edits.** The suppression flag was a boolean, so whichever operation finished first
+  exposed the other's create/remove churn; a restore running during a merge could
+  tombstone the bookmarks the merge had just written. It is now a counter. URL comparisons
+  for "is this bookmark really gone" also use the same canonical form as the rest of the
+  merge.
+
+- **Restoring a session checks the tab it asked for, not the total count.** A failed open
+  was inferred from "the number of open tabs did not grow by two", so closing a tab while
+  a restore ran produced a wrong "blocked" verdict that stranded every later restore in
+  one window. It now confirms the new tab id exists, and only a restore that actually got
+  a second tab open records that this browser allows more than one — a one-tab session no
+  longer claims it measured anything.
+
+- **A history visit-time rejection is only assumed when the error is about visit times.**
+  Any failure of `addUrl` with a visit time marked this browser as not supporting them,
+  even when the real cause was something else. The plain add is retried first, and the
+  capability is only disabled when the error names `visitTime`.
+
+- **Drive and GitHub writes are safer around versions and paths.** Drive listings now
+  follow pagination, conditional writes take the ETag from the response headers, and a
+  404 while storing a versioned file is reported as "gone" instead of being recreated.
+  GitHub encodes each path segment and the branch, and a 422 that carries a SHA is
+  surfaced as a real error rather than a lost race. OAuth sessions are generation-checked
+  and refreshed once for concurrent callers; an explicit sign-out is not undone by a
+  queued auto sign-in, and token responses are never logged.
 
 - **A restore point keeps naming the device that actually took it.** The default name is
   `Bookmark restore point · <device> · <short id>`, and the device half was re-derived from
