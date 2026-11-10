@@ -908,6 +908,46 @@ describe("SyncEngine — a bulk-delete approval lasts exactly one sync", () => {
     expect(blocked?.localTotal).toBe(100);  // and the pair still describes one deletion
     expect((await localUrls()).length).toBe(100);
   });
+
+  it("does not hand a finished sync's approval to a later 'use remote'", async () => {
+    // The approval is read once per cycle, but a sync that never reached a merge left the
+    // number on the engine. A manual resolution running afterwards inherited it and applied
+    // a deletion nobody had approved in this cycle. The budget is now passed to the merge
+    // explicitly, so only a sync can spend it.
+    const engine = new SyncEngine(
+      {
+        ...DEFAULT_SETTINGS,
+        device_id: "me",
+        active_backend: "webdav",
+        backends: [{
+          type: "webdav", label: "Local", enabled: true,
+          webdav: { url: "http://127.0.0.1:9/dav/", username: "u", password: "p" },
+        }],
+      },
+      () => {}
+    );
+    for (let i = 0; i < 100; i++) {
+      await chrome.bookmarks.create({ parentId: "1", title: `S${i}`, url: `https://s${i}.com` });
+    }
+    const tombstones = Array.from({ length: 70 }, (_, i) => ({ url: `https://s${i}.com`, deletedAt: 9e15 }));
+    await setState({
+      pending_conflicts: [{
+        id: "c1", data_type: "bookmarks", device_id: "peer1", resolved: false,
+        timestamp: new Date().toISOString(),
+        remote_packet: await peerPacket(engine, "peer1", payload([], tombstones)),
+      }],
+      status: "conflict",
+    });
+
+    await setBulkDeleteApproval(70);
+    await engine.sync(); // reads and clears the approval, then cannot reach the backend
+    expect(await getBulkDeleteApproval()).toBe(0); // spent, as the contract says
+
+    // 70 of 100 is over the 60% cap, so the guard must still refuse it here.
+    await expect(engine.resolveConflict("c1", "remote")).rejects.toThrow(/safety guard blocked/);
+    expect((await localUrls()).length).toBe(100);
+    expect((await getState()).pending_conflicts.map((c) => c.id)).toEqual(["c1"]);
+  });
 });
 
 describe("SyncEngine.findOwnMissingFiles — an unreadable folder is said once, not every cycle", () => {
@@ -1169,6 +1209,15 @@ describe("SyncEngine.sync — reports whether it actually ran", () => {
     );
   }
 
+  it("releases the in-memory guard when a preflight storage read rejects", async () => {
+    const engine = makeEngine();
+    const read = vi.spyOn(chrome.storage.local, "get").mockRejectedValueOnce(new Error("storage unavailable"));
+    await expect(engine.sync()).rejects.toThrow("storage unavailable");
+    read.mockRestore();
+    expect(engine.isSyncing).toBe(false);
+    expect(await engine.sync()).toBe("no-backend");
+  });
+
   it("reports no-backend when nothing is configured", async () => {
     expect(await makeEngine().sync()).toBe("no-backend");
   });
@@ -1288,6 +1337,67 @@ describe("SyncEngine.sync — reports whether it actually ran", () => {
     const b = configured();
     await b.sync();
     expect(b.isSyncing).toBe(false);
+  });
+});
+
+describe("SyncEngine mutation isolation", () => {
+  it("rejects all bookmark mutations while syncing", async () => {
+    const engine = makeEngine();
+    engine.isSyncing = true;
+    await expect(engine.resolveConflict("c1", "remote")).rejects.toThrow(/already running/);
+    await expect(engine.restoreFromSnapshot("point")).rejects.toThrow(/already running/);
+    await expect(engine.chooseFirstSync("merge")).rejects.toThrow(/already running/);
+  });
+
+  it("holds the guard throughout a restore and rejects a second mutation", async () => {
+    const engine = makeEngine();
+    let release!: (n: number) => void;
+    const pending = new Promise<number>((resolve) => { release = resolve; });
+    const seam = engine as unknown as { withBackend(): Promise<number> };
+    vi.spyOn(seam, "withBackend").mockReturnValue(pending);
+    const restoring = engine.restoreFromSnapshot("point");
+    expect(await engine.sync()).toBe("already-running");
+    await expect(engine.resolveConflict("c1", "local")).rejects.toThrow(/already running/);
+    release(0);
+    await restoring;
+    expect(engine.isSyncing).toBe(false);
+    expect(await acquireSyncLock(60_000)).toBe(true);
+  });
+
+  it("does not release another operation's persisted lock", async () => {
+    const engine = makeEngine();
+    await acquireSyncLock(60_000);
+    await expect(engine.chooseFirstSync("merge")).rejects.toThrow(/already running/);
+    expect(engine.isSyncing).toBe(false);
+    expect(await acquireSyncLock(60_000)).toBe(false);
+  });
+
+  it("releases both guards after a failed mutation", async () => {
+    const engine = makeEngine();
+    const seam = engine as unknown as { withBackend(): Promise<number> };
+    vi.spyOn(seam, "withBackend").mockRejectedValue(new Error("offline"));
+    await expect(engine.restoreFromSnapshot("point")).rejects.toThrow("offline");
+    expect(engine.isSyncing).toBe(false);
+    expect(await acquireSyncLock(60_000)).toBe(true);
+  });
+
+  it("resolves against fresh state without dropping newer conflicts or errors", async () => {
+    const engine = makeEngine();
+    const first: ConflictItem = {
+      id: "first", data_type: "bookmarks", device_id: "peer1",
+      timestamp: new Date().toISOString(), resolved: false,
+      remote_packet: await peerPacket(engine, "peer1", payload([])),
+    };
+    const second: ConflictItem = { ...first, id: "second", device_id: "peer2" };
+    await setState({ pending_conflicts: [first], status: "conflict" });
+    const seam = engine as unknown as { applyRemote(): Promise<void> };
+    vi.spyOn(seam, "applyRemote").mockImplementation(async () => {
+      await setState({ pending_conflicts: [first, second], status: "error", last_error: "offline" });
+    });
+    await engine.resolveConflict("first", "remote");
+    const state = await getState();
+    expect(state.pending_conflicts.map((c) => c.id)).toEqual(["second"]);
+    expect(state).toMatchObject({ status: "error", last_error: "offline" });
   });
 });
 
@@ -1522,8 +1632,15 @@ describe("SyncEngine.finishSync — tear-down must not strand its own guards", (
   // (every later sync answering "already running") and the persisted lock sat until its
   // TTL. No backend's disconnect() can throw today — this is hardening, and the previous
   // ordering only looked safe by accident.
-  type Finish = { finishSync(backend: IBackend): Promise<void> };
+  type Finish = { finishSync(backend: IBackend): Promise<void>; runSync(): Promise<"ran"> };
   const finish = (e: SyncEngine): Finish => e as unknown as Finish;
+  const runFinish = (engine: SyncEngine, backend: IBackend) => {
+    vi.spyOn(finish(engine), "runSync").mockImplementation(async () => {
+      await finish(engine).finishSync(backend);
+      return "ran";
+    });
+    return engine.sync();
+  };
 
   class HostileBackend extends FakeBackend {
     disconnect(): Promise<void> { return Promise.reject(new Error("socket gone")); }
@@ -1531,10 +1648,9 @@ describe("SyncEngine.finishSync — tear-down must not strand its own guards", (
 
   it("clears isSyncing and releases the lock even when disconnect throws", async () => {
     const engine = makeEngine();
-    engine.isSyncing = true;
     expect(await acquireSyncLock(60_000)).toBe(true);
 
-    await finish(engine).finishSync(new HostileBackend());
+    await runFinish(engine, new HostileBackend());
 
     expect(engine.isSyncing).toBe(false);
     // Released → the next sync can start immediately instead of waiting out the TTL.
@@ -1548,13 +1664,12 @@ describe("SyncEngine.finishSync — tear-down must not strand its own guards", (
 
   it("still disconnects normally when nothing is wrong", async () => {
     const engine = makeEngine();
-    engine.isSyncing = true;
     let disconnected = false;
     class Watched extends FakeBackend {
       disconnect(): Promise<void> { disconnected = true; return Promise.resolve(); }
     }
 
-    await finish(engine).finishSync(new Watched());
+    await runFinish(engine, new Watched());
 
     expect(disconnected).toBe(true);
     expect(engine.isSyncing).toBe(false);

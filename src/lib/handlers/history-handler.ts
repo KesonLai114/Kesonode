@@ -266,7 +266,8 @@ export async function importHistory(
         // necessarily the problem. Try it again plainly before blaming it.
         try {
           await browser.history.addUrl({ url: job.url });
-          if (visitTimeAccepted !== false) {
+          const unsupportedTime = /(?:unexpected|unknown|unrecognized|unsupported).{0,40}visitTime|visitTime.{0,40}(?:unexpected|unknown|unrecognized|unsupported|not supported)/i.test(String(err));
+          if (visitTimeAccepted === null && unsupportedTime) {
             visitTimeAccepted = false;
             await setVisitTimeSupport(false);
             logger.info("importHistory", "This browser doesn't accept visit times; pages will be dated when they arrive");

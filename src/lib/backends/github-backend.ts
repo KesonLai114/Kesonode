@@ -92,6 +92,18 @@ export class GitHubBackend implements IBackend {
     };
   }
 
+  /** The Contents API URL for one file or folder, with the branch as a query parameter.
+   *
+   *  Every path segment and the branch are percent-encoded. Left raw, a configured folder
+   *  or branch containing a space, `#` or `%` produced a different URL than the one meant
+   *  (the fragment swallowed everything after `#`), so the folder looked empty and a
+   *  restore point looked absent. */
+  private contentsUrl(path: string, branch?: string): string {
+    const encoded = path.split("/").map(encodeURIComponent).join("/");
+    const base = `${GITHUB_API}/repos/${this.repoSlug}/contents/${encoded}`;
+    return branch === undefined ? base : `${base}?ref=${encodeURIComponent(branch)}`;
+  }
+
   async connect(): Promise<void> {
     if (!this.gh.token) throw new Error("No token configured");
     if (!this.gh.repo) throw new Error("No repository configured");
@@ -125,7 +137,7 @@ export class GitHubBackend implements IBackend {
         if (sha) body.sha = sha;
 
         const res = await fetch(
-          `${GITHUB_API}/repos/${this.repoSlug}/contents/${filename}`,
+          this.contentsUrl(filename),
           { method: "PUT", headers: this.headers(), body: JSON.stringify(body) }
         );
         if (!res.ok) {
@@ -206,7 +218,7 @@ export class GitHubBackend implements IBackend {
 
   private async getFileSHA(path: string, branch: string): Promise<string | null> {
     const res = await fetch(
-      `${GITHUB_API}/repos/${this.repoSlug}/contents/${path}?ref=${branch}`,
+      this.contentsUrl(path, branch),
       // GitHub sends `Cache-Control: max-age=60` on contents reads, so the browser
       // HTTP cache can hand back a stale SHA right after a write — which then makes
       // the next PUT 409 ("does not match"). `no-store` forces a fresh read.
@@ -237,12 +249,15 @@ export class GitHubBackend implements IBackend {
       message: `snapshot: ${name}`, content: utf8ToBase64(content), branch: this.branch,
     };
     if (version) body.sha = version;
-    const res = await fetch(`${GITHUB_API}/repos/${this.repoSlug}/contents/${filename}`, {
+    const res = await fetch(this.contentsUrl(filename), {
       method: "PUT", headers: this.headers(), body: JSON.stringify(body),
     });
-    // 409: the sha we named is no longer the current one. 422: no sha was named, but the
-    // file exists — someone created it since we looked. Both mean "re-read and retry".
-    if (res.status === 409 || res.status === 422) return false;
+    // 409: the sha we named is no longer the current one. 422 with NO sha is the same
+    // fact — the file exists, someone created it since we looked. A 422 WITH a sha means
+    // GitHub refused for an unrelated reason (content too large, unreadable encoding),
+    // which no amount of re-reading and merging can fix: surface it instead of reporting
+    // a lost race after four doomed attempts.
+    if (res.status === 409 || (res.status === 422 && !version)) return false;
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw this.httpError(res, `GitHub putFile failed: ${res.status}. ${err.message ?? ""}`);
@@ -253,7 +268,7 @@ export class GitHubBackend implements IBackend {
   async downloadAll(data_type: DataType, excludeDeviceId?: string): Promise<SyncPacket[]> {
     return withRetry(async () => {
       const res = await fetch(
-        `${GITHUB_API}/repos/${this.repoSlug}/contents/${this.path}?ref=${this.branch}`,
+        this.contentsUrl(this.path, this.branch),
         { headers: this.headers(), cache: "no-store" }
       );
       // 404 = the sync folder doesn't exist yet (no peers). Any other non-OK is a
@@ -275,7 +290,7 @@ export class GitHubBackend implements IBackend {
         try {
           r = await withPeerRetry(async () => {
             const res = await fetch(
-              `${GITHUB_API}/repos/${this.repoSlug}/contents/${this.path}/${m.name}?ref=${this.branch}`,
+              this.contentsUrl(`${this.path}/${m.name}`, this.branch),
               { headers: { ...this.headers(), Accept: "application/vnd.github.raw+json" }, cache: "no-store" }
             );
             if (!res.ok) throw this.httpError(res, `HTTP ${res.status}`);
@@ -317,7 +332,7 @@ export class GitHubBackend implements IBackend {
         const sha = await this.getFileSHA(filename, this.branch);
         const body: Record<string, unknown> = { message: `snapshot: ${name}`, content: encoded, branch: this.branch };
         if (sha) body.sha = sha;
-        const res = await fetch(`${GITHUB_API}/repos/${this.repoSlug}/contents/${filename}`, {
+        const res = await fetch(this.contentsUrl(filename), {
           method: "PUT", headers: this.headers(), body: JSON.stringify(body),
         });
         if (!res.ok) {
@@ -332,7 +347,7 @@ export class GitHubBackend implements IBackend {
   async getFile(name: string): Promise<string | null> {
     return withRetry(async () => {
       const res = await fetch(
-        `${GITHUB_API}/repos/${this.repoSlug}/contents/${this.path}/${name}?ref=${this.branch}`,
+        this.contentsUrl(`${this.path}/${name}`, this.branch),
         { headers: { ...this.headers(), Accept: "application/vnd.github.raw+json" }, cache: "no-store" }
       );
       if (res.status === 404) return null;
@@ -344,7 +359,7 @@ export class GitHubBackend implements IBackend {
   async listFiles(prefix: string): Promise<string[]> {
     return withRetry(async () => {
       const res = await fetch(
-        `${GITHUB_API}/repos/${this.repoSlug}/contents/${this.path}?ref=${this.branch}`,
+        this.contentsUrl(this.path, this.branch),
         { headers: this.headers(), cache: "no-store" }
       );
       if (res.status === 404) return [];
@@ -359,7 +374,7 @@ export class GitHubBackend implements IBackend {
     await withRetry(async () => {
       const sha = await this.getFileSHA(filename, this.branch);
       if (!sha) return; // already gone
-      const res = await fetch(`${GITHUB_API}/repos/${this.repoSlug}/contents/${filename}`, {
+      const res = await fetch(this.contentsUrl(filename), {
         method: "DELETE", headers: this.headers(),
         body: JSON.stringify({ message: `snapshot: delete ${name}`, sha, branch: this.branch }),
       });

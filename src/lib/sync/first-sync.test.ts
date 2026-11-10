@@ -155,6 +155,8 @@ describe("first sync chooses a direction before anything is merged", () => {
 
     expect(await e.sync(undefined, { force: true })).toBe("first-sync-pending");
     expect((await getState()).first_sync_pending?.at).toBe(askedAt);
+    expect((await getState()).status).toBe("idle");
+    expect(e.isSyncing).toBe(false);
     expect(h.uploads).toEqual([]);
     expect(await localUrls()).toEqual(["https://local.example/"]);
   });
@@ -171,6 +173,40 @@ describe("first sync chooses a direction before anything is merged", () => {
     expect((await getState()).first_sync_pending).toBeNull();
     expect((await getFirstSync())?.done).toBe(true);
     expect(h.uploads).toContain("me");
+  });
+
+  it("honours an explicit merge without permanently changing manual conflict mode", async () => {
+    await seedLocal();
+    await putPeer("peer", ["https://peer.example/"]);
+    const e = new SyncEngine({ ...settings(), conflict_strategy: "manual" }, () => {});
+    await e.sync();
+    await e.chooseFirstSync("merge");
+    expect(await localUrls()).toEqual(["https://local.example/", "https://peer.example/"]);
+    expect((await getState()).pending_conflicts).toEqual([]);
+    const published = JSON.parse(h.blobs.get("konode_bookmarks_me.json")!) as SyncPacket;
+    expect(published.payload).toContain("https://peer.example/");
+    await putPeer("peer", ["https://new.example/"]);
+    await e.sync();
+    expect((await getState()).pending_conflicts).toHaveLength(1);
+    expect(await localUrls()).not.toContain("https://new.example/");
+  });
+
+  it("does not ask an upgraded device again after changing its encryption settings", async () => {
+    await seedLocal();
+    await putPeer("peer", ["https://peer.example/"]);
+    await setLastUploadChecksum("bookmarks", "already-published");
+    const e = engine();
+    await e.updateSettings({ ...settings(), encryption_enabled: true, encryption_passphrase: "long-passphrase" });
+    expect((await getFirstSync())?.done).toBe(true);
+    expect(await e.sync()).toBe("ran");
+    expect((await getState()).first_sync_pending ?? null).toBeNull();
+    expect(JSON.parse(h.blobs.get("konode_bookmarks_me.json")!).encrypted).toBe(true);
+  });
+
+  it("records successful publishing independently of the upload checksum", async () => {
+    await seedLocal();
+    await engine().sync();
+    expect((await getFirstSync())?.done).toBe(true);
   });
 
   it("local removes the peers' bookmark files and publishes this tree", async () => {

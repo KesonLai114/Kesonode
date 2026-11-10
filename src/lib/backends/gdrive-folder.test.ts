@@ -24,8 +24,8 @@ async function signIn(): Promise<void> {
   });
 }
 
-const json = (body: unknown, status = 200): Response =>
-  ({ ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) }) as Response;
+const json = (body: unknown, status = 200, headers?: HeadersInit): Response =>
+  new Response(JSON.stringify(body), { status, headers });
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -215,5 +215,182 @@ describe("GDriveBackend — a folder move must invalidate the upload checksums",
 
     // The upgrade path relies on the TAG FORMAT change to force that re-upload, not on this.
     expect(await checksums()).toEqual({ bookmarks: "carried-over-from-an-older-build" });
+  });
+});
+
+describe("Drive canonical duplicates across pages", () => {
+  const pageToken = "second+/= &?#%";
+  const newer = { id: "newer", createdTime: "2026-07-20T10:00:00.000Z" };
+  const older = { id: "older", createdTime: "2026-07-01T09:00:00.000Z" };
+
+  it("chooses a folder on the later page rather than settling on the first", async () => {
+    await signIn();
+    const fetchSpy = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      expect(u.searchParams.get("fields")).toBe("nextPageToken,files(id,name,createdTime)");
+      expect(u.searchParams.has("orderBy")).toBe(false);
+      if (!u.searchParams.has("pageToken")) return json({ files: [newer], nextPageToken: pageToken });
+      expect(u.searchParams.get("pageToken")).toBe(pageToken);
+      expect(url).toContain(`pageToken=${encodeURIComponent(pageToken)}`);
+      return json({ files: [older] });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const be = new GDriveBackend(config());
+
+    await be.connect();
+
+    expect((be as unknown as { folderId: string }).folderId).toBe("older");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("also paginates the post-create folder recheck before choosing the winner", async () => {
+    await signIn();
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(json({ files: [] }))
+      .mockResolvedValueOnce(json(newer))
+      .mockResolvedValueOnce(json({ files: [newer], nextPageToken: pageToken }))
+      .mockResolvedValueOnce(json({ files: [older] }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const be = new GDriveBackend(config());
+
+    await be.connect();
+
+    expect((be as unknown as { folderId: string }).folderId).toBe("older");
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(fetchSpy.mock.calls[1][1].method).toBe("POST");
+    expect(new URL(fetchSpy.mock.calls[3][0]).searchParams.get("pageToken")).toBe(pageToken);
+  });
+
+  it.each(["getFile", "putFile", "deleteFile"] as const)(
+    "%s resolves all duplicate pages before using the oldest file",
+    async (operation) => {
+      await signIn();
+      const fetchSpy = vi.fn(async (url: string) => {
+        const u = new URL(url);
+        if (!u.searchParams.has("q")) return json({});
+        expect(u.searchParams.get("fields")).toBe("nextPageToken,files(id,createdTime)");
+        expect(u.searchParams.has("orderBy")).toBe(false);
+        if (!u.searchParams.has("pageToken")) return json({ files: [newer], nextPageToken: pageToken });
+        expect(u.searchParams.get("pageToken")).toBe(pageToken);
+        expect(url).toContain(`pageToken=${encodeURIComponent(pageToken)}`);
+        return json({ files: [older] });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+      const be = new GDriveBackend({ ...config(), gdrive: { folderId: "pinned" } });
+
+      if (operation === "putFile") await be.putFile("konode_snap_index.json", "{}");
+      else await be[operation]("konode_snap_index.json");
+
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      expect(fetchSpy.mock.calls[2][0]).toContain("/files/older");
+      expect(new URL(fetchSpy.mock.calls[1][0]).searchParams.get("q"))
+        .toBe(new URL(fetchSpy.mock.calls[0][0]).searchParams.get("q"));
+    },
+  );
+});
+
+describe("Drive HTTP ETag conditional writes", () => {
+  const name = "konode_snap_index.json";
+  const be = () => new GDriveBackend({ ...config(), gdrive: { folderId: "pinned" } });
+  const found = () => json({ files: [{ id: "index" }] });
+
+  it.each([200, 412, 404])("uses the HTTP ETag verbatim for If-Match (PATCH %s)", async (status) => {
+    await signIn();
+    const etag = '"http-version+/="';
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(found())
+      .mockResolvedValueOnce(json({ id: "index", etag: "not-the-http-etag" }, 200, { eTaG: etag }))
+      .mockResolvedValueOnce(found())
+      .mockResolvedValueOnce(json({}, status));
+    vi.stubGlobal("fetch", fetchSpy);
+    const backend = be();
+
+    const version = await backend.getFileVersion(name);
+    expect(version).toBe(etag);
+    expect(fetchSpy.mock.calls[1][0]).toBe("https://www.googleapis.com/drive/v3/files/index?fields=id");
+    expect(fetchSpy.mock.calls[1][1].cache).toBe("no-store");
+    expect(await backend.putFileIfVersion(name, '{"labels":{}}', version)).toBe(status === 200);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(fetchSpy.mock.calls[3]).toEqual([
+      "https://www.googleapis.com/upload/drive/v3/files/index?uploadType=media",
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer test-token", "Content-Type": "application/json", "If-Match": etag,
+        },
+        body: '{"labels":{}}',
+      },
+    ]);
+  });
+
+  it.each([undefined, ""])("rejects a missing/empty ETag header (%s), never using JSON etag", async (etag) => {
+    await signIn();
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(found())
+      .mockResolvedValueOnce(json({ id: "index", etag: "json-is-not-a-version" }, 200,
+        etag === undefined ? {} : { ETag: etag }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await expect(be().getFileVersion(name)).rejects.toThrow(/no ETag header.*cannot be made conditional/);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns null if the file is absent at lookup", async () => {
+    await signIn();
+    const fetchSpy = vi.fn().mockResolvedValue(json({ files: [] }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    expect(await be().getFileVersion(name)).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns null if the file disappears before reading its version", async () => {
+    await signIn();
+    const fetchSpy = vi.fn().mockResolvedValueOnce(found()).mockResolvedValueOnce(json({}, 404));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    expect(await be().getFileVersion(name)).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not recreate a disappeared file when the caller supplied a version", async () => {
+    await signIn();
+    const fetchSpy = vi.fn().mockResolvedValue(json({ files: [] }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const backend = be();
+    const put = vi.spyOn(backend, "putFile").mockResolvedValue();
+
+    expect(await backend.putFileIfVersion(name, "{}", '"previous-version"')).toBe(false);
+    expect(put).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not overwrite a newly appeared file when version is null", async () => {
+    await signIn();
+    const fetchSpy = vi.fn().mockResolvedValue(found());
+    vi.stubGlobal("fetch", fetchSpy);
+
+    expect(await be().putFileIfVersion(name, "{}", null)).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("still creates a missing file when version is null without changing the multipart wire format", async () => {
+    await signIn();
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(json({ files: [] }))
+      .mockResolvedValueOnce(json({ files: [] }))
+      .mockResolvedValueOnce(json({ id: "created" }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    expect(await be().putFileIfVersion(name, "{}", null)).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    const [url, init] = fetchSpy.mock.calls[2];
+    expect(url).toBe("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart");
+    expect(init.method).toBe("POST");
+    expect(init.headers["If-Match"]).toBeUndefined();
+    expect(init.headers["Content-Type"]).toMatch(/^multipart\/related; boundary=konode_snap_/);
+    expect(init.body).toContain(JSON.stringify({ name, parents: ["pinned"], mimeType: "application/json" }));
+    expect(init.body).toContain("Content-Type: application/json\r\n\r\n{}\r\n");
   });
 });

@@ -217,21 +217,36 @@ export async function importSession(session: SyncSession): Promise<void> {
     return;
   }
 
-  const tabCount = async (): Promise<number> => (await browser.tabs.query({})).length;
-  const before = await tabCount();
+  // Did the tab we asked for actually appear? Asked for BY ID, because counting every open
+  // tab answers a different question — whether the user closed one while this was running —
+  // and a wrong "blocked" verdict strands every later restore in one window. A swallowed
+  // open can also answer with an id that already existed, so "some tab has this id" is not
+  // enough either: it has to be one that was not here before.
+  const known = new Set<number>();
+  for (const t of await browser.tabs.query({})) if (typeof t.id === "number") known.add(t.id);
+  const landed = async (tab: { id?: number } | undefined): Promise<boolean> => {
+    const id = tab?.id;
+    if (typeof id !== "number" || known.has(id)) return false;
+    known.add(id);
+    try { await browser.tabs.get(id); return true; } catch { return false; }
+  };
+  let measuredUnlimited = false;
 
   for (let i = 0; i < openable.length; i++) {
     const t = openable[i];
+    let appeared = false;
     try {
       const tab = await browser.tabs.create({ url: t.url, pinned: t.pinned, active: false });
-      if (typeof tab?.id === "number") opened.push({ at: i, tabId: tab.id, windowId: tab.windowId });
+      appeared = await landed(tab);
+      if (appeared) opened.push({ at: i, tabId: tab.id as number, windowId: tab.windowId });
     } catch (e) {
       logger.error(`Tab open: ${t.url}`, e);
     }
 
     // Check once, after the second tab — the first is the one every engine allows, so it
     // proves nothing on its own. Only reachable when we had no stored answer.
-    if (i === 1 && (await tabCount()) - before < 2) {
+    if (i === 1 && appeared) measuredUnlimited = true;
+    if (i === 1 && !appeared) {
       const rest = openable.slice(1).map((x) => x.url as string);
       // Record BEFORE the rescue attempt: on WebKit the rescue is blocked too, and this
       // flag is the only reason the next restore opens all of them.
@@ -253,9 +268,9 @@ export async function importSession(session: SyncSession): Promise<void> {
   }
 
   await noteOpened();
-  // Every tab landed where it was asked to, so per-tab restore is safe on this engine and
-  // the next restore can skip the measurement.
-  if (remembered === null) await setSingleTabOpenLimit(false);
+  // Only a restore that actually got a second tab open has proven anything. A one-tab
+  // session would otherwise record "unlimited" on an engine we never measured.
+  if (remembered === null && measuredUnlimited) await setSingleTabOpenLimit(false);
   await restoreGroups(session.groups, openable, opened, safe);
 }
 

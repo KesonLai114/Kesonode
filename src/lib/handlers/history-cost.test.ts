@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { importHistory, exportHistory } from "@/lib/handlers/history-handler";
-import { KEYS } from "@/lib/utils/storage";
+import { KEYS, getVisitTimeSupport } from "@/lib/utils/storage";
 
 // A guard on the WORK a sync does, not on its wall-clock.
 //
@@ -277,6 +277,18 @@ describe("the visit time is only sent to a browser that takes it", () => {
 
     const all = await chrome.history.search({ text: "", startTime: 0, maxResults: 100 });
     expect(all.find((h) => h.url === "https://a.example/page")?.lastVisitTime).toBe(1_700_000_000_000);
+  });
+
+  it("does not turn a transient page failure into a permanent loss of visit times", async () => {
+    histFake.__engine = "firefox";
+    const write = vi.spyOn(chrome.history, "addUrl").mockRejectedValueOnce(new Error("Places temporarily unavailable"));
+    await importHistory([packet[0]]);
+    expect(await getVisitTimeSupport()).toBeNull();
+    await importHistory([packet[1]]);
+    expect(await getVisitTimeSupport()).toBe(true);
+    const all = await chrome.history.search({ text: "", startTime: 0, maxResults: 100 });
+    expect(all.find((h) => h.url === packet[1].url)?.lastVisitTime).toBe(packet[1].lastVisitTime);
+    write.mockRestore();
   });
 
   it("forgets rejections it recorded while it was the one at fault", async () => {

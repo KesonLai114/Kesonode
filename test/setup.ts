@@ -118,21 +118,35 @@ let programmaticOpens = 0;
 let groupStore = new Map();
 let nextGroupId = 100;
 let nextWindowId = 2;
+// A real browser never hands the same id to two live tabs, so the fake must not either.
+// It used to derive the id from the number of open tabs, which let a closed tab make the
+// next open reuse an id still in use — something no engine does, and it turned a
+// legitimate "did my tab appear?" check into a false alarm.
+let nextTabId = 1;
 const allowanceSpent = () => tabsApi.__popupBlocked && programmaticOpens > 1;
 const tabsApi = {
   __popupBlocked: false,
   query: (q = {}) => Promise.resolve(
     openTabs.filter((t) => q.windowId == null || t.windowId === q.windowId).map((t) => ({ ...t })),
   ),
+  get: (id) => {
+    const t = openTabs.find((x) => x.id === id);
+    return t ? Promise.resolve({ ...t }) : Promise.reject(new Error(`No tab with id: ${id}`));
+  },
   create: (props = {}) => {
     const t = {
-      id: openTabs.length + 1, url: props.url, pinned: !!props.pinned, active: props.active ?? true,
+      id: nextTabId++, url: props.url, pinned: !!props.pinned, active: props.active ?? true,
       groupId: -1, windowId: props.windowId ?? 1,
     };
     programmaticOpens++;
     if (allowanceSpent()) return Promise.resolve(t); // resolves, opens nothing
     openTabs.push(t);
     return Promise.resolve(t);
+  },
+  remove: (ids) => {
+    const list = Array.isArray(ids) ? ids : [ids];
+    openTabs = openTabs.filter((t) => !list.includes(t.id));
+    return Promise.resolve();
   },
   group: (opts = {}) => {
     const ids = Array.isArray(opts.tabIds) ? opts.tabIds : opts.tabIds != null ? [opts.tabIds] : [];
@@ -169,7 +183,7 @@ const windowsApi = {
     if (allowanceSpent()) return Promise.resolve({ id: 1, focused: !!props.focused, tabs: [] });
     const windowId = nextWindowId++;
     const tabs = urls.map((u) => {
-      const t = { id: openTabs.length + 1, url: u, pinned: false, groupId: -1, windowId };
+      const t = { id: nextTabId++, url: u, pinned: false, groupId: -1, windowId };
       openTabs.push(t);
       return { ...t };
     });
@@ -185,6 +199,7 @@ function resetTabs() {
   groupStore = new Map();
   nextGroupId = 100;
   nextWindowId = 2;
+  nextTabId = 1;
 }
 resetTabs();
 

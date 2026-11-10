@@ -1,6 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { restoreBookmarks } from "@/lib/handlers/bookmarks-handler";
-import { setTombstones, getTombstones } from "@/lib/utils/storage";
+import { describe, it, expect, vi } from "vitest";
+import {
+  restoreBookmarks, importBookmarks, exportBookmarkPayload, registerBookmarkListeners, resetDeletionLog,
+} from "@/lib/handlers/bookmarks-handler";
+import {
+  setTombstones, getTombstones, getAppeared, getMoves, getFolderMoves, getFolderDeletes,
+} from "@/lib/utils/storage";
 import type { SyncBookmark } from "@/lib/types";
 
 // restoreBookmarks is additive: it brings back what is missing and leaves what is there. #29
@@ -178,6 +182,102 @@ describe("restoreBookmarks keeps the snapshot's order (#29)", () => {
     expect(bar.map((c) => c.title)).toEqual(["A", "", "", "News", "News"]);
     expect(await Promise.all(bar.slice(1).map((f) => titles(f.id)))).toEqual([["B"], ["C"], ["D"], ["E"]]);
   });
+});
+
+describe("overlapping bookmark imports keep event recording suppressed", () => {
+  const operations = {
+    import: () => importBookmarks({ tree: snapshot([]), tombstones: [] }),
+    restore: () => restoreBookmarks(snapshot([])),
+  };
+
+  function deferred(): { promise: Promise<void>; resolve: () => void } {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+  }
+
+  for (const first of ["import", "restore"] as const) {
+    for (const second of ["import", "restore"] as const) {
+      it.each([false, true])(`${first} stays suppressed after overlapping ${second} settles (failure=%s)`, async (failSecond) => {
+        let onCreated!: Parameters<typeof chrome.bookmarks.onCreated.addListener>[0];
+        let onChanged!: Parameters<typeof chrome.bookmarks.onChanged.addListener>[0];
+        let onMoved!: Parameters<typeof chrome.bookmarks.onMoved.addListener>[0];
+        let onRemoved!: Parameters<typeof chrome.bookmarks.onRemoved.addListener>[0];
+        const listeners = [
+          vi.spyOn(chrome.bookmarks.onCreated, "addListener").mockImplementation((cb) => { onCreated = cb; }),
+          vi.spyOn(chrome.bookmarks.onChanged, "addListener").mockImplementation((cb) => { onChanged = cb; }),
+          vi.spyOn(chrome.bookmarks.onMoved, "addListener").mockImplementation((cb) => { onMoved = cb; }),
+          vi.spyOn(chrome.bookmarks.onRemoved, "addListener").mockImplementation((cb) => { onRemoved = cb; }),
+        ];
+        registerBookmarkListeners(() => {});
+        const removed = await chrome.bookmarks.create({ parentId: "1", title: "Removed" });
+        await seedLink("Deleted", removed.id);
+        const [removedTree] = await chrome.bookmarks.getSubTree(removed.id);
+        const edited = await chrome.bookmarks.create({ parentId: "1", title: "Edited", url: "https://old.com" });
+        const moved = await chrome.bookmarks.create({ parentId: "1", title: "Moved" });
+        await seedLink("Moved-child", moved.id);
+        const appeared = await chrome.bookmarks.create({ parentId: "1", title: "Appeared", url: "https://appeared.com" });
+        await exportBookmarkPayload();
+        await chrome.bookmarks.removeTree(removed.id);
+        await chrome.bookmarks.update(edited.id, { url: "https://new.com" });
+        await chrome.bookmarks.move(moved.id, { parentId: "1", index: 0 });
+
+        const fireEvents = async (): Promise<void> => {
+          onCreated(appeared.id, { ...appeared, dateAdded: 1 });
+          onChanged(edited.id, { title: "Edited", url: "https://new.com" });
+          onMoved(moved.id, { parentId: "1", oldParentId: "1", index: 0, oldIndex: moved.index! });
+          onRemoved(removed.id, { parentId: "1", index: 0, node: removedTree });
+          await new Promise((r) => setTimeout(r, 0));
+        };
+        const logs = () => Promise.all([
+          getTombstones(), getAppeared(), getMoves(), getFolderMoves(), getFolderDeletes(),
+        ]);
+        const entered = deferred();
+        const release = deferred();
+        const realGetTree = chrome.bookmarks.getTree.bind(chrome.bookmarks);
+        const read = vi.spyOn(chrome.bookmarks, "getTree").mockImplementationOnce(async () => {
+          entered.resolve();
+          await release.promise;
+          return realGetTree();
+        });
+        // Pause after the first operation enters its suppression window. The second must
+        // finish independently: the counter suppresses recorders, it is NOT an operation lock.
+        const pending = operations[first]();
+        try {
+          await entered.promise;
+          await fireEvents();
+          expect(await logs()).toEqual([[], [], [], [], []]);
+          if (failSecond) {
+            read.mockRejectedValueOnce(new Error("overlapping tree read failed"));
+            await expect(operations[second]()).rejects.toThrow("overlapping tree read failed");
+          } else {
+            await operations[second]();
+          }
+
+          await fireEvents();
+          expect(await logs()).toEqual([[], [], [], [], []]);
+
+          release.resolve();
+          await pending;
+          // The same events must be recorded once the LAST import has left, also after
+          // an overlapping failure; a leaked reference would silently swallow user edits.
+          await fireEvents();
+          const [tombstones, appearances, moves, folderMoves, folderDeletes] = await logs();
+          expect(tombstones.map((t) => t.url).sort()).toEqual(["https://deleted.com", "https://old.com"]);
+          expect(appearances.map((r) => r.url)).toEqual(["https://appeared.com"]);
+          expect(moves.map((r) => r.url)).toEqual(["https://moved-child.com"]);
+          expect(folderMoves.map((r) => r.path)).toEqual([["bar", "Moved"]]);
+          expect(folderDeletes.map((r) => r.path)).toEqual([["bar", "Removed"]]);
+        } finally {
+          release.resolve();
+          await pending;
+          read.mockRestore();
+          listeners.forEach((listener) => listener.mockRestore());
+          resetDeletionLog();
+        }
+      });
+    }
+  }
 });
 
 describe("restoreBookmarks on the tree QA step AC was played on", () => {

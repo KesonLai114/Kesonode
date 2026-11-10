@@ -2,7 +2,7 @@
 // Handles: alarm-based polling, bookmark listeners, message routing
 
 import type { ExtensionMessage, ExtensionResponse, SyncState } from "@/lib/types";
-import { getSettings, getState, setState, saveSettings, clearStaleSyncLock, setBulkDeleteApproval, KEYS, exportSettingsBackup, importSettingsBackup, importSettingsRisks } from "@/lib/utils/storage";
+import { getSettings, getState, setState, saveSettings, clearStaleSyncLock, setBulkDeleteApproval, KEYS, exportSettingsBackup, importSettingsBackup, importSettingsRisks, syncCooldownRemaining, syncBackoffRemaining } from "@/lib/utils/storage";
 import { SyncEngine, explainSyncFailure } from "@/lib/sync/sync-engine";
 import { registerBookmarkListeners, recordExclusionRelease } from "@/lib/handlers/bookmarks-handler";
 import { createBackend } from "@/lib/backends/abstract-backend";
@@ -18,7 +18,11 @@ import { openConflictFromNotification } from "@/lib/sync/conflict-resolver";
 
 let syncEngine: SyncEngine | null = null;
 let bookmarkDebounce: ReturnType<typeof setTimeout> | null = null;
+let bookmarkGeneration = 0;
+let bookmarkSyncRunning = false;
+let bookmarkAlarmWork: Promise<void> = Promise.resolve();
 const BOOKMARK_DEBOUNCE_MS = 1000; // coalesce bursts (a folder delete fires many events)
+const BOOKMARK_RETRY_MINUTES = 0.5;
 
 // ─── Init ─────────────────────────────────────────────────────────────────
 
@@ -78,6 +82,15 @@ async function init(): Promise<void> {
   // reset its next fire and starved the periodic pull. See ensureSyncAlarm.
   if (settings.auto_sync) {
     await ensureSyncAlarm(settings.sync_interval_seconds);
+  } else {
+    // An alarm outlives the worker, and the setting can be turned off without the save
+    // that clears it reaching the browser (a failed clear, a settings blob written by an
+    // older build). Removing it here is what makes "automatic sync is off" true after a
+    // restart rather than merely "we stopped creating new ones".
+    await browser.alarms.clear(SYNC_ALARM);
+  }
+  if (!settings.sync_on_change || !settings.enabled_types.includes("bookmarks")) {
+    await updateBookmarkAlarm();
   }
 
   logger.info("ServiceWorker", "Initialized");
@@ -106,11 +119,14 @@ function ensureInit(): Promise<void> {
  *  it. Nothing about the sync depends on this succeeding. */
 function updateBadge(status: string): void {
   const key = status as keyof typeof BADGE_COLORS;
-  try {
-    browser.action.setBadgeBackgroundColor({ color: BADGE_COLORS[key] ?? BADGE_COLORS.idle });
-    browser.action.setBadgeText({ text: BADGE_TEXT[key] ?? "" });
-  } catch (e) {
+  const failed = (e: unknown): void => {
     logger.debug("updateBadge", `This browser wouldn't take a toolbar badge: ${e instanceof Error ? e.message : e}`);
+  };
+  try {
+    void Promise.resolve(browser.action.setBadgeBackgroundColor({ color: BADGE_COLORS[key] ?? BADGE_COLORS.idle })).catch(failed);
+    void Promise.resolve(browser.action.setBadgeText({ text: BADGE_TEXT[key] ?? "" })).catch(failed);
+  } catch (e) {
+    failed(e);
   }
 }
 
@@ -124,31 +140,92 @@ function broadcastState(state: SyncState): void {
 
 // ─── Bookmark Listener ────────────────────────────────────────────────────
 
-function onBookmarkChange(): void {
-  // Backstop: a one-shot alarm survives SW suspension (Chrome floors it at ~30s),
-  // so a change is never lost even if the fast path below doesn't get to run.
-  browser.alarms.create(BOOKMARK_ALARM, { delayInMinutes: 0.5 });
-
-  // Fast path: the worker is awake right now (the event just fired), so sync
-  // almost immediately. A short debounce coalesces bursts (e.g. deleting a
-  // folder fires many onRemoved events) into a single sync — applies equally to
-  // adds and removes, so deletions propagate as promptly as additions.
-  if (bookmarkDebounce) clearTimeout(bookmarkDebounce);
-  bookmarkDebounce = setTimeout(async () => {
-    bookmarkDebounce = null;
-    await ensureInit();
+/** Serialize read/create/clear: a burst must not postpone an existing alarm, and an
+ * event arriving during clear() must recreate the backstop AFTER that clear finishes. */
+function updateBookmarkAlarm(completedGeneration?: number): Promise<void> {
+  const work = bookmarkAlarmWork.then(async () => {
     const settings = await getSettings();
-    if (
-      settings.sync_on_change &&
-      settings.enabled_types.includes("bookmarks") &&
-      syncEngine &&
-      !syncEngine.isSyncing
-    ) {
-      // We're handling it now — drop the backstop so it doesn't double-sync.
+    if (!settings.sync_on_change || !settings.enabled_types.includes("bookmarks")) {
+      if (bookmarkDebounce) clearTimeout(bookmarkDebounce);
+      bookmarkDebounce = null;
       await browser.alarms.clear(BOOKMARK_ALARM);
-      await syncEngine.sync(["bookmarks"]);
+      return;
     }
-    // If a sync is already running, leave the alarm to pick this change up next.
+    if (completedGeneration !== undefined && completedGeneration === bookmarkGeneration) {
+      await browser.alarms.clear(BOOKMARK_ALARM);
+      return;
+    }
+
+    const alarm = await browser.alarms.get(BOOKMARK_ALARM);
+    const now = Date.now();
+    const remaining = Math.max(await syncCooldownRemaining(now), await syncBackoffRemaining(now));
+    // A periodic alarm survives both worker eviction and repeated busy/failed attempts.
+    // Move it only to respect a protection window, never just because another edit came in.
+    if (!alarm || alarm.periodInMinutes !== BOOKMARK_RETRY_MINUTES ||
+        (remaining > 0 && alarm.scheduledTime < now + remaining)) {
+      await browser.alarms.create(BOOKMARK_ALARM, {
+        when: now + Math.max(BOOKMARK_RETRY_MINUTES * 60_000, remaining),
+        periodInMinutes: BOOKMARK_RETRY_MINUTES,
+      });
+    }
+  });
+  bookmarkAlarmWork = work.catch((err) => logger.error("BookmarkAlarm", err));
+  return bookmarkAlarmWork;
+}
+
+/** Both the fast timer and the durable alarm acknowledge exactly the same outcomes. */
+async function syncChangedBookmarks(): Promise<void> {
+  if (bookmarkDebounce) clearTimeout(bookmarkDebounce);
+  bookmarkDebounce = null;
+  if (bookmarkSyncRunning) return;
+  bookmarkSyncRunning = true;
+  try {
+    await ensureInit();
+    // Also upgrades a legacy one-shot alarm before doing anything that may fail.
+    await updateBookmarkAlarm();
+    const settings = await getSettings();
+    if (!settings.sync_on_change || !settings.enabled_types.includes("bookmarks")) return;
+    const generation = bookmarkGeneration;
+    const before = await getState();
+    if (before.first_sync_pending) {
+      await updateBookmarkAlarm(generation); // the direction card, not a timer, owns this
+      return;
+    }
+    if (!syncEngine || syncEngine.isSyncing) return;
+
+    const outcome = await syncEngine.sync(["bookmarks"]);
+    if (outcome === "first-sync-pending") {
+      await updateBookmarkAlarm(generation);
+    } else if (outcome === "ran") {
+      const after = await getState();
+      // `ran` includes failures. A per-bookmark failure or guard hold needs another
+      // attempt; an unrelated warning/log (e.g. retention) does not. The counter also
+      // proves bookmarks completed when a later, cycle-wide operation reported an error.
+      const failed = after.failed_types?.includes("bookmarks") ||
+        (after.status === "error" && !after.failed_types?.length &&
+          after.sync_counts.bookmarks <= before.sync_counts.bookmarks);
+      await updateBookmarkAlarm(!failed && !after.guard_notice ? generation : undefined);
+    } else {
+      // Includes cooling-down/backing-off: read their persisted deadlines, without force.
+      await updateBookmarkAlarm();
+    }
+  } catch (err) {
+    logger.error("BookmarkSync", err);
+    await updateBookmarkAlarm();
+  } finally {
+    bookmarkSyncRunning = false;
+  }
+}
+
+function onBookmarkChange(): void {
+  bookmarkGeneration++;
+  void updateBookmarkAlarm();
+
+  // One-second debounce stays the fast path; only real bookmark events re-arm it.
+  if (bookmarkDebounce) clearTimeout(bookmarkDebounce);
+  bookmarkDebounce = setTimeout(() => {
+    bookmarkDebounce = null;
+    void syncChangedBookmarks();
   }, BOOKMARK_DEBOUNCE_MS);
 }
 
@@ -262,6 +339,9 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       // Reinit engine with new settings (awaited: an encryption/passphrase change
       // clears the upload checksums so the next sync re-uploads in the new form).
       await syncEngine?.updateSettings(updated);
+      if (!updated.sync_on_change || !updated.enabled_types.includes("bookmarks")) {
+        await updateBookmarkAlarm();
+      }
 
       // Reconfigure alarm if interval changed
       if ("sync_interval_seconds" in message.payload || "auto_sync" in message.payload) {
@@ -300,6 +380,9 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       });
       setLoggerDebug(updated.debug_mode);
       await syncEngine?.updateSettings(updated);
+      if (!updated.sync_on_change || !updated.enabled_types.includes("bookmarks")) {
+        await updateBookmarkAlarm();
+      }
       if (updated.auto_sync) {
         await ensureSyncAlarm(updated.sync_interval_seconds, true);
       } else {
@@ -457,21 +540,24 @@ on("alarms", "onAlarm", () => browser.alarms.onAlarm.addListener(async (alarm) =
   // Before anything else: an update that has been waiting for a sync to end. This is the
   // idle moment it was waiting for, and taking it here bounds the wait to one interval.
   if (applyPendingUpdate()) return;
+  if (alarm.name === BOOKMARK_ALARM) {
+    await syncChangedBookmarks();
+    return;
+  }
   await ensureInit();
   if (!syncEngine) return;
   if (alarm.name === SYNC_ALARM) {
+    // Re-read the setting rather than trusting that nobody could have turned it off: an
+    // alarm clear can lose a race with an event the browser already delivered, and a
+    // leftover alarm is exactly what init() above repairs. Without this check, "turn off
+    // automatic sync" left a device still syncing once a minute until its next restart.
+    const settings = await getSettings();
+    if (!settings.auto_sync) {
+      await browser.alarms.clear(SYNC_ALARM);
+      return;
+    }
     logger.info("Alarm", "Periodic sync triggered");
     await syncEngine.sync();
-  } else if (alarm.name === BOOKMARK_ALARM) {
-    const settings = await getSettings();
-    if (
-      settings.sync_on_change &&
-      settings.enabled_types.includes("bookmarks") &&
-      !syncEngine.isSyncing
-    ) {
-      logger.info("Alarm", "Bookmark-change sync triggered");
-      await syncEngine.sync(["bookmarks"]);
-    }
   }
 }));
 

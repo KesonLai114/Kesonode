@@ -124,9 +124,9 @@ function mapNode(node: BookmarkNode, depth: number): SyncBookmark {
 
 const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 
-// Suppress tombstone recording while WE import (our own create/remove churn
-// during a merge must not be mistaken for user deletions).
-let importing = false;
+// Suppress recording while ANY of our imports/restores is active: one finishing must
+// not expose another's create/remove churn as user edits. This is not an operation lock.
+let activeImports = 0;
 
 export function toDeletedMap(list: Tombstone[]): Map<string, number> {
   const m = new Map<string, number>();
@@ -369,9 +369,9 @@ function toCreatedMap(list: CreatedRecord[]): Map<string, CreatedRecord> {
   return m;
 }
 
-/** URLs present anywhere in the CURRENT local tree (called after a mutation). */
+/** Canonical URL keys present anywhere in the CURRENT local tree (after a mutation). */
 async function localUrlSet(): Promise<Set<string>> {
-  return new Set(flattenNodes(await exportBookmarks()).filter((n) => n.url).map((n) => n.url as string));
+  return new Set(flattenNodes(await exportBookmarks()).filter((n) => n.url).map((n) => canonicalUrlKey(n.url as string)));
 }
 
 /**
@@ -403,7 +403,7 @@ async function withRemovedContents(node: BookmarkNode): Promise<BookmarkNode> {
  *  so it would delete every copy on every peer (and the surviving local copy, being
  *  older than the tombstone, wouldn't re-propagate → the devices diverge). */
 async function recordRemovedTombstones(node: BookmarkNode, skip?: Set<string>): Promise<void> {
-  if (importing) return;
+  if (activeImports > 0) return;
   const urls: string[] = [];
   // `skip`: what this device keeps to itself (#54). Deleting a synced folder that holds an
   // excluded one must not tell the peers to delete their copies of what was never theirs.
@@ -415,7 +415,7 @@ async function recordRemovedTombstones(node: BookmarkNode, skip?: Set<string>): 
   walk(await withRemovedContents(node));
   if (!urls.length) return;
   const remaining = await localUrlSet();
-  const gone = [...new Set(urls)].filter((url) => !remaining.has(url));
+  const gone = [...new Set(urls)].filter((url) => !remaining.has(canonicalUrlKey(url)));
   if (!gone.length) return; // every removed URL still has another local copy
   const now = Date.now();
   // Serialized append: Chrome fires one onRemoved per removed node, so a multi-select
@@ -471,7 +471,7 @@ export function resetDeletionLog(): void {
  * as older than the tombstone and deleted them again, for as long as the tombstone lived.
  */
 async function recordAppeared(node: BookmarkNode): Promise<void> {
-  if (importing || !node.url) return;
+  if (activeImports > 0 || !node.url) return;
   const now = Date.now();
   if (now - (node.dateAdded ?? now) < APPEARED_SLACK_MS) return;
   const url = node.url;
@@ -488,7 +488,7 @@ async function recordAppeared(node: BookmarkNode): Promise<void> {
  * from the PARENT: by the time this runs the folder itself is gone.
  */
 async function recordRemovedFolder(parentId: string, node: BookmarkNode): Promise<void> {
-  if (importing || node.url) return;
+  if (activeImports > 0 || node.url) return;
   const parentPath = await folderPath(parentId);
   if (!parentPath) return;
   const path = [...parentPath, node.title];
@@ -509,15 +509,15 @@ async function recordRemovedFolder(parentId: string, node: BookmarkNode): Promis
  *  The old url comes from the last-synced snapshot (konode_bm_cache), which is
  *  exactly what peers still hold. */
 async function recordUrlChange(id: string, newUrl: string | undefined): Promise<void> {
-  if (importing || !newUrl) return;
+  if (activeImports > 0 || !newUrl) return;
   const cache = await getBookmarkCache<SyncBookmark[]>();
   if (!cache) return;
   const prev = flattenNodes(cache).find((n) => n.id === id);
   const oldUrl = prev?.url;
-  if (!oldUrl || oldUrl === newUrl) return;
+  if (!oldUrl || canonicalUrlKey(oldUrl) === canonicalUrlKey(newUrl)) return;
   // Same guard as deletion: don't tombstone the old url if another local bookmark
-  // still holds it (editing one of several identical-URL copies).
-  if ((await localUrlSet()).has(oldUrl)) return;
+  // still holds it (editing one of several canonically equivalent URL copies).
+  if ((await localUrlSet()).has(canonicalUrlKey(oldUrl))) return;
   const now = Date.now();
   await updateTombstones((current) => mergeTombstoneLists(current, [{ url: oldUrl, deletedAt: now, own: true }]));
   logger.event("Tombstones", "Recorded a URL-change deletion");
@@ -581,7 +581,7 @@ async function recordTitleChange(id: string, newTitle: string | undefined): Prom
 /** Record a move (per URL) for a moved bookmark/folder subtree, so the new
  *  placement propagates with LWW. */
 async function recordMove(id: string): Promise<void> {
-  if (importing) return;
+  if (activeImports > 0) return;
   const urls: string[] = [];
   try {
     const sub = await browser.bookmarks.getSubTree(id);
@@ -701,7 +701,7 @@ async function markedFolder(
  *  shell is cleaned up on the receiver during merge. A folder has no URL, so this
  *  is the only signal that carries its own position across devices. */
 async function recordFolderMove(id: string, moveInfo: chrome.bookmarks.BookmarkMoveInfo): Promise<void> {
-  if (importing) return;
+  if (activeImports > 0) return;
   if (moveInfo.parentId !== moveInfo.oldParentId) return; // reorder only
   let node: BookmarkNode | undefined;
   try { [node] = await browser.bookmarks.get(id); } catch { return; }
@@ -732,7 +732,7 @@ export async function exportBookmarkPayload(): Promise<BookmarkPayload> {
   // event landing mid-export would otherwise read the pre-GC list and write it back —
   // either undoing the prune or dropping the event's own record, depending on which
   // write happened to land last. Nothing here is exempt from the burst just because it
-  // runs inside a sync: `importing` only suppresses the recorders during an IMPORT.
+  // runs inside a sync: `activeImports` only suppresses the recorders during an IMPORT.
   const [tree, gced, gcedMoves, gcedFolderMoves, gcedTitles, gcedRenames, gcedFolderDeletes, gcedAppeared, createdRecords] = await Promise.all([
     exportBookmarks(),
     updateTombstones(gcTombstones),
@@ -1054,7 +1054,7 @@ export async function importBookmarks(
     remoteFolderRenames = remoteFolderRenames.filter((r) => !out([...r.path, r.from]) && !out([...r.path, r.to]));
     remoteFolderDeletes = remoteFolderDeletes.filter((r) => !out(r.path));
   }
-  importing = true;
+  activeImports++;
   try {
     // Capture our own deletions/moves before folding in the peer's, so the merge
     // can compare "mine vs theirs" (matters for prefer-* and move LWW). Then
@@ -1084,7 +1084,7 @@ export async function importBookmarks(
       await mergeBookmarks(tree, logs, conflictStrategy, deletePercent, approvedFor, onBulkBlocked, local?.part.excludedIds);
     }
   } finally {
-    importing = false;
+    activeImports--;
   }
 }
 
@@ -2159,7 +2159,7 @@ export async function restoreBookmarks(snapshot: SyncBookmark[]): Promise<number
   const rules = await getBookmarkExclusions();
   const local = rules.length ? await localExclusions(rules) : null;
   const tree = local ? withoutExcluded(snapshot, local) : snapshot;
-  importing = true;
+  activeImports++;
   try {
     const snapUrls = new Set(
       flattenNodes(tree).filter((n) => n.url).map((n) => canonicalUrlKey(n.url as string))
@@ -2241,7 +2241,7 @@ export async function restoreBookmarks(snapshot: SyncBookmark[]): Promise<number
     logger.event("Snapshots", `Restored ${added} bookmark(s)`);
     return added;
   } finally {
-    importing = false;
+    activeImports--;
   }
 }
 
@@ -2465,10 +2465,10 @@ export function registerBookmarkListeners(onChange: BookmarkChangeCallback): voi
   // Each event first asks whether it is about something this device keeps to itself (#54).
   // Those record nothing and start no sync: an extension rewriting its excluded folder is
   // exactly the storm of events that froze the browser. A merge never writes there, so
-  // its own churn (`importing`) skips the question.
+  // its own churn (`activeImports > 0`) skips the question.
   // A storage read that fails is no reason to drop the event: judged as not excluded, it is
   // recorded and synced as it always was.
-  const exclusions = () => (importing ? Promise.resolve(null) : excludedNow().catch(() => null));
+  const exclusions = () => (activeImports > 0 ? Promise.resolve(null) : excludedNow().catch(() => null));
   browser.bookmarks.onCreated.addListener((id, node) => {
     swallow((async () => {
       const ex = await exclusions();

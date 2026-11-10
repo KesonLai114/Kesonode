@@ -1,9 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { createSnapshot, listSnapshots, restoreSnapshot, pruneSnapshots, deleteSnapshot, renameSnapshot, setSnapshotPinned, flushPendingPins, snapshotDisplayName, snapshotIsUnnamed } from "@/lib/sync/snapshots";
 import { HttpError } from "@/lib/utils/retry";
 import { DEFAULT_SETTINGS, KEYS, shortDeviceId } from "@/lib/utils/storage";
 import { t } from "@/lib/utils/i18n";
-import type { IBackend, SyncSettings } from "@/lib/types";
+import type { IBackend, SnapshotMeta, SyncSettings } from "@/lib/types";
+import { logger } from "@/lib/utils/logger";
+
+afterEach(() => vi.restoreAllMocks());
 
 // A minimal in-memory backend exposing just the named-file ops snapshots use.
 class FileFake {
@@ -201,6 +204,45 @@ describe("snapshots — prune", () => {
     seedFiles(backend, 10);
     expect(await pruneSnapshots(asBackend(backend))).toHaveLength(10);
     expect(await listSnapshots(asBackend(backend), settings())).toHaveLength(10);
+  });
+
+  it.each(["auto", "manual"] as const)("retains %s files and annotations when pruning deletes fail", async (origin) => {
+    const backend = new FileFake();
+    const prefix = origin === "manual" ? "konode_snap_manual_" : "konode_snap_bookmarks_";
+    const metas = Array.from({ length: 12 }, (_, i) => ({
+      name: `${prefix}${1_700_000_000_000 + i}.json`, timestamp: 1_700_000_000_000 + i,
+      count: 20 + i, label: `Saved ${i}`, device_label: "Peer",
+    }));
+    for (const meta of metas) backend.blobs.set(meta.name, "{}");
+    backend.blobs.set(INDEX_NAME, indexFile(metas));
+    const remove = backend.deleteFile.bind(backend);
+    vi.spyOn(backend, "deleteFile").mockImplementation((n) => {
+      if (metas.slice(0, 2).some((m) => m.name === n)) return Promise.reject(new HttpError(423));
+      return remove(n);
+    });
+    const warn = vi.spyOn(logger, "warn");
+
+    const keep = await pruneSnapshots(asBackend(backend));
+
+    expect(keep).toHaveLength(12);
+    expect(keep).toContain(metas[0].name);
+    expect(keep).toContain(metas[1].name);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("Snapshots", expect.stringMatching(/Could not prune 2.*annotations/));
+
+    await createSnapshot(asBackend(backend), settings(), { origin });
+
+    const published: SnapshotMeta[] = JSON.parse(JSON.parse(backend.blobs.get(INDEX_NAME)!).payload);
+    for (const meta of metas.slice(0, 2)) {
+      expect(backend.blobs.has(meta.name)).toBe(true);
+      expect(published.find((m) => m.name === meta.name)).toEqual(meta);
+    }
+    // The next oldest really was deleted, so only that annotation may be removed.
+    expect(backend.blobs.has(metas[2].name)).toBe(false);
+    expect(published.some((m) => m.name === metas[2].name)).toBe(false);
+    await otherDevice();
+    const shown = await listSnapshots(asBackend(backend), settings());
+    expect(shown.find((m) => m.name === metas[0].name)).toMatchObject(metas[0]);
   });
 
   it("ignores files that aren't restore points", async () => {
@@ -799,6 +841,85 @@ describe("snapshots — the shared index is written under a condition", () => {
     expect(published.find((m) => m.name === peerPoint)!.count).toBe(7);
   });
 
+  it("never falls back to an unconditional PUT when every CAS attempt loses", async () => {
+    const backend = new VersionedFake();
+    const [name] = seedFiles(backend, 1);
+    let peerIndex = indexFile([{ name, timestamp: since, label: "Peer 0" }]);
+    backend.blobs.set(INDEX_NAME, peerIndex);
+    const interfere = () => {
+      peerIndex = indexFile([{ name, timestamp: since, label: `Peer ${backend.writeAttempts}` }]);
+      backend.applyElsewhere(INDEX_NAME, peerIndex);
+      backend.interfere = interfere;
+    };
+    backend.interfere = interfere;
+    const put = vi.spyOn(backend, "putFile");
+    const warn = vi.spyOn(logger, "warn");
+
+    const created = await createSnapshot(asBackend(backend), settings(), { origin: "manual" });
+
+    expect(backend.writeAttempts).toBe(4);
+    expect(backend.writes).toBe(0);
+    expect(put.mock.calls.filter(([n]) => n === INDEX_NAME)).toEqual([]);
+    expect(backend.blobs.get(INDEX_NAME)).toBe(peerIndex);
+    expect(warn).toHaveBeenCalledWith("Snapshots", expect.stringMatching(/all 4 conditional.*untouched/));
+    const local = (await chrome.storage.local.get(KEYS.SNAPSHOT_LOCAL))[KEYS.SNAPSHOT_LOCAL];
+    expect(local[created.name]).toMatchObject(created);
+  });
+
+  it("retains legacy annotations when conditional retries are exhausted", async () => {
+    const backend = new VersionedFake();
+    const [name] = seedFiles(backend, 1);
+    const legacy = [{ name, timestamp: since, count: 42 }];
+    await chrome.storage.local.set({ [KEYS.LEGACY_SNAPSHOTS]: legacy });
+    vi.spyOn(backend, "putFileIfVersion").mockResolvedValue(false);
+    const put = vi.spyOn(backend, "putFile");
+
+    await listSnapshots(asBackend(backend), settings());
+
+    expect(put).not.toHaveBeenCalled();
+    expect((await chrome.storage.local.get(KEYS.LEGACY_SNAPSHOTS))[KEYS.LEGACY_SNAPSHOTS]).toEqual(legacy);
+  });
+
+  it.each([
+    new HttpError(401), new HttpError(403), new HttpError(408), new HttpError(423),
+    new HttpError(429), new HttpError(503), new TypeError("Failed to fetch"),
+    new Error("Unexpected version lookup failure"),
+  ])("leaves the index untouched when version lookup fails: %s", async (error) => {
+    const backend = new VersionedFake();
+    const [name] = seedFiles(backend, 1);
+    const before = indexFile([{ name, timestamp: since, count: 7, label: "Peer annotation" }]);
+    backend.blobs.set(INDEX_NAME, before);
+    vi.spyOn(backend, "getFileVersion").mockRejectedValue(error);
+    const put = vi.spyOn(backend, "putFile");
+    const warn = vi.spyOn(logger, "warn");
+
+    await createSnapshot(asBackend(backend), settings(), { origin: "manual" });
+
+    expect(backend.blobs.get(INDEX_NAME)).toBe(before);
+    expect(backend.writeAttempts).toBe(0);
+    expect(put.mock.calls.filter(([n]) => n === INDEX_NAME)).toEqual([]);
+    expect(warn).toHaveBeenCalledWith("Snapshots", expect.stringMatching(/version.*untouched/));
+  });
+
+  it.each([
+    "This WebDAV server sends no ETag, so writes cannot be made conditional",
+    "Drive returned no etag, so writes cannot be made conditional",
+  ])("keeps the explicit no-ETag fallback: %s", async (message) => {
+    const backend = new VersionedFake();
+    const [name] = seedFiles(backend, 1);
+    backend.blobs.set(INDEX_NAME, indexFile([{ name, timestamp: since, count: 7 }]));
+    vi.spyOn(backend, "getFileVersion").mockRejectedValue(new Error(message));
+    const put = vi.spyOn(backend, "putFile");
+
+    const created = await createSnapshot(asBackend(backend), settings(), { origin: "manual" });
+
+    const published: SnapshotMeta[] = JSON.parse(JSON.parse(backend.blobs.get(INDEX_NAME)!).payload);
+    expect(published.find((m) => m.name === name)?.count).toBe(7);
+    expect(published.find((m) => m.name === created.name)).toBeDefined();
+    expect(put.mock.calls.filter(([n]) => n === INDEX_NAME)).toHaveLength(1);
+    expect(backend.writeAttempts).toBe(0);
+  });
+
   it("still writes the index for a storage that cannot report a version", async () => {
     await otherDevice();
     const backend = new FileFake(); // no getFileVersion / putFileIfVersion
@@ -807,6 +928,107 @@ describe("snapshots — the shared index is written under a condition", () => {
 
     const published = JSON.parse(JSON.parse(backend.blobs.get(INDEX_NAME)!).payload) as { name: string }[];
     expect(published.map((m) => m.name)).toContain(created.name);
+  });
+});
+
+describe("snapshots — peer annotations survive stale listings", () => {
+  it.each(["create", "rename", "pin", "delete", "migrate"] as const)(
+    "%s preserves peers arriving before the index read and during a CAS retry",
+    async (operation) => {
+      const backend = new VersionedFake();
+      const since = 1_700_000_000_000;
+      const [name] = seedFiles(backend, 1, since);
+      const original = { name, timestamp: since, label: "Original", count: 9 };
+      const peers = [1, 2].map((offset) => ({
+        name: `konode_snap_kept_${since + offset}.json`, timestamp: since + offset,
+        count: 10 + offset, label: `Peer ${offset}`, device_label: "Other device",
+      }));
+      backend.blobs.set(INDEX_NAME, indexFile([original]));
+      const get = backend.getFile.bind(backend);
+      let indexReads = 0;
+      const events: string[] = [];
+      vi.spyOn(backend, "getFile").mockImplementation((n) => {
+        if (n === INDEX_NAME) {
+          events.push("read");
+          if (++indexReads === 1) {
+            backend.blobs.set(peers[0].name, "{}");
+            backend.applyElsewhere(INDEX_NAME, indexFile([original, peers[0]]));
+          }
+        }
+        return get(n);
+      });
+      // Like WebDAV's instance cache: peer writes do not invalidate this listing.
+      // Local writes remain visible, but neither new peer is ever returned here.
+      const list = backend.listFiles.bind(backend);
+      const listing = vi.spyOn(backend, "listFiles").mockImplementation(async (prefix) => {
+        events.push("list");
+        return (await list(prefix)).filter((n) => !peers.some((p) => p.name === n));
+      });
+      backend.interfere = () => {
+        backend.blobs.set(peers[1].name, "{}");
+        backend.applyElsewhere(INDEX_NAME, indexFile([original, ...peers]));
+      };
+
+      if (operation === "create") await createSnapshot(asBackend(backend), settings(), { origin: "manual" });
+      if (operation === "rename") await renameSnapshot(asBackend(backend), settings(), name, "Renamed");
+      if (operation === "pin") await setSnapshotPinned(asBackend(backend), settings(), name, true);
+      if (operation === "delete") await deleteSnapshot(asBackend(backend), settings(), name);
+      if (operation === "migrate") {
+        await chrome.storage.local.set({ [KEYS.LEGACY_SNAPSHOTS]: [original] });
+        await listSnapshots(asBackend(backend), settings());
+      }
+
+      expect(backend.writeAttempts).toBe(2);
+      expect(indexReads).toBe(2);
+      for (let i = 0; i < events.length; i++) {
+        if (events[i] === "read") expect(events.slice(i + 1, i + 4)).toEqual(["list", "list", "list"]);
+      }
+      const published: SnapshotMeta[] = JSON.parse(JSON.parse(backend.blobs.get(INDEX_NAME)!).payload);
+      for (const peer of peers) expect(published.find((m) => m.name === peer.name)).toEqual(peer);
+      if (operation === "rename") expect(published.find((m) => m.name === name)?.label).toBe("Renamed");
+      if (operation === "pin" || operation === "delete") expect(published.some((m) => m.name === name)).toBe(false);
+      if (operation === "pin") {
+        expect(published.find((m) => m.name === `konode_snap_kept_${since}.json`))
+          .toMatchObject({ pinned: true, count: 9, label: "Original" });
+      }
+
+      listing.mockRestore(); // A new device / instance finally gets a fresh listing.
+      await otherDevice();
+      const shown = await listSnapshots(asBackend(backend), settings());
+      for (const peer of peers) expect(shown.find((m) => m.name === peer.name)).toMatchObject(peer);
+    },
+  );
+
+  it("preserves a peer arriving between rename's listing and GET without conditional support", async () => {
+    const backend = new FileFake();
+    const [name] = seedFiles(backend, 1);
+    const peer = { name: "konode_snap_manual_1700000000001.json", timestamp: 1_700_000_000_001, label: "New peer" };
+    const get = backend.getFile.bind(backend);
+    vi.spyOn(backend, "getFile").mockImplementation((n) => {
+      if (n === INDEX_NAME) {
+        backend.blobs.set(peer.name, "{}");
+        backend.blobs.set(INDEX_NAME, indexFile([peer]));
+      }
+      return get(n);
+    });
+
+    await renameSnapshot(asBackend(backend), settings(), name, "Mine");
+
+    const published: SnapshotMeta[] = JSON.parse(JSON.parse(backend.blobs.get(INDEX_NAME)!).payload);
+    expect(published).toContainEqual(peer);
+    expect(published.find((m) => m.name === name)?.label).toBe("Mine");
+  });
+
+  it("keeps unknown remote metadata but still hides missing files from the display", async () => {
+    const backend = new FileFake();
+    const [name] = seedFiles(backend, 1);
+    const missing = { name: "konode_snap_kept_1699999999999.json", timestamp: 1_699_999_999_999, label: "Unknown" };
+    backend.blobs.set(INDEX_NAME, indexFile([missing]));
+
+    await renameSnapshot(asBackend(backend), settings(), name, "Mine");
+
+    expect(JSON.parse(JSON.parse(backend.blobs.get(INDEX_NAME)!).payload)).toContainEqual(missing);
+    expect((await listSnapshots(asBackend(backend), settings())).map((m) => m.name)).toEqual([name]);
   });
 });
 
@@ -834,6 +1056,111 @@ class RefusingDeleteFake extends FileFake {
 }
 
 describe("snapshots — keep forever while the storage refuses writes", () => {
+  it.each([new HttpError(401), new HttpError(408), new HttpError(423), new TypeError("Failed to fetch")])(
+    "keeps a refused pin protected from pruning and completes it after recovery: %s",
+    async (error) => {
+      const backend = new FileFake();
+      const [name] = seedFiles(backend, 1);
+      const target = name.replace("bookmarks", "kept");
+      backend.blobs.set(INDEX_NAME, indexFile([{ name, timestamp: 1_700_000_000_000, count: 7, label: "Protect me" }]));
+      const put = backend.putFile.bind(backend);
+      const refusal = vi.spyOn(backend, "putFile").mockRejectedValue(error);
+
+      expect(await setSnapshotPinned(asBackend(backend), settings(), name, true)).toBe(false);
+      await flushPendingPins(asBackend(backend), settings());
+      const pending = (await chrome.storage.local.get(KEYS.SNAPSHOT_PENDING_PIN))[KEYS.SNAPSHOT_PENDING_PIN];
+      expect(pending).toEqual([{ name, pinned: true }]);
+      seedFiles(backend, 12, 1_700_000_000_001);
+      expect(await pruneSnapshots(asBackend(backend))).toContain(name);
+      expect(backend.blobs.has(name)).toBe(true);
+
+      refusal.mockImplementation(put);
+      await flushPendingPins(asBackend(backend), settings());
+
+      expect(backend.blobs.has(name)).toBe(false);
+      expect(backend.blobs.has(target)).toBe(true);
+      expect((await chrome.storage.local.get(KEYS.SNAPSHOT_PENDING_PIN))[KEYS.SNAPSHOT_PENDING_PIN]).toEqual([]);
+      await otherDevice();
+      expect((await listSnapshots(asBackend(backend), settings())).find((m) => m.name === target))
+        .toMatchObject({ pinned: true, count: 7, label: "Protect me" });
+    },
+  );
+
+  it.each([new Error("Unknown backend failure"), new HttpError(404), new HttpError(400)])(
+    "does not discard queued intent on an unclassified error: %s",
+    async (error) => {
+      const backend = new FileFake();
+      const [name, second] = seedFiles(backend, 2);
+      const pending = [{ name, pinned: true }, { name: second, pinned: true }];
+      await chrome.storage.local.set({ [KEYS.SNAPSHOT_PENDING_PIN]: pending });
+      const get = vi.spyOn(backend, "getFile").mockRejectedValue(error);
+      const warn = vi.spyOn(logger, "warn");
+
+      await flushPendingPins(asBackend(backend), settings());
+
+      expect((await chrome.storage.local.get(KEYS.SNAPSHOT_PENDING_PIN))[KEYS.SNAPSHOT_PENDING_PIN]).toEqual(pending);
+      expect(get).toHaveBeenCalledTimes(1); // Stop, rather than spending another round on the second intent.
+      expect(warn).toHaveBeenCalledWith("Snapshots", expect.stringMatching(/keeping it for retry/));
+      seedFiles(backend, 12, 1_700_000_000_002);
+      const kept = await pruneSnapshots(asBackend(backend));
+      expect(kept).toContain(name);
+      expect(kept).toContain(second);
+
+      get.mockRestore();
+      await flushPendingPins(asBackend(backend), settings());
+      expect((await chrome.storage.local.get(KEYS.SNAPSHOT_PENDING_PIN))[KEYS.SNAPSHOT_PENDING_PIN]).toEqual([]);
+      expect(backend.blobs.has(name.replace("bookmarks", "kept"))).toBe(true);
+    },
+  );
+
+  it("clears only invalid names and snapshots confirmed absent at both source and target", async () => {
+    const backend = new FileFake();
+    const name = "konode_snap_bookmarks_1700000000000.json";
+    const invalid = "../../not-a-snapshot.json";
+    await chrome.storage.local.set({
+      [KEYS.SNAPSHOT_PENDING_PIN]: [{ name: invalid, pinned: true }, { name, pinned: true }],
+    });
+    const get = vi.spyOn(backend, "getFile");
+    const put = vi.spyOn(backend, "putFile");
+
+    await flushPendingPins(asBackend(backend), settings());
+
+    expect((await chrome.storage.local.get(KEYS.SNAPSHOT_PENDING_PIN))[KEYS.SNAPSHOT_PENDING_PIN]).toEqual([]);
+    expect(get.mock.calls.map(([n]) => n)).toEqual([name.replace("bookmarks", "kept"), name]);
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("does not infer a missing snapshot from a stale empty listing", async () => {
+    const backend = new FileFake();
+    const [name] = seedFiles(backend, 1);
+    vi.spyOn(backend, "listFiles").mockResolvedValue([]);
+    await chrome.storage.local.set({ [KEYS.SNAPSHOT_PENDING_PIN]: [{ name, pinned: true }] });
+
+    await flushPendingPins(asBackend(backend), settings());
+
+    expect(backend.blobs.has(name.replace("bookmarks", "kept"))).toBe(true);
+    expect(backend.blobs.has(name)).toBe(false);
+    expect((await chrome.storage.local.get(KEYS.SNAPSHOT_PENDING_PIN))[KEYS.SNAPSHOT_PENDING_PIN]).toEqual([]);
+  });
+
+  it("finishes an already moved target without rewriting it or losing its annotations", async () => {
+    const backend = new FileFake();
+    const source = "konode_snap_bookmarks_1700000000000.json";
+    const target = source.replace("bookmarks", "kept");
+    const meta = { name: target, timestamp: 1_700_000_000_000, count: 7, label: "Already kept", pinned: true };
+    backend.blobs.set(target, "original target payload");
+    backend.blobs.set(INDEX_NAME, indexFile([meta]));
+    await chrome.storage.local.set({ [KEYS.SNAPSHOT_PENDING_PIN]: [{ name: source, pinned: true }] });
+    const put = vi.spyOn(backend, "putFile");
+
+    await flushPendingPins(asBackend(backend), settings());
+
+    expect(backend.blobs.get(target)).toBe("original target payload");
+    expect(put.mock.calls.map(([n]) => n)).toEqual([INDEX_NAME]);
+    expect(JSON.parse(JSON.parse(backend.blobs.get(INDEX_NAME)!).payload)).toEqual([meta]);
+    expect((await chrome.storage.local.get(KEYS.SNAPSHOT_PENDING_PIN))[KEYS.SNAPSHOT_PENDING_PIN]).toEqual([]);
+  });
+
   it("shows the click as kept at once and finishes the rename when the storage answers", async () => {
     await otherDevice();
     const backend = new RefusingWritesFake();

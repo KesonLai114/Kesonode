@@ -22,6 +22,7 @@
 import { logger } from "@/lib/utils/logger";
 import { KEYS } from "@/lib/utils/storage";
 import { browser } from "@/lib/utils/ext";
+import { HttpError } from "@/lib/utils/retry";
 
 const CLIENT_ID = "754300898931-2gejbfi1k9ul3lct0n09ke128gtv4j8l.apps.googleusercontent.com";
 const CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET ?? "";
@@ -121,12 +122,54 @@ export async function loadGDriveSession(): Promise<GDriveSession | null> {
   return (r[STORAGE_KEY] as GDriveSession | undefined) ?? null;
 }
 
-async function saveGDriveSession(s: GDriveSession): Promise<void> {
-  await browser.storage.local.set({ [STORAGE_KEY]: s });
+// These guards/serialization are local to this JS context. Storage identity checks
+// also notice changes from other contexts, but storage.local has no atomic CAS:
+// this is NOT a cross-context refresh lock or an atomic cross-context sign-out.
+let sessionGeneration = 0;
+let autoSignInBlocked = false;
+let sessionWrites: Promise<void> = Promise.resolve();
+let refreshInFlight: { session: GDriveSession; generation: number; promise: Promise<string> } | null = null;
+
+function sameSession(a: GDriveSession | null, b: GDriveSession | null): boolean {
+  if (!a || !b) return a === b;
+  return a.email === b.email && a.refresh_token === b.refresh_token &&
+    a.savedAt === b.savedAt && a.access_token === b.access_token;
+}
+
+function assertGeneration(generation: number): void {
+  if (generation !== sessionGeneration) {
+    throw new Error("Google session changed. The previous authentication request was discarded.");
+  }
+}
+
+async function assertCurrentSession(expected: GDriveSession | null, generation: number): Promise<void> {
+  const current = await loadGDriveSession();
+  assertGeneration(generation);
+  if (!sameSession(current, expected)) {
+    throw new Error("Google session changed. The previous authentication request was discarded.");
+  }
+}
+
+function serializeSessionWrite(operation: () => Promise<void>): Promise<void> {
+  const result = sessionWrites.then(operation);
+  sessionWrites = result.catch(() => {});
+  return result;
+}
+
+async function saveGDriveSession(s: GDriveSession, expected: GDriveSession | null, generation: number): Promise<void> {
+  await serializeSessionWrite(async () => {
+    await assertCurrentSession(expected, generation);
+    await browser.storage.local.set({ [STORAGE_KEY]: s });
+    assertGeneration(generation);
+  });
 }
 
 export async function clearGDriveSession(): Promise<void> {
-  await browser.storage.local.remove(STORAGE_KEY);
+  ++sessionGeneration;
+  refreshInFlight = null;
+  autoSignInBlocked = true;
+  // Queue behind any already-started save, so its completion cannot resurrect us.
+  await serializeSessionWrite(() => browser.storage.local.remove(STORAGE_KEY));
 }
 
 export async function getStoredGDriveUser(): Promise<{ email: string; displayName: string } | null> {
@@ -168,8 +211,12 @@ async function exchange(params: Record<string, string>): Promise<TokenResponse> 
     body: body.toString(),
   });
   if (!res.ok) {
-    const e = await res.json().catch(() => ({} as Record<string, string>));
-    throw new Error(`Google token request failed: ${res.status} ${e.error ?? ""} ${e.error_description ?? ""}`.trim());
+    const e = await res.json().catch(() => null);
+    const code = typeof e?.error === "string" ? e.error : "";
+    const detail = typeof e?.error_description === "string" ? e.error_description : res.statusText;
+    const advice = code === "invalid_grant" ? " Open Kesonode and sign in again to reauthorize Google Drive." : "";
+    // Keep status and the server's reason for retry/backoff; never log token responses.
+    throw new HttpError(res.status, `Google token request failed: ${res.status} ${code} ${detail ?? ""}`.trim() + advice);
   }
   return res.json() as Promise<TokenResponse>;
 }
@@ -204,6 +251,9 @@ function logSignInEnd(branch: string, detail: string): void {
 
 export async function interactiveSignIn(): Promise<GDriveSession> {
   if (!isDriveAuthAvailable()) throw new Error(DRIVE_UNSUPPORTED_MSG);
+  const generation = ++sessionGeneration;
+  refreshInFlight = null;
+  autoSignInBlocked = false; // only an explicit sign-in can undo this context's sign-out
   // Whatever session is already stored survives until this flow SUCCEEDS. It used to be
   // cleared up front, which made closing the consent window destructive: the refresh token
   // was already gone, so a cancelled attempt left a device that had been syncing a moment
@@ -211,7 +261,9 @@ export async function interactiveSignIn(): Promise<GDriveSession> {
   // (it only drops what it displays on an explicit disconnect). Nothing needed the early
   // clear: `prompt=consent` asks Google for fresh consent regardless of what is stored
   // here, and a flow that reaches the end overwrites the session below.
+  await sessionWrites;
   const previous = await loadGDriveSession();
+  assertGeneration(generation);
   const verifier = randomVerifier();
   const challenge = await codeChallenge(verifier);
   const authUrl =
@@ -259,6 +311,7 @@ export async function interactiveSignIn(): Promise<GDriveSession> {
     );
   }
 
+  await assertCurrentSession(previous, generation);
   const tok = await exchange({
     grant_type: "authorization_code",
     code,
@@ -280,7 +333,7 @@ export async function interactiveSignIn(): Promise<GDriveSession> {
     displayName: user.displayName,
     savedAt: Date.now(),
   };
-  await saveGDriveSession(session);
+  await saveGDriveSession(session, previous, generation);
   // Don't persist the account email in the audit log (PR-L2) — the signed-in
   // account is already shown in the UI; the log just needs the outcome.
   const tokenNote = tok.refresh_token
@@ -295,31 +348,45 @@ export async function interactiveSignIn(): Promise<GDriveSession> {
 // ─── Get a valid access token, refreshing silently when possible ──────────────
 
 export async function getAccessToken(interactive = false): Promise<string> {
+  const generation = sessionGeneration;
+  await sessionWrites;
   const session = await loadGDriveSession();
+  assertGeneration(generation);
 
   if (session?.access_token && session.expires_at > Date.now() + EXPIRY_BUFFER_MS) {
     return session.access_token;
   }
 
   if (session?.refresh_token) {
-    try {
-      const tok = await exchange({ grant_type: "refresh_token", refresh_token: session.refresh_token });
+    if (refreshInFlight?.generation === generation && sameSession(refreshInFlight.session, session)) {
+      return refreshInFlight.promise;
+    }
+    const refreshToken = session.refresh_token;
+    const promise = (async () => {
+      await assertCurrentSession(session, generation);
+      const tok = await exchange({ grant_type: "refresh_token", refresh_token: refreshToken });
       const updated: GDriveSession = {
         ...session,
         access_token: tok.access_token,
         expires_at: Date.now() + (tok.expires_in ?? 3600) * 1000,
-        refresh_token: tok.refresh_token ?? session.refresh_token, // Google may omit it
+        refresh_token: tok.refresh_token ?? refreshToken, // Google may omit it
         savedAt: Date.now(),
       };
-      await saveGDriveSession(updated);
+      await saveGDriveSession(updated, session, generation);
       logger.info("GDrive.oauth", "Access token refreshed");
       return updated.access_token;
-    } catch (err) {
-      logger.warn("GDrive.oauth", `Refresh failed: ${err instanceof Error ? err.message : String(err)}`);
-      // Fall through — interactive re-consent or a clear error.
+    })();
+    const flight = { session, generation, promise };
+    refreshInFlight = flight;
+    try {
+      // Do not turn network/server errors or invalidated requests into automatic
+      // sign-in. In particular, a late refresh must never undo an explicit sign-out.
+      return await promise;
+    } finally {
+      if (refreshInFlight === flight) refreshInFlight = null;
     }
   }
 
-  if (interactive) return (await interactiveSignIn()).access_token;
+  if (interactive && !autoSignInBlocked) return (await interactiveSignIn()).access_token;
   throw new Error("Google session expired. Open Kesonode and sign in again.");
 }

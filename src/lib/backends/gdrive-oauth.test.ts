@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { isDriveAuthAvailable, interactiveSignIn } from "./gdrive-oauth";
+import {
+  isDriveAuthAvailable, interactiveSignIn, getAccessToken, clearGDriveSession, loadGDriveSession,
+} from "./gdrive-oauth";
+import { HttpError } from "@/lib/utils/retry";
 import { KEYS } from "@/lib/utils/storage";
 
 // `browser` resolves to the globalThis.chrome stub (test/polyfill-stub.ts), which
@@ -240,5 +243,77 @@ describe("a Drive sign-in that does not complete leaves the existing session alo
     const s = await interactiveSignIn();
 
     expect(s.refresh_token).toBeUndefined();
+  });
+});
+
+// The token endpoint is the one call every Drive request shares when the access token
+// expires: a burst of bookmark/history/session traffic used to send one refresh each,
+// and Google answers a duplicate grant by revoking the family. Sharing the in-flight
+// request keeps the session alive; the sign-out checks keep a late response from
+// writing the session back after the user has disconnected.
+describe("a Drive access token is refreshed at most once at a time", () => {
+  const EXPIRED = {
+    access_token: "at-old", refresh_token: "rt-old", expires_at: 1,
+    email: "ben@example.com", displayName: "Ben", savedAt: 1_700_000_000_000,
+  };
+  const seedExpired = () => chrome.storage.local.set({ [KEYS.GDRIVE_SESSION]: EXPIRED });
+
+  const tokenStub = (handler: () => Promise<unknown>) => {
+    const calls = { token: 0 };
+    vi.stubGlobal("fetch", (url: string) => {
+      if (!String(url).includes("oauth2.googleapis.com/token")) {
+        return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+      }
+      calls.token++;
+      return handler();
+    });
+    return calls;
+  };
+
+  it("shares one refresh between callers that ask at the same moment", async () => {
+    await seedExpired();
+    const calls = tokenStub(() => new Promise((resolve) => setTimeout(() => resolve({
+      ok: true, json: () => Promise.resolve({ access_token: "at-new", expires_in: 3600 }),
+    }), 5)));
+
+    const tokens = await Promise.all([getAccessToken(), getAccessToken(), getAccessToken()]);
+
+    expect(tokens).toEqual(["at-new", "at-new", "at-new"]);
+    expect(calls.token).toBe(1);
+    expect((await loadGDriveSession())?.access_token).toBe("at-new");
+  });
+
+  it("does not write a refreshed session back after the user signed out", async () => {
+    await seedExpired();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    tokenStub(async () => {
+      await gate;
+      return { ok: true, json: () => Promise.resolve({ access_token: "at-new", expires_in: 3600 }) };
+    });
+
+    const pending = getAccessToken();
+    await clearGDriveSession();
+    release();
+
+    await expect(pending).rejects.toThrow(/session changed/i);
+    expect(await loadGDriveSession()).toBeNull();
+  });
+
+  it("says what to do when Google rejects the refresh token, instead of opening consent", async () => {
+    await seedExpired();
+    const flow = vi.fn(() => Promise.resolve("https://ext.example/gdrive?code=x"));
+    chromeStub.chrome.identity = { getRedirectURL: () => "https://ext.example/gdrive", launchWebAuthFlow: flow };
+    tokenStub(async () => ({
+      ok: false, status: 400, statusText: "Bad Request",
+      json: () => Promise.resolve({ error: "invalid_grant", error_description: "Token has been expired or revoked." }),
+    }));
+
+    const err = await getAccessToken(true).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(HttpError);
+    expect((err as HttpError).status).toBe(400);
+    expect((err as Error).message).toMatch(/sign in again/i);
+    expect(flow).not.toHaveBeenCalled();
   });
 });

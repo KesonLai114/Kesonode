@@ -94,15 +94,18 @@ describe("importBookmarks — cross-browser move safety (confidence gate)", () =
 });
 
 describe("tombstones — duplicate-URL safety", () => {
-  it("deleting ONE of two identical-URL bookmarks records NO tombstone; deleting the last one does", async () => {
+  it.each([
+    ["https://dup.com", "https://dup.com"],
+    ["https://dup.com", "https://dup.com/"],
+    ["https://dup.com/", "https://dup.com"],
+  ])("deleting %s leaves its %s copy untombstoned until the last copy goes", async (url, remainingUrl) => {
     let onRemoved: ((id: string, info: { node: chrome.bookmarks.BookmarkTreeNode }) => void) | undefined;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (chrome.bookmarks.onRemoved as any).addListener = (cb: never) => { onRemoved = cb; };
     registerBookmarkListeners(() => {});
 
-    const url = "https://dup.com";
     const a = await chrome.bookmarks.create({ parentId: "1", title: "Dup", url });
-    const b = await chrome.bookmarks.create({ parentId: "1", title: "Dup", url });
+    const b = await chrome.bookmarks.create({ parentId: "2", title: "Dup", url: remainingUrl });
 
     // Remove the FIRST copy — a copy still remains, so no tombstone.
     await chrome.bookmarks.remove(a.id);
@@ -112,9 +115,37 @@ describe("tombstones — duplicate-URL safety", () => {
 
     // Remove the LAST copy — now genuinely gone, so a tombstone is recorded.
     await chrome.bookmarks.remove(b.id);
-    onRemoved!(b.id, { node: { id: b.id, title: "Dup", url } as chrome.bookmarks.BookmarkTreeNode });
+    onRemoved!(b.id, { node: b });
     await new Promise((r) => setTimeout(r, 0));
-    expect((await getTombstones()).map((t) => t.url)).toEqual([url]);
+    expect((await getTombstones()).map((t) => t.url)).toEqual([remainingUrl]);
+    expect((await exportBookmarkPayload()).tombstones.map((t) => t.url)).toEqual([remainingUrl]);
+    resetDeletionLog();
+  });
+
+  it("deleting a folder only tombstones URLs with no canonical copy elsewhere", async () => {
+    let onRemoved!: Parameters<typeof chrome.bookmarks.onRemoved.addListener>[0];
+    const listener = vi.spyOn(chrome.bookmarks.onRemoved, "addListener")
+      .mockImplementation((cb) => { onRemoved = cb; });
+    registerBookmarkListeners(() => {});
+    try {
+      const f = await chrome.bookmarks.create({ parentId: "1", title: "Removed" });
+      await seed("Dup", "https://dup.com", f.id);
+      await seed("Gone", "https://gone.com", f.id);
+      await seed("Survivor", "https://dup.com/", "2");
+      const [node] = await chrome.bookmarks.getSubTree(f.id);
+
+      await chrome.bookmarks.removeTree(f.id);
+      onRemoved(f.id, { parentId: "1", index: 0, node });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect((await getTombstones()).map((t) => t.url)).toEqual(["https://gone.com"]);
+      expect((await exportBookmarkPayload()).tombstones.map((t) => t.url)).toEqual(["https://gone.com"]);
+      await importBookmarks(payload([link("Dup", "https://dup.com"), link("Gone", "https://gone.com")]), "merge", "lww", 100);
+      expect(await localUrls()).toEqual(["https://dup.com/"]);
+    } finally {
+      listener.mockRestore();
+      resetDeletionLog();
+    }
   });
 });
 
@@ -629,6 +660,87 @@ describe("importBookmarks — mass-delete guard (configurable percent)", () => {
 });
 
 describe("importBookmarks — URL edit (no duplicate)", () => {
+  it.each([
+    ["https://dup.com", "https://dup.com"],
+    ["https://dup.com", "https://dup.com/"],
+    ["https://dup.com/", "https://dup.com"],
+  ])("editing %s does not tombstone its surviving %s copy", async (oldUrl, remainingUrl) => {
+    let onChanged!: Parameters<typeof chrome.bookmarks.onChanged.addListener>[0];
+    const listener = vi.spyOn(chrome.bookmarks.onChanged, "addListener")
+      .mockImplementation((cb) => { onChanged = cb; });
+    registerBookmarkListeners(() => {});
+    try {
+      const a = await chrome.bookmarks.create({ parentId: "1", title: "A", url: oldUrl });
+      const b = await chrome.bookmarks.create({ parentId: "2", title: "B", url: remainingUrl });
+      await exportBookmarkPayload();
+
+      await chrome.bookmarks.update(a.id, { url: "https://edited.com" });
+      onChanged(a.id, { title: "A", url: "https://edited.com" });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(await getTombstones()).toEqual([]);
+
+      await importBookmarks(payload([link("B", oldUrl)]), "merge", "lww", 100);
+      expect(await localUrls()).toEqual([remainingUrl, "https://edited.com"].sort());
+
+      // Editing the LAST copy still records its original spelling on storage and wire.
+      await chrome.bookmarks.update(b.id, { url: "https://last-edited.com" });
+      onChanged(b.id, { title: "B", url: "https://last-edited.com" });
+      await new Promise((r) => setTimeout(r, 0));
+      expect((await getTombstones()).map((t) => t.url)).toEqual([remainingUrl]);
+      expect((await exportBookmarkPayload()).tombstones.map((t) => t.url)).toEqual([remainingUrl]);
+    } finally {
+      listener.mockRestore();
+    }
+  });
+
+  it.each([
+    ["https://a.com", "https://a.com/"],
+    ["https://a.com/", "https://a.com"],
+  ])("an equivalent rewrite %s → %s never records a deletion, even if its event is late", async (oldUrl, equivalentUrl) => {
+    let onChanged!: Parameters<typeof chrome.bookmarks.onChanged.addListener>[0];
+    const listener = vi.spyOn(chrome.bookmarks.onChanged, "addListener")
+      .mockImplementation((cb) => { onChanged = cb; });
+    registerBookmarkListeners(() => {});
+    try {
+      const a = await chrome.bookmarks.create({ parentId: "1", title: "A", url: oldUrl });
+      await exportBookmarkPayload();
+      await chrome.bookmarks.update(a.id, { url: equivalentUrl });
+      onChanged(a.id, { title: "A", url: equivalentUrl });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(await getTombstones()).toEqual([]);
+
+      // The live tree has already changed again when a delayed normalization event arrives.
+      // Checking presence alone cannot protect this case: compare the event to the cache too.
+      await chrome.bookmarks.update(a.id, { url: "https://a.com/path" });
+      onChanged(a.id, { title: "A", url: equivalentUrl });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(await getTombstones()).toEqual([]);
+
+      onChanged(a.id, { title: "A", url: "https://a.com/path" });
+      await new Promise((r) => setTimeout(r, 0));
+      expect((await getTombstones()).map((t) => t.url)).toEqual([oldUrl]);
+    } finally {
+      listener.mockRestore();
+    }
+  });
+
+  it("keeps nonempty paths with and without a trailing slash distinct", async () => {
+    let onChanged!: Parameters<typeof chrome.bookmarks.onChanged.addListener>[0];
+    const listener = vi.spyOn(chrome.bookmarks.onChanged, "addListener")
+      .mockImplementation((cb) => { onChanged = cb; });
+    registerBookmarkListeners(() => {});
+    try {
+      const a = await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.com/path" });
+      await exportBookmarkPayload();
+      await chrome.bookmarks.update(a.id, { url: "https://a.com/path/" });
+      onChanged(a.id, { title: "A", url: "https://a.com/path/" });
+      await new Promise((r) => setTimeout(r, 0));
+      expect((await getTombstones()).map((t) => t.url)).toEqual(["https://a.com/path"]);
+    } finally {
+      listener.mockRestore();
+    }
+  });
+
   it("tombstones the replaced url on edit so a peer doesn't resurrect it", async () => {
     // Capture the onChanged listener the handler registers (the fake's is a no-op).
     let onChanged: ((id: string, info: { title: string; url?: string }) => void) | undefined;

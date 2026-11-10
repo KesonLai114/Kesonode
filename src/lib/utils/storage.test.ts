@@ -8,7 +8,7 @@ import {
   noteSyncFailure, clearSyncFailure, syncBackoffRemaining,
   SYNC_BACKOFF_BASE_MS, SYNC_BACKOFF_MAX_MS,
   getSettings, saveSettings, DEFAULT_SETTINGS, ensureActiveBackendConfig,
-  setRemoteSession, setRemoteExtensions, getRemoteSessions,
+  setRemoteSession, setRemoteExtensions, getRemoteSessions, getState, setState,
 } from "@/lib/utils/storage";
 import { browser } from "@/lib/utils/ext";
 import type { RemoteSessionEntry, RemoteExtensionEntry, SyncExtension, SyncSettings } from "@/lib/types";
@@ -29,6 +29,55 @@ function entry(device: string, ts: string, tabCount = 1): RemoteSessionEntry {
     },
   };
 }
+
+describe("concurrent state patches", () => {
+  it("retains disjoint patches made in the same turn", async () => {
+    await Promise.all([
+      setState({ status: "error", last_error: "offline" }),
+      setState({ bytes_transferred: 42 }),
+    ]);
+    expect(await getState()).toMatchObject({ status: "error", last_error: "offline", bytes_transferred: 42 });
+  });
+
+  it("evaluates mutations against the latest state", async () => {
+    await Promise.all(Array.from({ length: 10 }, () =>
+      setState((s) => ({ bytes_transferred: s.bytes_transferred + 1 })),
+    ));
+    expect((await getState()).bytes_transferred).toBe(10);
+  });
+
+  it("accepts further patches after a failed write", async () => {
+    vi.spyOn(browser.storage.local, "set").mockRejectedValueOnce(new Error("storage unavailable"));
+    await expect(setState({ status: "syncing" })).rejects.toThrow("storage unavailable");
+    await setState({ status: "error" });
+    expect((await getState()).status).toBe("error");
+  });
+});
+
+describe("concurrent settings saves", () => {
+  it("keeps both changes when two contexts save in the same turn", async () => {
+    // Settings are saved as one object. Read-modify-write without a lock let the second
+    // writer start from a copy taken before the first landed, and the later write then
+    // silently undid the other one — a passphrase set in Options vanishing because the
+    // popup saved a disconnect a moment later.
+    await Promise.all([
+      saveSettings({ encryption_passphrase: "a long enough passphrase" }),
+      saveSettings({ auto_sync: false }),
+    ]);
+    const stored = await getSettings();
+    expect(stored.encryption_passphrase).toBe("a long enough passphrase");
+    expect(stored.auto_sync).toBe(false);
+  });
+
+  it("still rejects a policy violation without losing a concurrent valid change", async () => {
+    await expect(Promise.all([
+      saveSettings({ encryption_enabled: true, encryption_passphrase: "short" }),
+      saveSettings({ device_label: "Studio" }),
+    ])).rejects.toThrow(/at least/);
+
+    expect((await getSettings()).device_label).toBe("Studio");
+  });
+});
 
 describe("detectDeviceName", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -333,6 +382,15 @@ describe("imported-history stamps (CO-6)", () => {
     const stamps = await getImportedHistoryStamps();
     expect(Object.keys(stamps)).toHaveLength(20_000);
     expect(stamps["https://ancient.com/"]).toBeUndefined();
+  });
+});
+
+describe("concurrent sync locks", () => {
+  it("allows only one owner in a burst", async () => {
+    const claimed = await Promise.all(Array.from({ length: 8 }, () => acquireSyncLock(60_000)));
+    expect(claimed.filter(Boolean)).toHaveLength(1);
+    await releaseSyncLock();
+    expect(await acquireSyncLock(60_000)).toBe(true);
   });
 });
 

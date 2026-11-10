@@ -144,16 +144,40 @@ export class GDriveBackend implements IBackend {
 
   async disconnect(): Promise<void> { this.folderId = null; }
 
+  /** Collect every page before callers filter or choose a canonical file. The caller's
+   *  withRetry owns retries: a failed page must never become a successful partial list. */
+  private async listDriveFiles<T>(
+    q: string,
+    fields: string,
+    h: HeadersInit,
+    errorContext: string,
+    options: { orderBy?: string; cache?: RequestCache } = {},
+  ): Promise<T[]> {
+    const url = `${DRIVE_API}/files?q=${q}&fields=nextPageToken,files(${fields})`
+      + (options.orderBy ? `&orderBy=${encodeURIComponent(options.orderBy)}` : "");
+    const files: T[] = [];
+    let pageToken: string | undefined;
+    do {
+      const res = await fetch(url + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""), {
+        headers: h,
+        ...(options.cache ? { cache: options.cache } : {}),
+      });
+      if (!res.ok) throw await this.httpError(res, `${errorContext}: ${res.status}`);
+      const page = (await res.json()) as { files?: T[]; nextPageToken?: string };
+      files.push(...(page.files ?? []));
+      pageToken = page.nextPageToken;
+    } while (pageToken);
+    return files;
+  }
+
   /** Every non-trashed sync folder this app can see. */
   private async findFolders(h: HeadersInit): Promise<DriveFileRef[]> {
     const q = encodeURIComponent(`name='${driveFolderName()}' and mimeType='${FOLDER_MIME}' and trashed=false`);
     // connect() runs this on every sync, and it was the one Drive call outside withRetry, so
     // a single transient 500 failed the whole cycle and put an error in the Activity log.
-    return withRetry(async () => {
-      const res = await fetch(`${DRIVE_API}/files?q=${q}&fields=files(id,name,createdTime)`, { headers: h });
-      if (!res.ok) throw await this.httpError(res, `Drive folder lookup failed: ${res.status}`);
-      return ((await res.json()).files ?? []) as DriveFileRef[];
-    });
+    return withRetry(() => this.listDriveFiles<DriveFileRef>(
+      q, "id,name,createdTime", h, "Drive folder lookup failed",
+    ));
   }
 
   private async ensureFolder(): Promise<string> {
@@ -284,10 +308,11 @@ export class GDriveBackend implements IBackend {
         ? `name contains '${prefixes[0]}${data_type}_'`
         : `name contains '${data_type}_'`;
       const q = encodeURIComponent(`${nameQuery} and '${folderId}' in parents and trashed=false`);
-      const listRes = await fetch(`${DRIVE_API}/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc`, { headers: h, cache: "no-store" });
-      if (!listRes.ok) throw await this.httpError(listRes, `Drive list failed: ${listRes.status}`);
-      const { files } = await listRes.json();
-      if (!files?.length) return [];
+      const files = await this.listDriveFiles<{ id: string; name: string }>(
+        q, "id,name,modifiedTime", h, "Drive list failed",
+        { orderBy: "modifiedTime desc", cache: "no-store" },
+      );
+      if (!files.length) return [];
       // Every peer file (newest first), minus our own, and at most ONE file per device.
       //
       // Both filters are about Drive in particular. `contains` is a loose token match, the
@@ -304,7 +329,7 @@ export class GDriveBackend implements IBackend {
       // the first place, and neither has the download it costs.
       const seen = new Set<string>();
       const peers: Array<{ id: string; name: string }> = [];
-      for (const f of files as Array<{ id: string; name: string }>) {
+      for (const f of files) {
         const deviceId = f.name ? peerDeviceIdFromName(f.name, data_type) : null;
         if (!deviceId || deviceId === excludeDeviceId || seen.has(deviceId)) continue;
         seen.add(deviceId);
@@ -350,9 +375,9 @@ export class GDriveBackend implements IBackend {
 
   private async findFileId(name: string, folderId: string, h: HeadersInit): Promise<string | null> {
     const q = encodeURIComponent(`name='${name}' and '${folderId}' in parents and trashed=false`);
-    const res = await fetch(`${DRIVE_API}/files?q=${q}&fields=files(id,createdTime)`, { headers: h });
-    if (!res.ok) throw await this.httpError(res, `Drive lookup failed: ${res.status}`);
-    const files = ((await res.json()).files ?? []) as DriveFileRef[];
+    const files = await this.listDriveFiles<DriveFileRef>(
+      q, "id,createdTime", h, "Drive lookup failed",
+    );
     if (files.length > 1) {
       // A retried upload whose create response was lost can leave two files with the same
       // name. Always updating the same one keeps a single file authoritative, instead of
@@ -362,24 +387,24 @@ export class GDriveBackend implements IBackend {
     return pickCanonical(files)?.id ?? null;
   }
 
-  /** The file's `etag`, or null when it isn't in the folder. */
+  /** The file's HTTP ETag, or null when it isn't in the folder. */
   async getFileVersion(name: string): Promise<string | null> {
     return withRetry(async () => {
       const folderId = this.folderId ?? (await this.ensureFolder());
       const h = await this.authHeaders();
       const id = await this.findFileId(name, folderId, h);
       if (!id) return null;
-      const res = await fetch(`${DRIVE_API}/files/${id}?fields=etag`, { headers: h, cache: "no-store" });
+      const res = await fetch(`${DRIVE_API}/files/${id}?fields=id`, { headers: h, cache: "no-store" });
       if (res.status === 404) return null;
       if (!res.ok) throw await this.httpError(res, `Drive version read failed: ${res.status}`);
-      const etag = ((await res.json()) as { etag?: string }).etag;
-      if (!etag) throw new Error("Drive returned no etag, so writes cannot be made conditional");
+      const etag = res.headers.get("ETag");
+      if (!etag) throw new Error("Drive returned no ETag header, so writes cannot be made conditional");
       return etag;
     });
   }
 
   /** Update-media only if the file still carries `version`; false when someone else wrote
-   *  first (412), which is the caller's cue to re-read and merge again.
+   *  first (412) or deleted it, which is the caller's cue to re-read and merge again.
    *
    *  A file that does not exist yet is created without a condition: Drive has no
    *  If-None-Match on a create. That race is between two devices taking their FIRST
@@ -391,11 +416,12 @@ export class GDriveBackend implements IBackend {
       const h = await this.authHeaders();
       const token = await this.getToken(false);
       const existingId = await this.findFileId(name, folderId, h);
-      if (!existingId || version === null) {
+      if (version === null) {
         if (existingId) return false; // created since we looked
         await this.putFile(name, content);
         return true;
       }
+      if (!existingId) return false; // deleted since we read the version; never resurrect it
       const res = await fetch(`${UPLOAD_API}/files/${existingId}?uploadType=media`, {
         method: "PATCH",
         headers: {
@@ -405,7 +431,7 @@ export class GDriveBackend implements IBackend {
         },
         body: content,
       });
-      if (res.status === 412) return false;
+      if (res.status === 412 || res.status === 404) return false;
       if (!res.ok) throw await this.httpError(res, `Drive update failed: ${res.status}`);
       return true;
     });
@@ -462,10 +488,10 @@ export class GDriveBackend implements IBackend {
       const h = await this.authHeaders();
       // Drive's `contains` is a loose token match, so filter to a real startsWith below.
       const q = encodeURIComponent(`name contains '${prefix}' and '${folderId}' in parents and trashed=false`);
-      const res = await fetch(`${DRIVE_API}/files?q=${q}&fields=files(name)`, { headers: h, cache: "no-store" });
-      if (!res.ok) throw await this.httpError(res, `Drive list failed: ${res.status}`);
-      const { files } = await res.json();
-      return ((files ?? []) as Array<{ name: string }>).map(f => f.name).filter(n => n.startsWith(prefix));
+      const files = await this.listDriveFiles<{ name: string }>(
+        q, "name", h, "Drive list failed", { cache: "no-store" },
+      );
+      return files.map(f => f.name).filter(n => n.startsWith(prefix));
     });
   }
 
@@ -474,10 +500,10 @@ export class GDriveBackend implements IBackend {
       const folderId = this.folderId ?? (await this.ensureFolder());
       const h = await this.authHeaders();
       const q = encodeURIComponent(`name contains '${prefix}' and '${folderId}' in parents and trashed=false`);
-      const res = await fetch(`${DRIVE_API}/files?q=${q}&fields=files(name,modifiedTime)`, { headers: h, cache: "no-store" });
-      if (!res.ok) throw await this.httpError(res, `Drive list failed: ${res.status}`);
-      const { files } = await res.json();
-      return ((files ?? []) as Array<{ name: string; modifiedTime?: string }>)
+      const files = await this.listDriveFiles<{ name: string; modifiedTime?: string }>(
+        q, "name,modifiedTime", h, "Drive list failed", { cache: "no-store" },
+      );
+      return files
         .filter(f => f.name.startsWith(prefix))
         .map(f => {
           const t = f.modifiedTime ? Date.parse(f.modifiedTime) : NaN;

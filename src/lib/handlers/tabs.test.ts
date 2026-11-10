@@ -194,6 +194,31 @@ describe("a session restore on an engine that allows one open per click", () => 
     expect(windowsFake.__created()[0].blocked).toBe(true); // the rescue was swallowed too
     expect(await getSingleTabOpenLimit()).toBe(true); // and that is why the next one works
   });
+
+  it("doesn't mistake a tab the user closed for one the engine blocked", async () => {
+    // The measurement used to compare the total number of open tabs with the total before
+    // the restore. Anyone closing a tab while it runs then made a perfectly good engine
+    // look blocked, which sent the whole session into a new window and remembered the
+    // wrong answer for every later restore. Counting OUR tabs by id cannot be fooled.
+    const userTab = await chrome.tabs.create({ url: "https://mine.com/" });
+    const realCreate = chrome.tabs.create.bind(chrome.tabs);
+    let openedByRestore = 0;
+    vi.spyOn(chrome.tabs, "create").mockImplementation(async (props) => {
+      const tab = await realCreate(props);
+      if (++openedByRestore === 1 && typeof userTab.id === "number") {
+        await chrome.tabs.remove(userTab.id);
+      }
+      return tab;
+    });
+
+    await importSession(many(3));
+
+    expect(windowsFake.__created()).toEqual([]);
+    expect(await getSingleTabOpenLimit()).toBe(false);
+    expect((await chrome.tabs.query({})).map((t) => t.url)).toEqual([
+      "https://s0.com/", "https://s1.com/", "https://s2.com/",
+    ]);
+  });
 });
 
 describe("a session restore is bounded by what Kesonode will open", () => {

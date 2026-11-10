@@ -101,8 +101,12 @@ async function clearPendingPin(name: string): Promise<void> {
 
 /** A metered or offline server saying "not now", as opposed to a bad request of ours. */
 function isStorageRefusal(err: unknown): boolean {
-  if (err instanceof HttpError) return err.status === 403 || err.status === 429 || err.status >= 500;
+  if (err instanceof HttpError) return [401, 403, 408, 423, 429].includes(err.status) || err.status >= 500;
   return err instanceof TypeError && /fetch|network|load failed/i.test(err.message);
+}
+
+class SnapshotNotFoundError extends Error {
+  constructor() { super("Restore point not found on the backend."); }
 }
 
 /**
@@ -114,10 +118,15 @@ export async function flushPendingPins(backend: IBackend, settings: SyncSettings
     let done: boolean;
     try {
       done = await setSnapshotPinned(backend, settings, p.name, p.pinned);
-    } catch {
-      // The point is gone or the name collides: it can never be moved, so drop it.
-      await clearPendingPin(p.name);
-      continue;
+    } catch (err) {
+      if (tsFromName(p.name) == null || err instanceof SnapshotNotFoundError) {
+        await clearPendingPin(p.name);
+        continue;
+      }
+      // An unknown failure is not proof that the point is gone. Keep the intent (and
+      // its retention protection), and avoid another round of requests this cycle.
+      logger.warn("Snapshots", `Could not finish the pending change for ${p.name}; keeping it for retry (${err instanceof Error ? err.message : err})`);
+      break;
     }
     if (!done) break;
   }
@@ -333,56 +342,66 @@ async function indexBody(settings: SyncSettings, list: SnapshotMeta[]): Promise<
   return JSON.stringify(file);
 }
 
-/** Fold `add` into what we read, drop entries with no file behind them, newest first. */
-function foldIndex(remote: SnapshotMeta[], add: SnapshotMeta[], live: string[]): SnapshotMeta[] {
+/** Fold annotations newest first. Listings may be cached on the backend instance
+ *  (WebDAV), even when requested again after reading the index. A missing name is not
+ *  proof of deletion: preserve unknown remote entries, dropping only names this operation
+ *  successfully deleted. listSnapshots still filters the display by actual file names. */
+function foldIndex(
+  remote: SnapshotMeta[], add: SnapshotMeta[], live: string[], deleted: ReadonlySet<string> = new Set(),
+): SnapshotMeta[] {
   const byName = new Map<string, SnapshotMeta>();
   for (const m of [...remote, ...add]) byName.set(m.name, m); // `add` wins on conflict
-  const alive = new Set(live);
+  const alive = new Set([...live, ...remote.map((m) => m.name), ...add.map((m) => m.name)]);
   return [...byName.values()]
-    .filter((m) => alive.has(m.name))
+    .filter((m) => alive.has(m.name) && !deleted.has(m.name))
     .sort((a, b) => b.timestamp - a.timestamp);
 }
 
 /**
  * Read-modify-write the shared index, and redo it when another device got there first.
  *
- * `update` receives what we read and returns the list to publish. Returning `null` from
- * it means "leave the file alone".
+ * `update` receives what we read and a listing requested after that read on every attempt,
+ * and returns the list to publish.
  *
  * This is the ONE file two devices write, and without a condition it lost a side whenever
  * they overlapped: both read the index, both merged their own change into what they had
  * read, and the later write's list did not contain the earlier one's entry. Nothing is
  * lost but annotations — a name, a count, "saved by" — which is also what a restore point
  * that lost its name looks like. Where the backend can report a version (ETag / blob SHA)
- * the write is made conditional on it, and a lost race is simply redone. Three tries, then
- * one unconditional write: losing the improvement must never lose the write.
+ * the write is made conditional on it, and a lost race is simply redone. Every attempt
+ * keeps that condition; exhausting retries must never overwrite another device's work.
  *
- * Returns the published list, or null when nothing was written — the existing index could
- * not be read (see getIndex), and overwriting data we couldn't read would destroy every
- * other device's annotations or downgrade the group's encrypted index to plaintext.
+ * Returns the published list, or null when nothing was written — the existing index or
+ * its version could not be read, or contention exhausted the retries. Overwriting then
+ * could destroy other devices' annotations or downgrade the group's encrypted index.
  */
 async function updateIndex(
   backend: IBackend, settings: SyncSettings,
-  update: (remote: SnapshotMeta[]) => SnapshotMeta[],
+  update: (remote: SnapshotMeta[], live: string[]) => SnapshotMeta[],
 ): Promise<SnapshotMeta[] | null> {
   const canCondition = !!(backend.getFileVersion && backend.putFileIfVersion);
-  const attempts = canCondition ? 4 : 1; // last one is the unconditional fallback
+  const attempts = canCondition ? 4 : 1;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    let conditional = canCondition && attempt < attempts - 1;
+    let conditional = canCondition;
     let version: string | null = null;
     if (conditional) {
       try {
         version = await backend.getFileVersion!(INDEX_NAME);
       } catch (e) {
-        // No ETag/SHA from this storage, or the check itself failed. Losing the condition
-        // is losing an improvement, not the write.
+        // Only the explicit no-ETag signal from WebDAV/Drive permits the legacy
+        // fallback. HTTP/network failures (or unknown errors) cannot prove that this
+        // backend lacks conditions, so leave the original index untouched.
+        if (e instanceof HttpError || !(e instanceof Error) || !/\bno etag\b.*writes cannot be made conditional/i.test(e.message)) {
+          logger.warn("Snapshots", `Could not read the shared index version; leaving the index untouched (${e instanceof Error ? e.message : e})`);
+          return null;
+        }
         conditional = false;
-        logger.info("Snapshots", `Conditional index write unavailable (${e instanceof Error ? e.message : e}); merging without it`);
+        logger.info("Snapshots", `Conditional index write unavailable (${e.message}); merging without it`);
       }
     }
     const remote = await getIndex(backend, settings);
     if (remote === null) return null;
-    const merged = update(remote);
+    const merged = update(remote, await allSnapshotNames(backend));
     const body = await indexBody(settings, merged);
     if (conditional) {
       if (!(await backend.putFileIfVersion!(INDEX_NAME, body, version))) {
@@ -397,13 +416,14 @@ async function updateIndex(
     await writeSharedCache(merged);
     return merged;
   }
-  return null; // unreachable: the last attempt cannot take the conditional branch
+  logger.warn("Snapshots", `Shared index changed during all ${attempts} conditional write attempts; leaving the remote index untouched`);
+  return null;
 }
 
 async function mergeIndex(
-  backend: IBackend, settings: SyncSettings, add: SnapshotMeta[], live: string[],
+  backend: IBackend, settings: SyncSettings, add: SnapshotMeta[], deleted: ReadonlySet<string> = new Set(),
 ): Promise<SnapshotMeta[] | null> {
-  const merged = await updateIndex(backend, settings, (remote) => foldIndex(remote, add, live));
+  const merged = await updateIndex(backend, settings, (remote, live) => foldIndex(remote, add, live, deleted));
   if (merged === null) {
     logger.warn("Snapshots", "Leaving the shared index untouched, only the counts are affected, the restore points themselves are fine");
   }
@@ -515,13 +535,11 @@ export async function createSnapshot(
     ...(opts.origin ? { origin: opts.origin } : {}),
     ...(pinned ? { pinned: true } : {}),
   };
-  // Prune first so the index write reflects the post-prune file list in one pass.
-  // Kept and by-hand points are NOT in the rolling list, so they have to be added
-  // explicitly or their annotations would be dropped from the shared index here.
-  const rolled = await pruneSnapshots(backend);
-  const byHand = await backend.listFiles(MANUAL_PREFIX);
-  const kept = await backend.listFiles(KEPT_PREFIX);
-  await mergeIndex(backend, settings, [meta], [...rolled, ...byHand, ...kept, name]);
+  // Prune first, recording only successful deletes. An absent name in a cached
+  // listing must never erase another device's newly published annotation.
+  const deleted = new Set<string>();
+  await pruneSnapshots(backend, deleted);
+  await mergeIndex(backend, settings, [meta], deleted);
   // The merge writes NOTHING when the shared index is unreadable. Keep our own annotations
   // anyway, or this point would have no name, device or count anywhere at all.
   await rememberLocal(meta);
@@ -534,7 +552,7 @@ export async function createSnapshot(
  *  — otherwise upgrading would silently discard them — then drop the legacy key.
  *  Returns the merged index, or null when there was nothing to migrate. */
 async function migrateLegacyIndex(
-  backend: IBackend, settings: SyncSettings, live: string[],
+  backend: IBackend, settings: SyncSettings,
 ): Promise<SnapshotMeta[] | null> {
   const r = await browser.storage.local.get(KEYS.LEGACY_SNAPSHOTS);
   const legacy = r[KEYS.LEGACY_SNAPSHOTS] as SnapshotMeta[] | undefined;
@@ -543,7 +561,7 @@ async function migrateLegacyIndex(
     await browser.storage.local.remove(KEYS.LEGACY_SNAPSHOTS); // nothing to carry over
     return null;
   }
-  const merged = await mergeIndex(backend, settings, legacy, live);
+  const merged = await mergeIndex(backend, settings, legacy);
   if (merged === null) {
     // The shared index couldn't be read, so nothing was published. KEEP the legacy
     // counts and retry later — dropping the key here deleted them for good, and these
@@ -593,7 +611,7 @@ export async function listSnapshots(backend: IBackend, settings: SyncSettings): 
   // says which restore points exist, so the list still works. And when the index itself
   // is out of reach, the last copy this device read fills in what it can: the device that
   // saved each point and how many bookmarks it held.
-  const idx = (await migrateLegacyIndex(backend, settings, names))
+  const idx = (await migrateLegacyIndex(backend, settings))
     ?? (await getIndex(backend, settings))
     ?? (await readSharedCache())
     ?? [];
@@ -678,21 +696,21 @@ export async function restoreSnapshot(backend: IBackend, name: string, settings:
  *  between them pruned nothing and the folder grew without limit. Ordering comes from the
  *  timestamp in the filename, and the prefix from the file kind — never from an annotation
  *  this device may be unable to read. */
-export async function pruneSnapshots(backend: IBackend): Promise<string[]> {
+export async function pruneSnapshots(backend: IBackend, deleted?: Set<string>): Promise<string[]> {
   // A point whose "keep forever" is still queued must not be pruned here: the storage
   // refused the rename, not the user's intent. Otherwise a click made during a 403
   // window could lose the very point it was meant to protect.
   const protectedNames = new Set((await readPendingPins()).filter((p) => p.pinned).map((p) => p.name));
   const keep = [
-    ...(await pruneRing(backend, PREFIX, MAX_SNAPSHOTS, protectedNames)),
-    ...(await pruneRing(backend, MANUAL_PREFIX, MAX_MANUAL_SNAPSHOTS, protectedNames)),
+    ...(await pruneRing(backend, PREFIX, MAX_SNAPSHOTS, protectedNames, deleted)),
+    ...(await pruneRing(backend, MANUAL_PREFIX, MAX_MANUAL_SNAPSHOTS, protectedNames, deleted)),
   ];
   return keep;
 }
 
 /** Rotate one prefix down to `cap`, newest first, and return what is left. */
 async function pruneRing(
-  backend: IBackend, prefix: string, cap: number, protectedNames: Set<string>,
+  backend: IBackend, prefix: string, cap: number, protectedNames: Set<string>, deleted?: Set<string>,
 ): Promise<string[]> {
   const named = (await backend.listFiles(prefix))
     .map((name) => ({ name, ts: tsFromName(name) }))
@@ -700,10 +718,18 @@ async function pruneRing(
     .sort((a, b) => b.ts - a.ts);
   const keep = named.filter((x, i) => i < cap || protectedNames.has(x.name));
   const keepSet = new Set(keep.map((x) => x.name));
+  let failed = 0;
   for (const x of named) {
     if (keepSet.has(x.name)) continue;
-    try { await backend.deleteFile(x.name); } catch { /* best effort — retried next time */ }
+    try {
+      await backend.deleteFile(x.name);
+      deleted?.add(x.name);
+    } catch {
+      keep.push(x); // The file and its annotations survive until a delete succeeds.
+      failed++;
+    }
   }
+  if (failed) logger.warn("Snapshots", `Could not prune ${failed} restore point(s) from ${prefix}; keeping their files and annotations for retry`);
   return keep.map((x) => x.name);
 }
 
@@ -719,16 +745,14 @@ export async function renameSnapshot(
   if (!live.includes(name)) throw new Error("Restore point not found on the backend.");
   const ts = tsFromName(name)!;
   const clean = label.trim().slice(0, 120);
-  const alive = new Set(live);
   // Conditional where the backend allows it: a rename landing while another device takes
   // a restore point must not drop that point's annotation.
-  const merged = await updateIndex(backend, settings, (remote) => {
+  const merged = await updateIndex(backend, settings, (remote, currentLive) => {
     const byName = new Map(remote.map((m) => [m.name, m]));
     const next: SnapshotMeta = { ...(byName.get(name) ?? {}), name, timestamp: ts };
     if (clean) next.label = clean;
     else delete next.label;
-    byName.set(name, next);
-    return [...byName.values()].filter((m) => alive.has(m.name)).sort((a, b) => b.timestamp - a.timestamp);
+    return foldIndex(remote, [next], currentLive);
   });
   if (merged === null) {
     // A refused index is never overwritten. Keep the name on this device instead, so a
@@ -759,27 +783,26 @@ async function moveSnapshotFile(
   backend: IBackend, settings: SyncSettings, name: string, target: string,
   pinned: boolean, ts: number,
 ): Promise<void> {
-  const live = await allSnapshotNames(backend);
-  if (!live.includes(name) && !live.includes(target)) {
-    throw new Error("Restore point not found on the backend.");
+  // A cached listing cannot confirm absence. Read the actual files before declaring
+  // an intent impossible, and tolerate a retry that already got past the copy.
+  if (await backend.getFile(target) === null) {
+    const source = await backend.getFile(name);
+    if (source === null) throw new SnapshotNotFoundError();
+    await backend.putFile(target, source);
+    await backend.deleteFile(name);
+  } else if (await backend.getFile(name) !== null) {
+    // An earlier attempt copied it and was refused only at the delete. Deleting a
+    // missing name instead would fail on every retry and never finish the move.
+    await backend.deleteFile(name);
   }
-  if (!live.includes(target)) {
-    const raw = await backend.getFile(name);
-    if (!raw) throw new Error("Restore point not found on the backend.");
-    await backend.putFile(target, raw);
-  }
-  if (live.includes(name)) await backend.deleteFile(name);
   await moveLocal(name, target);
 
-  const alive = new Set([...live.filter((n) => n !== name), target]);
-  const merged = await updateIndex(backend, settings, (remote) => {
+  const merged = await updateIndex(backend, settings, (remote, live) => {
     const byName = new Map(remote.map((m) => [m.name, m]));
-    const next: SnapshotMeta = { ...(byName.get(name) ?? {}), name: target, timestamp: ts };
+    const next: SnapshotMeta = { ...(byName.get(target) ?? {}), ...(byName.get(name) ?? {}), name: target, timestamp: ts };
     if (pinned) next.pinned = true;
     else delete next.pinned;
-    byName.delete(name);
-    byName.set(target, next);
-    return [...byName.values()].filter((m) => alive.has(m.name)).sort((a, b) => b.timestamp - a.timestamp);
+    return foldIndex(remote, [next], [...live, target], new Set([name]));
   });
   if (merged === null) {
     logger.warn("Snapshots", `Shared index unreadable; kept ${target} on this device only`);
@@ -824,8 +847,7 @@ export async function deleteSnapshot(backend: IBackend, settings: SyncSettings, 
   if (tsFromName(name) == null) throw new Error("Not a restore point.");
   await backend.deleteFile(name);
   await forgetLocal(name);
-  const live = await allSnapshotNames(backend);
-  // mergeIndex drops entries with no file behind them, which now includes this one.
-  await mergeIndex(backend, settings, [], live);
+  // Only this successful deletion is authoritative, not omissions from a cached list.
+  await mergeIndex(backend, settings, [], new Set([name]));
   logger.event("Snapshots", `Deleted ${name}`);
 }

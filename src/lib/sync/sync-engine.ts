@@ -349,6 +349,7 @@ export class SyncEngine {
   /** Local change guard: true → this cycle must NOT publish our bookmark file. Reset at
    * the top of sync(), read by uploadIfChanged, the one gate every upload path uses. */
   private guardHoldThisSync = false;
+  private mergeBookmarksThisSync = false;
   /** The banner the popup shows while that hold is in effect. */
   private guardNoticeThisSync: SyncState["guard_notice"] = null;
   /** Set when a held drift streak ended this cycle, so a one-time "resumed" log line fires. */
@@ -399,7 +400,12 @@ export class SyncEngine {
     this.settings = settings;
     this.resolver.updateStrategy(settings.conflict_strategy);
     setCompatMode(settings.compat_mode);
-    if (encChanged) await clearUploadChecksums();
+    if (encChanged) {
+      if ((await getLastUploadChecksum("bookmarks")) !== null && !(await getFirstSync())?.done) {
+        await setFirstSync({ done: true, at: new Date().toISOString() });
+      }
+      await clearUploadChecksums();
+    }
     // Whatever was wrong may be what the user just changed (a password, a token, a repo,
     // the passphrase) — so the repeated-failure pause is dropped and the next cycle tries
     // again. The rate-limit cooldown is deliberately left alone: that one is the storage's
@@ -451,7 +457,7 @@ export class SyncEngine {
 
   // ─── Main Entry Point ─────────────────────────────────────────────────
 
-  async sync(types?: DataType[], options: { force?: boolean } = {}): Promise<SyncOutcome> {
+  async sync(types?: DataType[], options: { force?: boolean; mergeBookmarks?: boolean } = {}): Promise<SyncOutcome> {
     if (this.isSyncing) {
       logger.warn("SyncEngine", "Already syncing, skipping");
       return "already-running";
@@ -461,7 +467,19 @@ export class SyncEngine {
     // (It used to be set only after `await acquireSyncLock`, leaving that window
     // open.) Reset on every early return below so a no-op sync doesn't wedge it on.
     this.isSyncing = true;
+    try {
+      return await this.runSync(types, options);
+    } finally {
+      this.mergeBookmarksThisSync = false;
+      // The approval is a one-cycle budget. `applyPayload` receives it as an argument,
+      // but leaving the stale number on the instance made any later operation that
+      // consulted it inherit a consent the user gave for a different cycle.
+      this.bulkApprovedThisSync = 0;
+      this.isSyncing = false;
+    }
+  }
 
+  private async runSync(types?: DataType[], options: { force?: boolean; mergeBookmarks?: boolean } = {}): Promise<SyncOutcome> {
     // A metered server keeps refusing requests for a whole window (Nutstore: 30 min),
     // so polling every minute through it spends the NEXT window before it opens and
     // "wait for the window to pass" can never work. Only automatic sync is parked:
@@ -536,6 +554,7 @@ export class SyncEngine {
     // MV3 worker suspension can't have a later wake double-run. A stale lock is
     // ignored, so a crashed sync self-heals. isSyncing (above) guards within one
     // worker instance; this guards across suspend/recreate.
+    const backend = createBackend(backendConfig);
     if (!(await acquireSyncLock(SYNC_LOCK_TTL_MS))) {
       logger.warn("SyncEngine", "Another sync holds the lock, skipping");
       this.isSyncing = false;
@@ -556,9 +575,9 @@ export class SyncEngine {
     this.bulkBlockedThisSync = null;
     this.historyIndexThisSync = null;
     this.guardHoldThisSync = false;
+    this.mergeBookmarksThisSync = options.mergeBookmarks === true;
     this.guardNoticeThisSync = null;
     this.guardClearedThisSync = false;
-    const backend = createBackend(backendConfig);
 
     try {
       // A manual press is the retry, so it starts the count over: whatever this cycle runs
@@ -596,6 +615,8 @@ export class SyncEngine {
           this.onStateChange(pending);
           if (this.settings.notifications_enabled) notifyFirstSync();
           logger.event("FirstSync", `Waiting for a sync direction: this device has bookmarks and ${firstSyncPeers} peer(s) already have some`);
+        } else {
+          this.onStateChange(await setState({ status: "idle" }));
         }
         return "first-sync-pending";
       }
@@ -768,20 +789,7 @@ export class SyncEngine {
     logger.warn("SyncEngine", `Automatic sync paused for ${SYNC_COOLDOWN_MS / 60000} minutes: the storage is refusing requests for a rate-limit window. "Sync now" still works; raise Sync interval in Settings → Device so the next window stays clear.`);
   }
 
-  /**
-   * Tear-down after a sync, in the only order that cannot strand anything.
-   *
-   * The `finally` block used to start with `await backend.disconnect()`, so a throw from
-   * it skipped everything after: `isSyncing` stayed on for the rest of the worker's
-   * lifetime (every later sync answering "already running") and the persisted lock sat
-   * there until its TTL. The in-memory guard is cleared FIRST and synchronously — it
-   * cannot fail — and the two awaits are isolated so neither can strand the other.
-   *
-   * No backend's `disconnect()` can throw today, so this is hardening rather than a live
-   * bug. It costs nothing, and the previous ordering only looked safe by accident.
-   */
   private async finishSync(backend: ReturnType<typeof createBackend>): Promise<void> {
-    this.isSyncing = false;
     try {
       await releaseSyncLock();
     } catch (e) {
@@ -1356,7 +1364,10 @@ export class SyncEngine {
     if (!types.includes("bookmarks")) return null;
     const record = await getFirstSync();
     if (record?.done) return null;
-    if ((await getLastUploadChecksum("bookmarks")) !== null) return null;
+    if ((await getLastUploadChecksum("bookmarks")) !== null) {
+      await setFirstSync({ done: true, at: new Date().toISOString() });
+      return null;
+    }
     const local = await this.buildPayload("bookmarks");
     if (await this.isPayloadEmpty("bookmarks", local)) return null;
 
@@ -1389,8 +1400,11 @@ export class SyncEngine {
    * this device's ordinary v1.0 packet. The frozen wire contract is untouched.
    */
   async chooseFirstSync(choice: FirstSyncChoice): Promise<void> {
-    if (this.isSyncing) throw new Error("A sync is already running — try again in a moment.");
+    await this.withMutationLock(() => this.applyFirstSyncChoice(choice));
+    await this.sync(["bookmarks"], { force: true, mergeBookmarks: choice === "merge" });
+  }
 
+  private async applyFirstSyncChoice(choice: FirstSyncChoice): Promise<void> {
     if (choice === "remote") {
       const read = await this.withBackend(async (b) => {
         const peers = orderPeersByTime(await b.downloadAll("bookmarks", this.settings.device_id));
@@ -1494,7 +1508,6 @@ export class SyncEngine {
     await setFirstSync({ done: true, choice, at: new Date().toISOString() });
     const cleared = await setState({ first_sync_pending: null });
     this.onStateChange(cleared);
-    await this.sync(["bookmarks"], { force: true });
   }
 
   /**
@@ -1581,7 +1594,9 @@ export class SyncEngine {
    * slower response for a bookmarks-only sync, which is the right trade.
    */
   async restoreFromSnapshot(name: string): Promise<number> {
-    const restored = await this.withBackend((b) => applySnapshot(b, name, this.settings));
+    const restored = await this.withMutationLock(() =>
+      this.withBackend((b) => applySnapshot(b, name, this.settings)),
+    );
     if (restored > 0) {
       // Forced: the user pressed Restore. A paused or cooled-down automatic loop must not
       // hold back publishing what they just asked for — and this is also the moment the
@@ -1743,7 +1758,8 @@ export class SyncEngine {
         } else {
           logger.info("SyncEngine", `${dataType}: nothing to sync`);
         }
-      } else if (!isEmpty && this.settings.conflict_strategy === "manual" && CONFLICTABLE_TYPES.has(dataType)) {
+      } else if (!isEmpty && this.settings.conflict_strategy === "manual" && CONFLICTABLE_TYPES.has(dataType)
+        && !(dataType === "bookmarks" && this.mergeBookmarksThisSync)) {
         // Manual: queue a conflict for EACH diverging peer, not just the newest —
         // otherwise with 3+ devices the other peers' differences are never surfaced.
         // Dedupe by data_type + peer device so the same conflict doesn't pile up
@@ -1879,7 +1895,10 @@ export class SyncEngine {
             continue;
           }
           try {
-            await this.applyRemote(dataType, peer, false);
+            // The approval belongs to THIS cycle and is handed down explicitly: the field
+            // is per-sync state, and a caller outside a cycle (a manual resolution) must
+            // never inherit whatever a finished sync left behind.
+            await this.applyRemote(dataType, peer, false, this.bulkApprovedThisSync);
           } catch (err) {
             // An encryption disagreement (plaintext peer while we encrypt, encrypted
             // peer we can't decrypt, or a wrong passphrase) must NOT be swallowed
@@ -2125,6 +2144,9 @@ export class SyncEngine {
     await backend.upload(packet);
     this.bytesThisSync += packet.payload?.length ?? 0; // pushed bytes → transfer stat
     await setLastUploadChecksum(dataType, tag);
+    if (dataType === "bookmarks" && !(await getFirstSync())?.done) {
+      await setFirstSync({ done: true, at: new Date().toISOString() });
+    }
   }
 
   private async buildPacket(dataType: DataType, payload: unknown): Promise<SyncPacket> {
@@ -2168,16 +2190,17 @@ export class SyncEngine {
   private async applyRemote(
     dataType: DataType,
     packet: SyncPacket,
-    isLocalEmpty = false
-  ): Promise<void> {
+    isLocalEmpty = false,
+    approvedFor = 0
+  ): Promise<BulkDeleteBlock | null> {
     const payload = await this.openPacket(packet);
-    await this.applyPayload(dataType, payload, {
+    return this.applyPayload(dataType, payload, {
       device_id: packet.device_id,
       timestamp: packet.timestamp,
       // Outside the encrypted payload, so it reads even with E2EE on. It is what the
       // recovery notice shows instead of a truncated id when the guard blocks.
       device_label: packet.device_label ?? null,
-    }, isLocalEmpty);
+    }, isLocalEmpty, approvedFor);
   }
 
   /**
@@ -2251,13 +2274,21 @@ export class SyncEngine {
     return JSON.parse(raw);
   }
 
-  /** Applies an already-decrypted, already-parsed payload for a data type. */
+  /**
+   * Applies an already-decrypted, already-parsed payload for a data type.
+   *
+   * Returns the mass-delete block the bookmark merge refused, if any. The sync cycle keeps
+   * it on the instance for its recovery notice, but a caller OUTSIDE a cycle — a manual
+   * "use remote" — gets it directly, so it can say the deletion did not happen instead of
+   * removing the card as though it had.
+   */
   private async applyPayload(
     dataType: DataType,
     payload: unknown,
     meta: { device_id: string; timestamp: string; device_label?: string | null },
-    isLocalEmpty: boolean
-  ): Promise<void> {
+    isLocalEmpty: boolean,
+    approvedFor = 0
+  ): Promise<BulkDeleteBlock | null> {
     // Validate the parsed payload shape before handing untrusted remote data to
     // the Chrome APIs (a corrupt/tampered file must not crash or mis-import).
     if ((dataType === "history" || dataType === "extensions") && !Array.isArray(payload)) {
@@ -2269,15 +2300,17 @@ export class SyncEngine {
     }
 
     switch (dataType) {
-      case "bookmarks":
+      case "bookmarks": {
         // Fresh device → replace; existing device → merge with deletion tracking.
+        let blockedHere: BulkDeleteBlock | null = null;
         await importBookmarks(
           payload,
           isLocalEmpty ? "replace" : "merge",
-          this.settings.conflict_strategy,
+          this.mergeBookmarksThisSync ? "lww" : this.settings.conflict_strategy,
           this.settings.bulk_delete_percent,
-          this.bulkApprovedThisSync,
+          approvedFor,
           (info) => {
+            blockedHere = info;
             // Largest single block wins, kept whole with the numbers that describe it.
             if (info.blocked > (this.bulkBlockedThisSync?.blocked ?? 0)) {
               this.bulkBlockedThisSync = {
@@ -2288,7 +2321,8 @@ export class SyncEngine {
             }
           },
         );
-        break;
+        return blockedHere;
+      }
       case "history":
         // One index per SYNC, not per peer. Building it reads the whole local history
         // (up to 100k rows) into a map, and this runs once per peer, so three other
@@ -2335,12 +2369,34 @@ export class SyncEngine {
         break;
       }
     }
+    return null;
   }
 
   // ─── Conflict Resolution ──────────────────────────────────────────────
 
   /** Resolves a queued manual conflict by applying the local or remote version. */
+  private async withMutationLock<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.isSyncing) throw new Error("A sync is already running — try again in a moment.");
+    this.isSyncing = true;
+    let locked = false;
+    try {
+      locked = await acquireSyncLock(SYNC_LOCK_TTL_MS);
+      if (!locked) throw new Error("A sync is already running — try again in a moment.");
+      return await operation();
+    } finally {
+      try {
+        if (locked) await releaseSyncLock();
+      } finally {
+        this.isSyncing = false;
+      }
+    }
+  }
+
   async resolveConflict(id: string, resolution: "local" | "remote"): Promise<void> {
+    await this.withMutationLock(() => this.applyConflictResolution(id, resolution));
+  }
+
+  private async applyConflictResolution(id: string, resolution: "local" | "remote"): Promise<void> {
     const state = await getState();
     const conflict = state.pending_conflicts.find((c) => c.id === id);
     if (!conflict) {
@@ -2354,11 +2410,12 @@ export class SyncEngine {
 
     if (resolution === "remote") {
       // The packet is preferred: applyRemote decrypts and verifies the checksum.
+      let blocked: BulkDeleteBlock | null = null;
       if (remotePacket) {
-        await this.applyRemote(conflict.data_type, remotePacket, false);
+        blocked = await this.applyRemote(conflict.data_type, remotePacket, false);
       } else if (conflict.remote_version !== undefined) {
         // Oldest legacy shape: only the parsed payload was stored.
-        await this.applyPayload(
+        blocked = await this.applyPayload(
           conflict.data_type,
           conflict.remote_version,
           { device_id: conflict.device_id, timestamp: conflict.timestamp },
@@ -2368,6 +2425,18 @@ export class SyncEngine {
         // Nothing left to apply — don't silently drop the conflict as if we had.
         throw new Error(
           "That peer's data is no longer available to apply. Keep local, or sync again to re-check the peer."
+        );
+      }
+      // The mass-delete guard refused this peer's deletion. Reporting success would remove
+      // the card and record a resolved memo while the bookmarks the user agreed to delete
+      // are still here — the card would never come back and nothing would say why. Keep it
+      // pending and name the limit, which is the one thing that can be changed.
+      if (blocked) {
+        throw new Error(
+          `That device would delete ${blocked.blocked} of your ${blocked.localTotal} bookmarks, ` +
+            `which the safety guard blocked (cap ${blocked.cap}, ${blocked.pct}%). Nothing was ` +
+            "deleted and this conflict is still pending. Raise the limit in Settings → Safety, " +
+            "or keep local."
         );
       }
     } else {
@@ -2416,13 +2485,15 @@ export class SyncEngine {
       await setResolvedConflict(`${conflict.data_type}:${conflict.device_id}`, memo);
     }
 
-    const remaining = state.pending_conflicts.filter((c) => c.id !== id);
-    // Drop the packet we just consumed (and any orphan from an earlier interruption).
-    await pruneConflictPackets(remaining.map((c) => c.id));
-    const newState = await setState({
-      pending_conflicts: remaining,
-      status: remaining.length > 0 ? "conflict" : "idle",
+    const newState = await setState((current) => {
+      const remaining = current.pending_conflicts.filter((c) => c.id !== id);
+      return {
+        pending_conflicts: remaining,
+        status: current.status === "error" || current.status === "syncing"
+          ? current.status : remaining.length > 0 ? "conflict" : "idle",
+      };
     });
+    await pruneConflictPackets(newState.pending_conflicts.map((c) => c.id));
     this.onStateChange(newState);
     logger.event("SyncEngine", `Resolved conflict ${id} → ${resolution}`);
   }

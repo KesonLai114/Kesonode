@@ -441,19 +441,26 @@ export async function getBookmarkExclusions(): Promise<BookmarkExclusion[]> {
 }
 
 export async function saveSettings(partial: Partial<SyncSettings>): Promise<SyncSettings> {
-  const current = await getSettings();
-  const next = { ...current, ...partial };
-  // One choke point for the label, so the machine halves can never be written back in:
-  // a name pasted from an old build's Activity log, or typed with a trailing "· Edge",
-  // is stored as the words alone. The browser and the id are shown next to it.
-  if (partial.device_label !== undefined) {
-    next.device_label = cleanDeviceLabel(partial.device_label, next.device_id) || defaultDeviceLabel();
-  }
-  // 口令强度兜底：即使绕过 UI 直接发消息，启用 E2EE 时也不允许过短口令（离线可暴力）。
-  if (passphraseViolatesPolicy(next)) {
-    throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters when E2EE is enabled.`);
-  }
-  await set(KEYS.SETTINGS, next);
+  // Read-modify-write of the WHOLE settings object, so two contexts saving at the same
+  // moment (options changing the passphrase while the popup disconnects a backend) used
+  // to drop one of the two changes. Runs under the same key lock as everything else.
+  // getSettings() is called first, not inside: it may itself take that lock to mint the
+  // device identity, and waiting for it from within the update would deadlock.
+  await getSettings();
+  const next = await updateKey<SyncSettings>(KEYS.SETTINGS, (stored) => {
+    const merged = ensureActiveBackendConfig({ ...DEFAULT_SETTINGS, ...stored, ...partial });
+    // One choke point for the label, so the machine halves can never be written back in:
+    // a name pasted from an old build's Activity log, or typed with a trailing "· Edge",
+    // is stored as the words alone. The browser and the id are shown next to it.
+    if (partial.device_label !== undefined) {
+      merged.device_label = cleanDeviceLabel(partial.device_label, merged.device_id) || defaultDeviceLabel();
+    }
+    // 口令强度兜底：即使绕过 UI 直接发消息，启用 E2EE 时也不允许过短口令（离线可暴力）。
+    if (passphraseViolatesPolicy(merged)) {
+      throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters when E2EE is enabled.`);
+    }
+    return merged;
+  }, DEFAULT_SETTINGS);
   // A mode change has to take effect in THIS worker, not after the next service-worker
   // wake: the naming helpers the backends use read the active mode at call time.
   setCompatMode(next.compat_mode);
@@ -764,11 +771,11 @@ export async function getState(): Promise<SyncState> {
   return get<SyncState>(KEYS.STATE, DEFAULT_STATE);
 }
 
-export async function setState(partial: Partial<SyncState>): Promise<SyncState> {
-  const current = await getState();
-  const next = { ...current, ...partial };
-  await set(KEYS.STATE, next);
-  return next;
+export function setState(partial: Partial<SyncState> | ((current: SyncState) => Partial<SyncState>)): Promise<SyncState> {
+  return updateKey<SyncState>(KEYS.STATE, (current) => ({
+    ...current,
+    ...(typeof partial === "function" ? partial(current) : partial),
+  }), DEFAULT_STATE);
 }
 
 // ─── First-sync direction ─────────────────────────────────────────────────
@@ -1407,15 +1414,18 @@ export async function clearSyncFailure(): Promise<void> {
 }
 
 export async function acquireSyncLock(ttlMs: number): Promise<boolean> {
-  const now = Date.now();
-  const lockedAt = await get<number>(KEYS.SYNC_LOCK, 0);
-  if (lockedAt && now - lockedAt < ttlMs) return false; // a fresh lock is held
-  await set(KEYS.SYNC_LOCK, now);
-  return true;
+  let acquired = false;
+  await updateKey<number>(KEYS.SYNC_LOCK, (lockedAt) => {
+    const now = Date.now();
+    if (lockedAt && now - lockedAt < ttlMs) return lockedAt;
+    acquired = true;
+    return now;
+  }, 0);
+  return acquired;
 }
 
 export async function releaseSyncLock(): Promise<void> {
-  await set(KEYS.SYNC_LOCK, 0);
+  await updateKey<number>(KEYS.SYNC_LOCK, () => 0, 0);
 }
 
 /**
