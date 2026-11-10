@@ -13,6 +13,7 @@ import {
   BACKUP_SETTINGS_FIELDS,
   SETTINGS_BACKUP_SCHEMA,
   migrateBackupDocument,
+  detectDeviceOs,
 } from "@/lib/utils/storage";
 import { withChecksum } from "@/lib/utils/checksum";
 
@@ -107,7 +108,11 @@ describe("settings backup", () => {
     expect(restored.device_id).not.toBe("device-from-old-id");
     expect(restored.device_id).toMatch(/^[0-9a-f-]{36}$/i);
     expect(restored.device_label).not.toBe("Old laptop");
-    expect(restored.device_label).toMatch(/ · [0-9a-f]{8}$/);
+    // This browser's own name, and ONLY that: the browser and the 8-char id used to be
+    // glued onto the stored label, which put a machine half inside a field the user is
+    // asked to edit. They are shown next to the name now, never stored in it.
+    expect(restored.device_label).not.toMatch(/[0-9a-f]{8}$/i);
+    expect(restored.device_label).toBe(detectDeviceOs());
     // Configuration, credentials and the setup flag are unaffected by the new identity.
     expect(restored.active_backend).toBe("webdav");
     expect(restored.backends[0].webdav?.password).toBe("secret");

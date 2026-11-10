@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { detectDeviceName } from "@/lib/utils/storage";
+import { cleanDeviceLabel, detectDeviceName } from "@/lib/utils/storage";
 
 // The device label is user-facing: it names the device in Settings, and it names the peer
 // whose session or extension list you are looking at in the popup. Every case below is a
@@ -60,5 +60,37 @@ describe("detectDeviceName — the OS half", () => {
 
   it("falls back to a neutral label rather than guessing", () => {
     expect(named("Some/1.0 (unknown platform)")).toBe("Device");
+  });
+});
+
+describe("cleanDeviceLabel — give the user their own words back", () => {
+  it("strips the machine suffixes older builds stored", () => {
+    // The reported string, three times over: the field read `Mac · Edge · 451dbeb9`, the
+    // owner edited the first word, and the machine half rode along into every restore
+    // point name from then on.
+    expect(cleanDeviceLabel("Mac · Edge · 451dbeb9")).toBe("Mac");
+    expect(cleanDeviceLabel("Macbook · Edge · 451dbeb9")).toBe("Macbook");
+    expect(cleanDeviceLabel("Windows 10/11 · Chromium · b5fe8371")).toBe("Windows 10/11");
+    expect(cleanDeviceLabel("Android · Firefox · 0a1b2c3d")).toBe("Android");
+  });
+
+  it("leaves a name the user chose alone", () => {
+    expect(cleanDeviceLabel("Mac mini M4pro")).toBe("Mac mini M4pro");
+    expect(cleanDeviceLabel("办公室那台")).toBe("办公室那台");
+    expect(cleanDeviceLabel("Mac · Office")).toBe("Mac · Office"); // not a browser token
+  });
+
+  it("does not eat a date that happens to be all digits", () => {
+    // 20240101 is valid hex, so a naive [0-9a-f]{8} rule silently renamed this laptop.
+    expect(cleanDeviceLabel("工作机 · 20240101")).toBe("工作机 · 20240101");
+    // …unless it IS this device's id, which only a machine would have written.
+    expect(cleanDeviceLabel("工作机 · 20240101", "20240101-aaaa-bbbb-cccc-dddddddddddd")).toBe("工作机");
+  });
+
+  it("is idempotent and never returns an empty label", () => {
+    const once = cleanDeviceLabel("Macbook · Edge · 451dbeb9");
+    expect(cleanDeviceLabel(once)).toBe(once);
+    expect(cleanDeviceLabel("")).toBe("");
+    expect(cleanDeviceLabel(null)).toBe("");
   });
 });

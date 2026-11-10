@@ -4,6 +4,7 @@ import { logger } from "@/lib/utils/logger";
 import { isSecureBackendUrl } from "@/lib/utils/url";
 import { utf8ToBase64 } from "@/lib/utils/base64";
 import { folderPath, isPeerFileName, packetFileName, peerDeviceIdFromName } from "@/lib/compat/protocol";
+import { cachedPeerPacket, peerFileVersion, rememberPeerPackets } from "@/lib/utils/peer-packet-cache";
 
 const INSECURE_URL_MSG =
   "WebDAV over plain http:// is not allowed. Your username and password would be sent unencrypted on every request. Use an https:// URL (http is permitted only for localhost).";
@@ -52,13 +53,42 @@ export function forbiddenMessage(host: string): string {
  * ending in `/`, whose basename is empty, and callers filter it out by prefix.
  */
 export function parsePropfindListing(xml: string): ListedFile[] {
-  const out: ListedFile[] = [];
+  return parseDavEntries(xml).map((e) =>
+    e.size == null ? { name: e.name, modified: e.modified } : { name: e.name, modified: e.modified, size: e.size }
+  );
+}
+
+/** One entry of a PROPFIND multistatus, with the href it came from. */
+interface DavEntry {
+  name: string;
+  href: string;
+  modified: number | null;
+  size: number | null;
+}
+
+/**
+ * The PROPFIND multistatus, in full.
+ *
+ * The href is kept because it is the only thing that says WHICH file a row is about;
+ * the basename alone can collide with a file in another folder, and the origin check
+ * in `downloadAll` needs the path the server actually pointed at. The size is a second
+ * version signal for the local packet cache (see peer-packet-cache.ts).
+ */
+function parseDavEntries(xml: string): DavEntry[] {
+  const out: DavEntry[] = [];
   for (const block of xml.matchAll(/<(?:[a-z0-9]+:)?response\b[^>]*>([\s\S]*?)<\/(?:[a-z0-9]+:)?response>/gi)) {
     const href = /<(?:[a-z0-9]+:)?href>([^<]+)<\/(?:[a-z0-9]+:)?href>/i.exec(block[1]);
     if (!href) continue;
     const stamp = /<(?:[a-z0-9]+:)?getlastmodified[^>]*>([^<]+)<\/(?:[a-z0-9]+:)?getlastmodified>/i.exec(block[1]);
     const t = stamp ? Date.parse(stamp[1].trim()) : NaN;
-    out.push({ name: hrefBasename(href[1].trim()), modified: Number.isNaN(t) ? null : t });
+    const len = /<(?:[a-z0-9]+:)?getcontentlength[^>]*>([^<]+)<\/(?:[a-z0-9]+:)?getcontentlength>/i.exec(block[1]);
+    const size = len ? Number(len[1].trim()) : NaN;
+    out.push({
+      name: hrefBasename(href[1].trim()),
+      href: href[1].trim(),
+      modified: Number.isNaN(t) ? null : t,
+      size: Number.isNaN(size) ? null : size,
+    });
   }
   return out;
 }
@@ -67,8 +97,61 @@ export class WebDAVBackend implements IBackend {
   readonly type = "webdav" as const;
   /** Peer files this sync could not read; the engine surfaces these as a visible problem. */
   readonly failedPeers: string[] = [];
+  /**
+   * Did the storage meter us? Set on a 429 anywhere and on Nutstore's 403 (which is its
+   * way of saying 429). The engine reads it after the cycle and parks automatic sync
+   * for a whole window — because a refusal that is only logged is a refusal that comes
+   * back next minute, and each attempt spends quota the window still has.
+   */
+  rateLimited = false;
+
+  /**
+   * The folder listing, fetched ONCE per backend instance.
+   *
+   * Every list in a sync cycle asked the server the same question: `listFiles`,
+   * `listFilesWithTimes` and `downloadAll` each ran their own PROPFIND, and the
+   * restore-point code asked twice more (once for the rolling points, once for the
+   * kept-forever ones). On Nutstore every one of those counted against the 600-requests-
+   * per-30-minutes free quota, so a single cycle could spend a tenth of the window on
+   * listings that all returned the same rows.
+   *
+   * Invalidated by any write (a PUT or a DELETE changes the listing), so a file this
+   * device just uploaded is never missing from a later list in the same cycle.
+   */
+  private listing: DavEntry[] | null = null;
+  private listingPromise: Promise<DavEntry[]> | null = null;
 
   constructor(private config: BackendConfig) {}
+
+  /**
+   * Refuse to send another request once the storage has metered us.
+   *
+   * A Nutstore window is 30 minutes long and every request inside it is refused, so
+   * continuing to ask only burns the quota that the next window needs. The error is
+   * the same one the server would have sent, so callers cannot tell the difference
+   * between "refused locally" and "refused by the server" — which is the point: they
+   * must both park the sync.
+   */
+  private guardRateLimit(): void {
+    if (!this.rateLimited) return;
+    const host = new URL(this.w.url).host;
+    throw new HttpError(403, forbiddenMessage(host), true);
+  }
+
+  /** The error for a refused response, with the rate-limit case flagged. */
+  private httpError(res: Response, verb: string): HttpError {
+    if (res.status === 403) {
+      const host = new URL(this.w.url).host;
+      // A Nutstore 403 IS a rate limit, so the sync loop has to back off for a whole
+      // window; a 403 from any other server is the path or the account's rights and
+      // must not park sync for half an hour.
+      const nut = isNutstoreHost(host);
+      if (nut) this.rateLimited = true;
+      return new HttpError(403, forbiddenMessage(host), nut);
+    }
+    if (res.status === 429) this.rateLimited = true;
+    return new HttpError(res.status, `WebDAV ${verb} failed: ${res.status}`, res.status === 429);
+  }
 
   isConfigured(): boolean {
     const w = this.config.webdav;
@@ -109,20 +192,31 @@ export class WebDAVBackend implements IBackend {
   }
 
   /**
+   * Which storage this instance talks to, as a cache scope: origin, folder, account.
+   *
+   * The cached peer packets are local working state, and a file name alone does not
+   * identify them — `konode_bookmarks_<device_id>.json` can exist in two different
+   * accounts, and switching the active backend must not merge one account's data into
+   * the other. Never includes the password. Empty when the URL is unparseable, which
+   * disables the cache rather than making it ambiguous.
+   */
+  private get packetScope(): string {
+    try {
+      const u = new URL(this.w.url);
+      return `${u.origin}/${(this.w.path ?? folderPath()).replace(/^\/+/, "")}#${this.w.username ?? ""}`;
+    } catch {
+      return "";
+    }
+  }
+
+  /**
    * The HttpError for a failed request, with a 403 explained (see `forbiddenMessage`):
    * a bare "WebDAV GET failed: 403" told someone it failed and not what to do, while the
    * one server that 403s for a fixable reason was left undescribed. Other statuses keep
    * the plain form — 401 already has `authFailureMessage` at the doors that need it.
    */
   private fail(res: Response, verb: string): never {
-    if (res.status === 403) {
-      const host = new URL(this.w.url).host;
-      // A Nutstore 403 IS a rate limit, so the sync loop has to back off for a whole
-      // window; a 403 from any other server is the path or the account's rights and
-      // must not park sync for half an hour.
-      throw new HttpError(403, forbiddenMessage(host), isNutstoreHost(host));
-    }
-    throw new HttpError(res.status, `WebDAV ${verb} failed: ${res.status}`, res.status === 429);
+    throw this.httpError(res, verb);
   }
 
   /**
@@ -224,14 +318,62 @@ export class WebDAVBackend implements IBackend {
       logger.info("WebDAV.ensureFolder", `MKCOL returned ${res.status}, but the folder is there`);
       return;
     }
+    // A metered server refuses the MKCOL too, and that refusal must park the sync —
+    // not just be described. Flag it here, where the first 403 of a cycle lands.
+    if (res.status === 429) this.rateLimited = true;
+    if (res.status === 403 && isNutstoreHost(new URL(this.w.url).host)) this.rateLimited = true;
     throw new HttpError(
       res.status,
-      `Couldn't create the sync folder on the WebDAV server (MKCOL ${res.status}, and it isn't there: ${check.status}). Check the path and that the account may write to it.`
+      `Couldn't create the sync folder on the WebDAV server (MKCOL ${res.status}, and it isn't there: ${check.status}). Check the path and that the account may write to it.`,
+      this.rateLimited
     );
+  }
+
+  /**
+   * The folder listing, fetched at most once per backend instance.
+   *
+   * One PROPFIND answers every list a cycle needs — the device list, the peer files and
+   * the restore points — so a cycle that asked four questions now asks the server once.
+   * The listing carries each file's modification time and size, which is what lets an
+   * unchanged peer file be recognised without downloading it again.
+   */
+  private async folderListing(): Promise<DavEntry[]> {
+    if (this.listing) return this.listing;
+    if (!this.listingPromise) {
+      this.listingPromise = this.fetchListing()
+        .then((entries) => {
+          this.listing = entries;
+          return entries;
+        })
+        .finally(() => {
+          this.listingPromise = null;
+        });
+    }
+    return this.listingPromise;
+  }
+
+  private async fetchListing(): Promise<DavEntry[]> {
+    this.guardRateLimit();
+    const res = await fetch(this.baseUrl + "/", {
+      method: "PROPFIND",
+      headers: { ...this.headers(), Depth: "1" },
+      body: `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/><d:getlastmodified/><d:getcontentlength/></d:prop></d:propfind>`,
+      cache: "no-store",
+    });
+    // 404 = the sync folder doesn't exist yet (no peers).
+    if (res.status === 404) return [];
+    if (!res.ok) this.fail(res, "list");
+    return parseDavEntries(await res.text());
+  }
+
+  /** A write changes the listing, so the cached one is no longer true. */
+  private invalidateListing(): void {
+    this.listing = null;
   }
 
   async upload(packet: SyncPacket): Promise<void> {
     await withRetry(async () => {
+      this.guardRateLimit();
       const name = packetFileName(packet.data_type, packet.device_id);
       const res = await fetch(`${this.baseUrl}/${name}`, {
         method: "PUT",
@@ -239,6 +381,8 @@ export class WebDAVBackend implements IBackend {
         body: JSON.stringify(packet, null, 2),
       });
       if (!res.ok) this.fail(res, "PUT");
+      // The folder now holds a file the cached listing doesn't know about.
+      this.invalidateListing();
       // Log the FILE NAME, never the URL. `baseUrl` carries the account username on
       // Nextcloud/ownCloud (…/remote.php/dav/files/<user>/…) and the audit log is
       // persisted to disk — connect() already logs the hostname only for exactly this
@@ -249,47 +393,30 @@ export class WebDAVBackend implements IBackend {
 
   async downloadAll(data_type: DataType, excludeDeviceId?: string): Promise<SyncPacket[]> {
     return withRetry(async () => {
-      // PROPFIND to list files in folder
-      const res = await fetch(this.baseUrl + "/", {
-        method: "PROPFIND",
-        headers: { ...this.headers(), Depth: "1" },
-        body: `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`,
-        cache: "no-store",
+      // One PROPFIND for the whole cycle: the listing is cached on the instance, and
+      // every list in this cycle asks the server the same question.
+      const entries = await this.folderListing();
+
+      const peers = entries.filter((e) => {
+        if (!isPeerFileName(e.name, data_type)) return false;
+        // Exclude by DEVICE ID, not by exact file name: an isolated-mode device may
+        // still find its own old upstream file in the folder.
+        return !(excludeDeviceId && peerDeviceIdFromName(e.name, data_type) === excludeDeviceId);
       });
 
-      // 404 = the sync folder doesn't exist yet (no peers). A successful PROPFIND is
-      // 207 Multi-Status (res.ok covers it). Any other non-OK is transient/real —
-      // throw so withRetry retries and a persistent failure surfaces, instead of
-      // silently masquerading as "no peers" (which would hide the peers' data).
-      if (res.status === 404) return [];
-      if (!res.ok) this.fail(res, "list");
-
-      const xml = await res.text();
-      // Extract hrefs from PROPFIND response. Match any namespace prefix
-      // (d:href, D:href, lp1:href, or bare href) — servers differ.
-      // Compare the DECODED basename exactly — hrefs can be percent-encoded.
-      const basename = (h: string): string => {
-        try { return decodeURIComponent(h).split("/").pop() ?? ""; }
-        catch { return h.split("/").pop() ?? ""; }
-      };
-      const hrefs = [...xml.matchAll(/<(?:[a-z0-9]+:)?href>([^<]+)<\/(?:[a-z0-9]+:)?href>/gi)]
-        .map(m => m[1])
-        .filter(h => {
-          const name = basename(h);
-          if (!isPeerFileName(name, data_type)) return false;
-          // Exclude by DEVICE ID, not by exact file name: an isolated-mode device may
-          // still find its own old upstream file in the folder.
-          return !(excludeDeviceId && peerDeviceIdFromName(name, data_type) === excludeDeviceId);
-        });
-
       const packets: SyncPacket[] = [];
+      // Packets downloaded in THIS cycle, written to the local cache in one go after the
+      // loop rather than re-reading and re-writing a multi-megabyte value per file.
+      const fresh: { name: string; version: string; packet: SyncPacket }[] = [];
+      const scope = this.packetScope;
       // Credentials must only be sent to THIS WebDAV server. An attacker who can influence
       // the PROPFIND response (rogue/infected server, shared account, poisoned cache) could
       // otherwise redirect our Basic-auth header to an arbitrary host, or downgrade to
       // plaintext http://. Resolve every href against the configured base and refuse any
       // that leave this origin or are not a secure scheme.
       const baseOrigin = new URL(this.w.url).origin;
-      for (const href of hrefs) {
+      for (const entry of peers) {
+        const href = entry.href;
         let fullUrl: string;
         try { fullUrl = new URL(href, this.w.url).href; } catch { continue; }
         let target: URL;
@@ -308,16 +435,35 @@ export class WebDAVBackend implements IBackend {
           );
           break;
         }
+
+        // ── The unchanged-file shortcut ────────────────────────────────────
+        // A peer file that has not changed since we last downloaded it is merged from
+        // the local copy instead of from the network. The bytes are the same ones the
+        // server would have sent, so the merge, the conflict resolution and the
+        // bulk-delete guard all still run — only the round trip is saved, and that is
+        // the difference between fitting inside Nutstore's 600-requests-per-30-minutes
+        // free quota and blowing straight through it every single minute.
+        //
+        // The listing has to carry a modification time for this to be possible; the
+        // GitHub-style listings that carry none simply never hit this path.
+        const version = peerFileVersion(entry.modified, entry.size);
+        const cached = await cachedPeerPacket(entry.name, version, scope);
+        if (cached) {
+          packets.push(cached);
+          continue;
+        }
+
         let r: Response;
         try {
           // A 503 from a NAS/metered WebDAV is often a one-off. Retry just THIS file,
           // without re-running the whole listing.
           r = await withPeerRetry(async () => {
+            this.guardRateLimit();
             const res = await fetch(fullUrl, {
               headers: { Authorization: this.authHeader() },
               cache: "no-store", // avoid a stale peer file from the browser HTTP cache
             });
-            if (!res.ok) throw new HttpError(res.status, `HTTP ${res.status}`);
+            if (!res.ok) throw this.httpError(res, "GET");
             return res;
           });
         } catch (err) {
@@ -328,10 +474,10 @@ export class WebDAVBackend implements IBackend {
           const detail = err instanceof HttpError
             ? `HTTP ${err.status}`
             : err instanceof Error ? err.message : String(err);
-          this.failedPeers.push(`${basename(href)} (${detail})`);
+          this.failedPeers.push(`${entry.name} (${detail})`);
           logger.warn(
             "WebDAV.downloadAll",
-            `Couldn't download ${basename(href)} (${detail}) — that device is left out of this sync`
+            `Couldn't download ${entry.name} (${detail}) — that device is left out of this sync`
           );
           continue;
         }
@@ -341,7 +487,7 @@ export class WebDAVBackend implements IBackend {
         if (lenHeader && Number(lenHeader) > MAX_PACKET_BYTES) {
           logger.warn(
             "WebDAV.downloadAll",
-            `Skipping oversized peer file (${lenHeader} bytes): ${basename(href)}`
+            `Skipping oversized peer file (${lenHeader} bytes): ${entry.name}`
           );
           continue;
         }
@@ -349,33 +495,42 @@ export class WebDAVBackend implements IBackend {
         if (body.length > MAX_PACKET_BYTES) {
           logger.warn(
             "WebDAV.downloadAll",
-            `Skipping oversized peer file (${body.length} bytes): ${basename(href)}`
+            `Skipping oversized peer file (${body.length} bytes): ${entry.name}`
           );
           continue;
         }
         try {
-          packets.push(JSON.parse(body) as SyncPacket);
+          const packet = JSON.parse(body) as SyncPacket;
+          packets.push(packet);
+          // Remember it, so the next cycle can merge it without another request.
+          fresh.push({ name: entry.name, version, packet });
         } catch {
           // A corrupt/partial file (e.g. trailing junk from a non-truncating write)
           // must not abort the whole sync — skip it; the owner rewrites it next sync.
           // Name only: an href is a full DAV path, which on Nextcloud/ownCloud embeds
           // the account username (see the note in upload()).
-          logger.warn("WebDAV.downloadAll", `Skipping unreadable sync file: ${basename(href)}`);
+          logger.warn("WebDAV.downloadAll", `Skipping unreadable sync file: ${entry.name}`);
         }
       }
+      // One write for everything this cycle read. A file whose bytes were served from
+      // the cache is already in the map, so it costs nothing to leave it out here.
+      await rememberPeerPackets(scope, fresh);
       return packets;
     });
   }
 
   async putFile(name: string, content: string): Promise<void> {
     await withRetry(async () => {
+      this.guardRateLimit();
       const res = await fetch(`${this.baseUrl}/${name}`, { method: "PUT", headers: this.headers(), body: content });
       if (!res.ok) this.fail(res, "PUT");
+      this.invalidateListing();
     });
   }
 
   async getFile(name: string): Promise<string | null> {
     return withRetry(async () => {
+      this.guardRateLimit();
       const res = await fetch(`${this.baseUrl}/${name}`, { headers: this.headers(), cache: "no-store" });
       if (res.status === 404) return null;
       if (!res.ok) this.fail(res, "GET");
@@ -385,39 +540,29 @@ export class WebDAVBackend implements IBackend {
 
   async listFiles(prefix: string): Promise<string[]> {
     return withRetry(async () => {
-      const res = await fetch(this.baseUrl + "/", {
-        method: "PROPFIND",
-        headers: { ...this.headers(), Depth: "1" },
-        body: `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`,
-        cache: "no-store",
-      });
-      if (res.status === 404) return [];
-      if (!res.ok) this.fail(res, "list");
-      const xml = await res.text();
-      return [...xml.matchAll(/<(?:[a-z0-9]+:)?href>([^<]+)<\/(?:[a-z0-9]+:)?href>/gi)]
-        .map(m => hrefBasename(m[1]))
-        .filter(name => name.startsWith(prefix));
+      const entries = await this.folderListing();
+      return entries.map((e) => e.name).filter((name) => name.startsWith(prefix));
     });
   }
 
   async listFilesWithTimes(prefix: string): Promise<ListedFile[]> {
     return withRetry(async () => {
-      const res = await fetch(this.baseUrl + "/", {
-        method: "PROPFIND",
-        headers: { ...this.headers(), Depth: "1" },
-        body: `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/><d:getlastmodified/></d:prop></d:propfind>`,
-        cache: "no-store",
-      });
-      if (res.status === 404) return [];
-      if (!res.ok) this.fail(res, "list");
-      return parsePropfindListing(await res.text()).filter(f => f.name.startsWith(prefix));
+      const entries = await this.folderListing();
+      return entries
+        .filter((e) => e.name.startsWith(prefix))
+        .map((e) => (e.size == null
+          ? { name: e.name, modified: e.modified }
+          : { name: e.name, modified: e.modified, size: e.size }));
     });
   }
 
   async deleteFile(name: string): Promise<void> {
     await withRetry(async () => {
+      this.guardRateLimit();
       const res = await fetch(`${this.baseUrl}/${name}`, { method: "DELETE", headers: this.headers() });
       if (!res.ok && res.status !== 404) this.fail(res, "DELETE");
+      // The folder no longer holds what the cached listing says it holds.
+      this.invalidateListing();
     });
   }
 

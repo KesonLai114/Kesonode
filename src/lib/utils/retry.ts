@@ -104,7 +104,16 @@ export async function withRetry<T>(
  * statuses (401/403/404) are not retried — defaultShouldRetry already excludes them.
  */
 export function withPeerRetry<T>(fn: () => Promise<T>): Promise<T> {
-  return withRetry(fn, { maxAttempts: 2, baseDelayMs: 200, maxDelayMs: 500, jitter: false });
+  return withRetry(fn, {
+    maxAttempts: 2,
+    baseDelayMs: 200,
+    maxDelayMs: 500,
+    jitter: false,
+    // A metered server answers the retry with the same refusal, and every attempt spends
+    // quota that the NEXT window needs. Terminal 401/403/404 are already excluded by
+    // defaultShouldRetry; this adds the 429 / Nutstore-403 case, which it would retry.
+    shouldRetry: (err) => !(err instanceof HttpError && err.rateLimited) && defaultShouldRetry(err),
+  });
 }
 
 export function sleep(ms: number): Promise<void> {

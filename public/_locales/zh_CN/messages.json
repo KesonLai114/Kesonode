@@ -553,7 +553,7 @@
     "message": "扩展列表，显示缺失的扩展及其安装链接。"
   },
   "extension_name": {
-    "message": "Kesonode | 私人书签与标签页同步 v1.5.10"
+    "message": "Kesonode | 私人书签与标签页同步 v1.5.11"
   },
   "onb_err_perms_no_prompt": {
     "message": "此浏览器无法显示权限提示，因此 Kesonode 无法请求所需的访问权限。请在浏览器扩展设置的 Kesonode 权限页面上授予权限，然后再次点击完成。"
@@ -1762,7 +1762,7 @@
     "message": "给这台设备起个名字"
   },
   "onb_welcome_device_hint": {
-    "message": "浏览器不允许扩展读取电脑的名称，自动生成的只是通用标识（如 Mac · Chromium · b5fe8371）。请填写你能一眼认出的名字，例如「Mac mini M4pro」。"
+    "message": "浏览器不允许扩展读取电脑的名称，自动生成的只是系统名（如「Mac」）。请填写你能一眼认出的名字，例如「Mac mini M4pro」。"
   },
   "onb_import_title": {
     "message": "已有配置备份？"

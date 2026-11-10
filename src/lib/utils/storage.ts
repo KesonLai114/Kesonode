@@ -31,41 +31,102 @@ import { withChecksum, verifyChecksum } from "@/lib/utils/checksum";
 
 // ─── Device name detection ─────────────────────────────────────────────────
 
-export function detectDeviceName(): string {
+/** The operating system, as a word a person would use for their own machine. */
+export function detectDeviceOs(): string {
   const ua = navigator.userAgent;
 
   // OS detection. ORDER MATTERS, and it used to be wrong in both directions: an Android
   // user agent contains "Linux" and an iPhone's contains "Mac OS X", so those two were
   // caught by the desktop branch above them and no device ever identified as Android or
   // iOS. The mobile platforms have to be tested FIRST, because they are the specific case.
-  let os = "Device";
-  if (ua.includes("Android")) os = "Android";
-  else if (ua.includes("iPhone") || ua.includes("iPad")) os = "iOS";
+  if (ua.includes("Android")) return "Android";
+  if (ua.includes("iPhone") || ua.includes("iPad")) return "iOS";
   // "Windows NT 10.0" is sent by BOTH Windows 10 and Windows 11 — Microsoft never bumped
   // it — so calling it Windows 11 was simply wrong for every Windows 10 user, in a label
   // they see next to their device. Telling them apart needs an async high-entropy
   // client-hint this sync function can't make.
-  else if (ua.includes("Windows NT 10.0")) os = "Windows 10/11";
-  else if (ua.includes("Windows NT 6.3")) os = "Windows 8.1";
-  else if (ua.includes("Windows NT 6.1")) os = "Windows 7";
-  else if (ua.includes("Windows")) os = "Windows";
-  else if (ua.includes("Mac OS X")) os = "Mac";
-  else if (ua.includes("Linux")) os = "Linux";
+  if (ua.includes("Windows NT 10.0")) return "Windows 10/11";
+  if (ua.includes("Windows NT 6.3")) return "Windows 8.1";
+  if (ua.includes("Windows NT 6.1")) return "Windows 7";
+  if (ua.includes("Windows")) return "Windows";
+  if (ua.includes("Mac OS X")) return "Mac";
+  if (ua.includes("Linux")) return "Linux";
+  return "Device";
+}
 
-  // Browser detection
-  let browser = "";
-  if ((navigator as any).brave) browser = " · Brave";
-  else if (ua.includes("Edg/")) browser = " · Edge";
+/** The browser, prefixed with the separator the label used to be built from. */
+function detectDeviceBrowserSuffix(): string {
+  const ua = navigator.userAgent;
+  if ((navigator as any).brave) return " · Brave";
+  if (ua.includes("Edg/")) return " · Edge";
   // QuarkPC sends Chrome's user agent plus its own token. Without this it reads
   // "Chromium" on a machine its owner calls 夸克浏览器 (field report, 2026-11-08).
-  else if (ua.includes("QuarkPC/")) browser = " · 夸克浏览器";
+  if (ua.includes("QuarkPC/")) return " · 夸克浏览器";
   // "Chrome/" is in every Chromium build's user agent, Helium's, Vivaldi's and
   // ungoogled-chromium's included, so it proves the engine and nothing more. Calling that
   // Chrome named a fresh Helium "Linux · Chrome" (2026-11-05).
-  else if (ua.includes("Chrome")) browser = " · Chromium";
-  else if (ua.includes("Firefox")) browser = " · Firefox";
+  if (ua.includes("Chrome")) return " · Chromium";
+  if (ua.includes("Firefox")) return " · Firefox";
+  return "";
+}
 
-  return `${os}${browser}`;
+/**
+ * `<OS> · <browser>` — the FULL description of this browser, for places that want to
+ * name what a device runs rather than what its owner calls it (the device list's
+ * secondary line, the popup's peer rows).
+ *
+ * NOT the stored `device_label`. See defaultDeviceLabel() for why those two are different
+ * things, and cleanDeviceLabel() for the mess that came of conflating them.
+ */
+export function detectDeviceName(): string {
+  return `${detectDeviceOs()}${detectDeviceBrowserSuffix()}`;
+}
+
+/** The eight-hex id older builds appended to the stored label. */
+const AUTO_SHORT_ID = /\s*[·•]\s*([0-9a-f]{8})$/i;
+/** The browser token older builds appended to the stored label. */
+const AUTO_BROWSER = /\s*[·•]\s*(?:Edge|Chromium|Firefox|Brave|Safari|夸克浏览器)$/i;
+
+/**
+ * Strip the machine-generated suffixes out of a stored device label.
+ *
+ * `device_label` is meant to hold the name the USER chose — "Mac mini M4pro", "Macbook",
+ * "办公室那台". Older builds instead stored `<OS> · <browser> · <short id>`, which put a
+ * string nobody typed into an editable field. The reported symptom was exactly that:
+ * the field read `Mac · Edge · 451dbeb9`, the owner edited only the first word, and every
+ * restore point from then on was called `Macbook · Edge · 451dbeb9` — one name that is
+ * half a person's word and half a machine's.
+ *
+ * Stripping is idempotent and never empties the label: a name that is nothing but
+ * suffixes falls back to the plain OS name at the call site. A user's own "Mac · Office"
+ * is left alone — "Office" is not a browser token, and there is no id after it.
+ *
+ * The trailing token is only taken for an id when it IS this device's short id, or when
+ * it cannot be anything else (eight hex chars with at least one letter). That keeps a
+ * hand-written "工作机 · 20240101" from losing its date: all-digit tokens are only ever
+ * stripped on an exact match with the device id.
+ */
+export function cleanDeviceLabel(raw: string | null | undefined, deviceId?: string): string {
+  const original = (raw ?? "").trim();
+  if (!original) return "";
+  const ownShort = shortDeviceId(deviceId).toLowerCase();
+  let out = original;
+  // Two passes: the id comes off the end first, which exposes the browser token that
+  // was sitting in front of it.
+  for (let i = 0; i < 3; i++) {
+    const next = out
+      .replace(AUTO_SHORT_ID, (match, token: string) => {
+        const low = token.toLowerCase();
+        const isOwn = !!ownShort && low === ownShort;
+        const unmistakable = /[a-f]/.test(low); // eight digits alone could be a date
+        return isOwn || unmistakable ? "" : match;
+      })
+      .replace(AUTO_BROWSER, "")
+      .trim();
+    if (!next || next === out) break;
+    out = next;
+  }
+  return out || original;
 }
 
 /** First 8 hex chars of a device id: enough to tell two installs apart, adds no data
@@ -75,19 +136,24 @@ export function shortDeviceId(deviceId: string | undefined): string {
 }
 
 /**
- * Default label for a freshly minted device identity: `<OS> · <browser> · <short id>`.
+ * Default label for a freshly minted device identity: the plain OS name — `Mac`,
+ * `Windows 10/11`, `Android`.
  *
- * OS + browser alone is identical on two identical machines and on two profiles of one
- * browser, so the device list (and every restore point named after it) could not say
- * which one it was looking at. The short id makes the label unique without recording
- * a version, a hostname, a hardware id or an install id — nothing beyond the random
- * device id Kesonode already needs for its file names. A name the user typed is never
- * overwritten by this.
+ * It used to be `<OS> · <browser> · <short id>`, which is the WRONG thing to put in a
+ * field the user is invited to edit: the machine's half of the string survived every
+ * edit and ended up glued to the user's half (`Macbook · Edge · 451dbeb9`, reported three
+ * times). The two halves are different data and are now stored and shown separately:
+ *
+ *   - `device_label` — the user's words, and nothing else. This is what travels in a
+ *     packet and what a restore point is named after.
+ *   - the browser and the 8-char id — derived at DISPLAY time from `device_browser` and
+ *     `device_id`, so they can never be edited into a name and never go stale.
+ *
+ * Two installs of the same OS still tell apart, because the extra id is shown next to
+ * the name wherever two devices are listed.
  */
-export function defaultDeviceLabel(deviceId: string): string {
-  const short = shortDeviceId(deviceId);
-  const readable = detectDeviceName();
-  return short ? `${readable} · ${short}` : readable;
+export function defaultDeviceLabel(): string {
+  return detectDeviceOs();
 }
 
 // ─── Default Settings ──────────────────────────────────────────────────────
@@ -98,7 +164,8 @@ export const DEFAULT_SETTINGS: SyncSettings = {
   // context — service worker, popup, options, onboarding — carried its own different
   // default, and nothing ever wrote it down. See getSettings().
   device_id: "",
-  device_label: detectDeviceName(),
+  // Just the OS. The browser and the short id are shown next to this name, not inside it.
+  device_label: detectDeviceOs(),
   // Bookmarks only by default. The extension list is fingerprint-grade data and
   // history/tabs are sensitive, so those are opt-in (turned on in onboarding/settings).
   enabled_types: ["bookmarks"],
@@ -168,6 +235,17 @@ export const KEYS = {
   // "Keep forever" requests the storage refused (Nutstore 403). Retried as soon as the
   // backend answers again. Device-local only; never published in a SyncPacket.
   SNAPSHOT_PENDING_PIN: "konode_snap_pending_pin",
+  // The last shared snapshot index this device managed to READ. A rate-limited storage
+  // refuses the index for whole windows, and without a copy the restore points lose the
+  // device that saved them and their bookmark count — the list then shows bare
+  // "Bookmark restore point" rows for points that are perfectly well described in the
+  // file. A READ-ONLY fallback: it is never written back to the backend, so it cannot
+  // resurrect a stale index over a newer one.
+  SNAPSHOT_SHARED_CACHE: "konode_snap_shared_cache",
+  // Peer packets already downloaded, keyed by their file name and version, so an
+  // unchanged peer file can be merged again without another round trip to the storage.
+  // Device-local working state; never travels in a SyncPacket.
+  PEER_PACKET_CACHE: "konode_peer_packet_cache",
   HIST_IMPORTED: "konode_hist_imported",
   HIST_REJECTED: "konode_hist_rejected",
   HIST_VISITTIME_OK: "konode_hist_visittime_ok",
@@ -296,7 +374,28 @@ export async function getSettings(): Promise<SyncSettings> {
   // Fallback `{}`, NOT DEFAULT_SETTINGS: "nothing stored" has to be distinguishable so we
   // know to mint an identity, and the defaults get merged over it either way.
   const stored = await get<Partial<SyncSettings>>(KEYS.SETTINGS, {});
-  if (stored.device_id) return ensureActiveBackendConfig({ ...DEFAULT_SETTINGS, ...stored });
+  if (stored.device_id) {
+    const merged = { ...DEFAULT_SETTINGS, ...stored };
+    // Older builds stored `<OS> · <browser> · <short id>` as the label. Hand the user
+    // back their own words, and write the cleaned value once so every context (worker,
+    // popup, options) agrees instead of each re-deriving it on every read.
+    const clean = cleanDeviceLabel(merged.device_label, merged.device_id) || detectDeviceOs();
+    if (clean !== merged.device_label) {
+      merged.device_label = clean;
+      // Re-derive inside the update rather than writing `clean` blindly: if the user
+      // renamed the device between the read above and this write, their new name wins.
+      const settled = await updateKey<Partial<SyncSettings>>(
+        KEYS.SETTINGS,
+        (cur) => {
+          const now = cleanDeviceLabel(cur.device_label, cur.device_id);
+          return now === cur.device_label ? cur : { ...cur, device_label: now || detectDeviceOs() };
+        },
+        {}
+      );
+      return ensureActiveBackendConfig({ ...DEFAULT_SETTINGS, ...settled });
+    }
+    return ensureActiveBackendConfig(merged);
+  }
   const settled = await updateKey<Partial<SyncSettings>>(
     KEYS.SETTINGS,
     (cur) => {
@@ -307,7 +406,7 @@ export async function getSettings(): Promise<SyncSettings> {
       return {
         ...cur,
         device_id,
-        device_label: cur.device_label?.trim() || defaultDeviceLabel(device_id),
+        device_label: cleanDeviceLabel(cur.device_label, device_id) || defaultDeviceLabel(),
       };
     },
     {}
@@ -329,6 +428,12 @@ export async function getBookmarkExclusions(): Promise<BookmarkExclusion[]> {
 export async function saveSettings(partial: Partial<SyncSettings>): Promise<SyncSettings> {
   const current = await getSettings();
   const next = { ...current, ...partial };
+  // One choke point for the label, so the machine halves can never be written back in:
+  // a name pasted from an old build's Activity log, or typed with a trailing "· Edge",
+  // is stored as the words alone. The browser and the id are shown next to it.
+  if (partial.device_label !== undefined) {
+    next.device_label = cleanDeviceLabel(partial.device_label, next.device_id) || defaultDeviceLabel();
+  }
   // 口令强度兜底：即使绕过 UI 直接发消息，启用 E2EE 时也不允许过短口令（离线可暴力）。
   if (passphraseViolatesPolicy(next)) {
     throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters when E2EE is enabled.`);
@@ -575,7 +680,11 @@ export async function importSettingsBackup(
   if (options.asNewDevice) {
     const device_id = crypto.randomUUID();
     partial.device_id = device_id;
-    partial.device_label = defaultDeviceLabel(device_id);
+    // A fresh identity gets this browser's own default name — never the backup's label,
+    // which names the machine the backup came from. The old build's suffixed form is
+    // stripped first, so importing an old backup doesn't paste `Mac · Edge · 451dbeb9`
+    // into the new device's name.
+    partial.device_label = defaultDeviceLabel();
   }
 
   const updated = await saveSettings(partial as Partial<SyncSettings>);

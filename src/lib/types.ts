@@ -639,6 +639,17 @@ export interface IBackend {
    * never part of the wire format.
    */
   failedPeers?: string[];
+  /**
+   * Did the storage meter us during this backend's use? A 429 anywhere, or Nutstore's
+   * 403 standing in for one.
+   *
+   * The engine reads it AFTER a cycle — and after a device listing or a restore-point
+   * list, which is where the refusals used to be swallowed — because a refusal that is
+   * only logged is a refusal that is repeated every minute. Once it is set, automatic
+   * sync parks itself for a whole window instead of spending the next one too.
+   * Per-instance working state, never part of the wire format.
+   */
+  rateLimited?: boolean;
   // `listVersions` used to sit here, returning [] from all three backends because none of
   // them can answer it: Drive, GitHub and WebDAV expose file history in three unrelated
   // ways and we never called it. Restore points are ordinary files we write ourselves
@@ -664,6 +675,13 @@ export interface ListedFile {
   name: string;
   /** epoch ms, or null when the listing gave no parseable time for this file */
   modified: number | null;
+  /**
+   * The file's size in bytes, where the listing carries one. A second, independent
+   * version signal: two different files can share a second-resolution modification
+   * time, and without the size a peer that republishes within the same second could
+   * be served the previous bytes from the local packet cache.
+   */
+  size?: number;
 }
 
 // ─── Snapshots (bookmark restore points) ────────────────────────────────────

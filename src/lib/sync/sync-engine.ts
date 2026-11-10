@@ -3,7 +3,7 @@ import type { SyncSettings, SyncState, DataType, SyncPacket, SyncSession, SyncEx
 } from "@/lib/types";
 import { createBackend } from "@/lib/backends/abstract-backend";
 import { normalizeRepoSlug } from "@/lib/backends/github-backend";
-import { createSnapshot as writeSnapshot, listSnapshots as readSnapshots, restoreSnapshot as applySnapshot, deleteSnapshot as dropSnapshot, renameSnapshot as renameSnapshotFile, setSnapshotPinned as pinSnapshotFile, flushPendingPins, type SnapshotMeta, type CreateSnapshotOptions } from "@/lib/sync/snapshots";
+import { createSnapshot as writeSnapshot, listSnapshots as readSnapshots, knownSnapshots, restoreSnapshot as applySnapshot, deleteSnapshot as dropSnapshot, renameSnapshot as renameSnapshotFile, setSnapshotPinned as pinSnapshotFile, flushPendingPins, type SnapshotMeta, type CreateSnapshotOptions } from "@/lib/sync/snapshots";
 import {
   bookmarkContent, exportBookmarkPayload, importBookmarks, peerTreeAsMerged, type BulkDeleteBlock,
 } from "@/lib/handlers/bookmarks-handler";
@@ -578,6 +578,13 @@ export class SyncEngine {
 
       const typeErrors = await this.syncAllTypes(typesToSync, backend, state);
 
+      // The storage refused us for quota reasons. Nothing here threw — the refusals
+      // were handled where they happened (a peer file skipped, an index left alone) —
+      // so without this the cycle would report success and the next minute would do
+      // exactly the same thing, spending the window's quota again. The warning on the
+      // backend is what says it; this is where it is acted on.
+      if (backend.rateLimited) await this.noteRateLimit();
+
       // A device that disagrees on encryption isn't a hard failure — we still synced
       // and re-uploaded our own (correctly-encrypted) data, so the group self-heals
       // once it's aligned. Surface it as a visible error message so the user fixes
@@ -687,9 +694,21 @@ export class SyncEngine {
    * until its window rolls over. Retrying every minute spends that window's quota too,
    * which is why the advice to "wait for the window to pass" never worked. One notice
    * per cooldown, and a manual "Sync now" is never gated.
+   *
+   * Called with NO argument it means the BACKEND said so (`backend.rateLimited`) rather
+   * than an exception arriving here. That distinction is the whole point. Most refusals
+   * never reach this function at all: one unreadable peer file is skipped so the other
+   * peers still merge, the device list falls back to a cached name, the shared snapshot
+   * index is left alone rather than overwritten. Each of those handled the refusal
+   * exactly as it should — and each of them then let the NEXT minute do the same thing.
+   * A refusal that is only logged is a refusal that is repeated, and on a free Nutstore
+   * account (600 requests per 30 minutes, counted across every other app using it) that
+   * is how an account ends up permanently over its quota.
    */
-  private async noteRateLimit(err: unknown): Promise<void> {
-    if (!(err instanceof HttpError) || (err.status !== 429 && !err.rateLimited)) return;
+  private async noteRateLimit(err?: unknown): Promise<void> {
+    if (err !== undefined) {
+      if (!(err instanceof HttpError) || (err.status !== 429 && !err.rateLimited)) return;
+    }
     this.rateLimitedThisSync = true;
     if (!(await startSyncCooldown())) return;
     logger.warn("SyncEngine", `Automatic sync paused for ${SYNC_COOLDOWN_MS / 60000} minutes: the storage is refusing requests for a rate-limit window. "Sync now" still works; raise Sync interval in Settings → Device so the next window stays clear.`);
@@ -1025,9 +1044,47 @@ export class SyncEngine {
    * An unreadable file costs that device its name, not the whole list: the same rule as
    * downloadAll, and for the same reason.
    */
+  /**
+   * The device list as this device already knows it, with no request to the backend.
+   *
+   * This device comes first and is always present — its own packets are never
+   * downloaded, so it is exactly the row a "peer names only" list would be missing.
+   * Everything else comes from the names learned on earlier syncs.
+   */
+  private async knownDevices(): Promise<DeviceInfo[]> {
+    const known = await readPeerLabels();
+    const selfId = this.settings.device_id;
+    const peers: DeviceInfo[] = Object.entries(known)
+      .filter(([device_id]) => device_id !== selfId)
+      .map(([device_id, rec]) => ({
+        device_id,
+        label: rec.label,
+        lastSeen: null,
+        browser: rec.browser ?? null,
+        types: [] as DataType[],
+        isSelf: false,
+      }));
+    if (selfId) {
+      peers.unshift({
+        device_id: selfId,
+        label: this.settings.device_label || null,
+        lastSeen: null,
+        browser: null,
+        types: [...this.settings.enabled_types],
+        isSelf: true,
+      });
+    }
+    return peers;
+  }
+
   async listDevices(): Promise<DeviceInfo[]> {
     const cfg = this.activeBackendConfig();
     if (!cfg) return [];
+    // A cooldown means the storage is refusing every request in this window. Opening
+    // Settings → Activity during one used to show a wall of 403 text where the device
+    // list belongs, and each attempt spent quota the next window needs. The local view
+    // is the same list the fallback below shows, for free.
+    if ((await syncCooldownRemaining()) > 0) return this.knownDevices();
     return this.withBackend(async (b) => {
       // Names learned from packets this device has already downloaded. A packet we can
       // read now wins; the cache is only there for a failed read or an old packet that
@@ -1040,11 +1097,21 @@ export class SyncEngine {
       // list unchanged for days froze the row of a device that uploads bookmarks every minute.
       // One listing per readable namespace: isolated mode still sees upstream peers.
       const listed: ListedFile[] = [];
-      for (const prefix of listPrefixes()) {
-        const part = b.listFilesWithTimes
-          ? await b.listFilesWithTimes(prefix)
-          : (await b.listFiles(prefix)).map((name) => ({ name, modified: null }));
-        listed.push(...part);
+      try {
+        for (const prefix of listPrefixes()) {
+          const part = b.listFilesWithTimes
+            ? await b.listFilesWithTimes(prefix)
+            : (await b.listFiles(prefix)).map((name) => ({ name, modified: null }));
+          listed.push(...part);
+        }
+      } catch (err) {
+        // The folder itself can't be listed — almost always a rate-limited window.
+        // Showing an error and an EMPTY list is the worst possible answer here: the
+        // devices are all still there, still named, and the names this device learned
+        // earlier are exactly what the list is for. So show them, and park the sync.
+        logger.warn("listDevices", `Couldn't list the sync folder (${err instanceof Error ? err.message : err}); showing the devices this device knows about`);
+        if (b.rateLimited) await this.noteRateLimit();
+        return this.knownDevices();
       }
       const deviceFiles = new Map<string, Map<DataType, string>>();
       const newestUpload = new Map<string, number>();
@@ -1072,37 +1139,60 @@ export class SyncEngine {
         let label: string | null = null;
         let lastSeen: string | null = null;
         let browserInfo: DeviceBrowser | null = null;
-        // The smallest file is often the OLDEST: an extension list that never changes was
-        // written by whichever build first set the device up, before packets carried a
-        // name. Try the next smallest before calling the device unnamed. A history packet
-        // can be megabytes, so it is read only when it is the device's only file (#30).
-        const candidates = CHEAPEST.filter((t) => files.has(t));
-        const small = candidates.filter((t) => t !== "history");
-        for (const type of small.length ? small : candidates) {
-          const name = files.get(type);
-          if (!name) continue;
-          let p: Partial<SyncPacket>;
-          try {
-            const raw = await b.getFile(name);
-            if (raw === null) {
-              // The listing named this file a moment ago, so a null here is a real fetch
-              // problem, not an old peer. Try the device's OTHER files before giving up:
-              // one refused extensions file must not cost a named device its name when
-              // its bookmarks file is perfectly readable.
-              logger.warn("listDevices", `${name} is in the folder listing but came back empty; trying another file`);
+
+        // ── The name learned on an earlier sync comes FIRST ──────────────────
+        // It is what the last successful read saw, and asking the storage again
+        // costs a request that a metered account counts — one per device per cycle.
+        // That is not a small thing: three devices, four data types, a minute apart,
+        // is enough to blow through Nutstore's free 600-requests-per-30-minutes
+        // quota on its own, and every request after that came back 403.
+        //
+        // A peer that renames itself re-uploads (the name rides on the upload tag),
+        // so the next successful sync refreshes this copy anyway — and the device
+        // list is re-read when a sync finishes, which is when it changes.
+        const cached = known[device_id];
+        if (!isSelf && cached) {
+          label = cached.label;
+          browserInfo = cached.browser ?? null;
+        }
+
+        if (!label) {
+          // The smallest file is often the OLDEST: an extension list that never changes was
+          // written by whichever build first set the device up, before packets carried a
+          // name. Try the next smallest before calling the device unnamed. A history packet
+          // can be megabytes, so it is read only when it is the device's only file (#30).
+          const candidates = CHEAPEST.filter((t) => files.has(t));
+          const small = candidates.filter((t) => t !== "history");
+          for (const type of small.length ? small : candidates) {
+            // The storage is metering us: every further request in this window is
+            // refused and every one of them spends quota the next window needs. Stop
+            // here and let the names we already have do the talking.
+            if (b.rateLimited) break;
+            const name = files.get(type);
+            if (!name) continue;
+            let p: Partial<SyncPacket>;
+            try {
+              const raw = await b.getFile(name);
+              if (raw === null) {
+                // The listing named this file a moment ago, so a null here is a real fetch
+                // problem, not an old peer. Try the device's OTHER files before giving up:
+                // one refused extensions file must not cost a named device its name when
+                // its bookmarks file is perfectly readable.
+                logger.warn("listDevices", `${name} is in the folder listing but came back empty; trying another file`);
+                continue;
+              }
+              p = JSON.parse(raw) as Partial<SyncPacket>;
+            } catch (err) {
+              logger.warn("listDevices", `Couldn't read ${name} (${err instanceof Error ? err.message : err}); trying another file`);
               continue;
             }
-            p = JSON.parse(raw) as Partial<SyncPacket>;
-          } catch (err) {
-            logger.warn("listDevices", `Couldn't read ${name} (${err instanceof Error ? err.message : err}); trying another file`);
-            continue;
-          }
-          if (!lastSeen) lastSeen = p.timestamp ?? null;
-          browserInfo ??= readDeviceBrowser(p.device_browser);
-          if (p.device_label) {
-            label = p.device_label;
-            learned.push({ device_id, device_label: label });
-            break;
+            if (!lastSeen) lastSeen = p.timestamp ?? null;
+            browserInfo ??= readDeviceBrowser(p.device_browser);
+            if (p.device_label) {
+              label = p.device_label;
+              learned.push({ device_id, device_label: label });
+              break;
+            }
           }
         }
         // Nothing readable on the backend (or a pre-name build): use the name learned on
@@ -1128,6 +1218,10 @@ export class SyncEngine {
           isSelf,
         });
       }
+      // A refusal anywhere in this listing means the account is over its quota, and the
+      // next minute's listing would be refused too. Park automatic sync, exactly as a
+      // refused sync does.
+      if (b.rateLimited) await this.noteRateLimit();
       // This device first, then the rest newest-seen first; nameless ones sink to the end.
       out.sort((a, c) => {
         if (a.isSelf !== c.isSelf) return a.isSelf ? -1 : 1;
@@ -1304,7 +1398,18 @@ export class SyncEngine {
   async getSnapshots(): Promise<SnapshotMeta[]> {
     const cfg = this.activeBackendConfig();
     if (!cfg) return [];
-    return this.withBackend((b) => readSnapshots(b, this.settings));
+    // Same rule as the device list: during a cooldown every request is refused, so show
+    // what this device already knows instead of an error the storage will repeat.
+    if ((await syncCooldownRemaining()) > 0) return knownSnapshots();
+    return this.withBackend(async (b) => {
+      const list = await readSnapshots(b, this.settings);
+      // A refusal here was handled INSIDE the snapshot reader — the restore points
+      // themselves are fine, only their annotations are missing — so nothing would
+      // ever reach the engine to say the account is over its quota. Say it here, or
+      // the next minute asks the same questions and gets the same answer.
+      if (b.rateLimited) await this.noteRateLimit();
+      return list;
+    });
   }
 
   /**

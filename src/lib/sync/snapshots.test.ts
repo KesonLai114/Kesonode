@@ -695,3 +695,64 @@ describe("snapshots — keep forever while the storage refuses writes", () => {
     expect([...backend.blobs.keys()].filter((n) => n.startsWith("konode_snap_kept_"))).toHaveLength(1);
   });
 });
+
+// The reported bug: every restore point except the newest showed as a bare
+// "Bookmark restore point", with no device and no count. The points were fine; the
+// shared index that describes them was refused (Nutstore 403), and this device had
+// thrown away the last copy it had read.
+class RefuseAfterFirstReadFake extends FileFake {
+  refuseIndex = false;
+  refuseList = false;
+  getFile(n: string): Promise<string | null> {
+    if (n === INDEX_NAME && this.refuseIndex) return Promise.reject(new HttpError(403, "Forbidden (403)"));
+    return super.getFile(n);
+  }
+  listFiles(p: string): Promise<string[]> {
+    if (this.refuseList) return Promise.reject(new HttpError(403, "Forbidden (403)"));
+    return super.listFiles(p);
+  }
+}
+
+describe("snapshots — annotations survive a window in which the index is unreadable", () => {
+  const me = () => settings({
+    device_label: "Macbook",
+    device_id: "451dbeb9-0000-4000-8000-000000000001",
+  });
+
+  it("keeps the device and the count from the last index it managed to read", async () => {
+    await otherDevice();
+    const backend = new RefuseAfterFirstReadFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    await chrome.bookmarks.create({ parentId: "1", title: "B", url: "https://b.example/" });
+    const created = await createSnapshot(asBackend(backend), me());
+
+    // Read the index once, successfully — this is the copy that must survive.
+    const online = await listSnapshots(asBackend(backend), me());
+    expect(online[0].count).toBe(2);
+    expect(online[0].device_label).toBe("Macbook");
+
+    // The quota window closes. The index is now refused; the local index is wiped so it
+    // cannot be what answers (that is the "only the newest point is described" symptom).
+    await chrome.storage.local.remove(KEYS.SNAPSHOT_LOCAL);
+    backend.refuseIndex = true;
+
+    const offline = await listSnapshots(asBackend(backend), me());
+    const point = offline.find((m) => m.name === created.name)!;
+    expect(point.device_label).toBe("Macbook");
+    expect(point.count).toBe(2);
+    expect(snapshotDisplayName(point)).toBe(`${t("opt_snap_unknown")} · Macbook · 451dbeb9`);
+  });
+
+  it("still lists the points this device knows when the whole folder is refused", async () => {
+    await otherDevice();
+    const backend = new RefuseAfterFirstReadFake();
+    await chrome.bookmarks.create({ parentId: "1", title: "A", url: "https://a.example/" });
+    const created = await createSnapshot(asBackend(backend), me());
+    await listSnapshots(asBackend(backend), me());
+
+    backend.refuseList = true;
+    const offline = await listSnapshots(asBackend(backend), me());
+    // An empty list would read as "you have no backups", which is the opposite of true.
+    expect(offline.map((m) => m.name)).toContain(created.name);
+  });
+});

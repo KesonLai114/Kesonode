@@ -459,7 +459,7 @@ export default function OptionsApp() {
   // info (older points), so the fallback stays "Bookmark restore point" alone.
   const snapDevice = (s: SnapshotMeta): string => {
     const id = s.device_id ? s.device_id.replace(/-/g, "").slice(0, 8) : "";
-    if (s.device_label && id) return `${s.device_label} · ${id}`;
+    if (s.device_label && id) return s.device_label.includes(id) ? s.device_label : `${s.device_label} · ${id}`;
     if (s.device_label) return s.device_label;
     return id;
   };
@@ -2412,6 +2412,13 @@ export default function OptionsApp() {
                           <div>
                             <div className="row-label">
                               {d.label != null ? <bdi>{d.label}</bdi> : t("opt_device_unnamed", d.device_id.slice(0, 8))}
+                              {/* The 8-char id, next to the name rather than inside it. It is
+                                  what a restore point's name ends with, so this is the row that
+                                  answers "which device made 451dbeb9". Kept out of the label
+                                  itself: the label is the user's words, and a machine half
+                                  glued onto it survived every edit. */}
+                              {d.label != null && !d.label.includes(d.device_id.replace(/-/g, "").slice(0, 8))
+                                && <span className="device-short-id">{d.device_id.replace(/-/g, "").slice(0, 8)}</span>}
                               {/* What the device runs, from its own packets (#10). It tells the
                                   Chrome build and the Firefox build on one machine apart; two
                                   identical machines it cannot, which the time below does. */}
@@ -3146,6 +3153,9 @@ const STYLES = `
      the danger red, because nothing is wrong and nothing will happen to that device. */
   .badge-quiet { font-size: var(--fs-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); border: 1px solid var(--border-input); padding: 0 var(--sp-xs); border-radius: var(--r-xs); margin-left: var(--sp-sm); white-space: nowrap; }
   .device-browser { font-size: var(--fs-xs); color: var(--text-secondary); margin-left: var(--sp-sm); }
+  /* The 8-char device id, monospaced so it lines up with the tail of a restore point's
+     name ("Bookmark restore point · Macbook · 451dbeb9"). */
+  .device-short-id { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: var(--fs-xs); color: var(--text-secondary); margin-left: var(--sp-sm); }
   .radio-circle { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border-input); flex-shrink: 0; margin-top: var(--sp-2xs); background: var(--bg-card); transition: border-color .15s; }
   .radio-circle.checked { border-color: var(--accent); background: radial-gradient(circle at center, var(--accent) 38%, transparent 42%); }
 

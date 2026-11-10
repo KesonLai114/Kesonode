@@ -16,6 +16,8 @@
 
 import { browser } from "@/lib/utils/ext";
 import { logger } from "@/lib/utils/logger";
+import { cleanDeviceLabel } from "@/lib/utils/storage";
+import type { DeviceBrowser } from "@/lib/types";
 
 // A Kesonode-owned local key, deliberately NOT a `konode_*` one: the frozen upstream
 // storage keys are wire-adjacent, this is a purely local display cache.
@@ -24,6 +26,9 @@ const MAX_DEVICES = 64;
 
 interface PeerLabel {
   label: string;
+  /** What the peer runs, from its own packets. Kept so the device list can show it
+   *  without reading a file off the backend — which is the request that costs quota. */
+  browser?: DeviceBrowser | null;
   at: number;
 }
 
@@ -39,7 +44,11 @@ export async function readPeerLabels(): Promise<PeerLabelMap> {
       if (!entry || typeof entry !== "object") continue;
       const rec = entry as Partial<PeerLabel>;
       if (typeof rec.label === "string" && rec.label.trim()) {
-        out[id] = { label: rec.label, at: typeof rec.at === "number" ? rec.at : 0 };
+        out[id] = {
+          label: rec.label,
+          browser: (rec.browser as DeviceBrowser | undefined) ?? null,
+          at: typeof rec.at === "number" ? rec.at : 0,
+        };
       }
     }
     return out;
@@ -54,21 +63,30 @@ export async function readPeerLabels(): Promise<PeerLabelMap> {
  * from the device list; a no-op when nothing changed, so an idle sync writes nothing.
  */
 export async function rememberPeerLabels(
-  packets: readonly { device_id?: string; device_label?: string | null }[],
+  packets: readonly {
+    device_id?: string;
+    device_label?: string | null;
+    device_browser?: DeviceBrowser | null;
+  }[],
 ): Promise<void> {
-  const seen = new Map<string, string>();
+  const seen = new Map<string, { label: string; browser: DeviceBrowser | null }>();
   for (const p of packets) {
     const id = typeof p.device_id === "string" ? p.device_id : "";
-    const label = typeof p.device_label === "string" ? p.device_label.trim() : "";
-    if (id && label) seen.set(id, label);
+    const raw = typeof p.device_label === "string" ? p.device_label.trim() : "";
+    // Strip the `<browser> · <short id>` suffixes older builds glued onto the label, so a
+    // peer's name is its OWN words too. Otherwise this cache would store
+    // `Macbook · Edge · 451dbeb9` and every list that renders the id next to the name
+    // would print `451dbeb9` twice.
+    const label = raw ? cleanDeviceLabel(raw, id) : "";
+    if (id && label) seen.set(id, { label, browser: p.device_browser ?? null });
   }
   if (seen.size === 0) return;
 
   const current = await readPeerLabels();
   let changed = false;
-  for (const [id, label] of seen) {
-    if (current[id]?.label !== label) {
-      current[id] = { label, at: Date.now() };
+  for (const [id, entry] of seen) {
+    if (current[id]?.label !== entry.label || (current[id]?.browser?.name ?? null) !== (entry.browser?.name ?? null)) {
+      current[id] = { label: entry.label, browser: entry.browser, at: Date.now() };
       changed = true;
     }
   }

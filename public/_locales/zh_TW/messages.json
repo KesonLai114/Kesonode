@@ -34,7 +34,7 @@
     "message": "立即同步"
   },
   "extension_name": {
-    "message": "Kesonode | 私人書籤與分頁同步 v1.5.10"
+    "message": "Kesonode | 私人書籤與分頁同步 v1.5.11"
   },
   "extension_description": {
     "message": "隱私優先的瀏覽器同步，資料存放在你自己的空間：Google Drive、WebDAV、GitHub。"
@@ -1762,7 +1762,7 @@
     "message": "為這台裝置命名"
   },
   "onb_welcome_device_hint": {
-    "message": "瀏覽器不允許擴充功能讀取電腦名稱，自動產生的只是通用識別（如 Mac · Chromium · b5fe8371）。請填寫你能一眼認出的名字，例如「Mac mini M4pro」。"
+    "message": "瀏覽器不允許擴充功能讀取電腦名稱，自動產生的只是系統名（如「Mac」）。請填寫你能一眼認出的名字，例如「Mac mini M4pro」。"
   },
   "onb_import_title": {
     "message": "已有設定備份？"

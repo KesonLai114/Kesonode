@@ -51,6 +51,55 @@ All notable changes to Konode. Format loosely follows
 
 ### Fixed
 
+- **A rate-limited WebDAV account now actually backs off, instead of retrying every
+  minute for as long as it stays over quota.** Nutstore's free plan allows 600 requests
+  per 30 minutes, counted across every app using the account, and answers 403 rather than
+  429. A 30-minute cooldown existed, but it only fired when the sync loop itself threw —
+  and the two paths that mattered most (the device list and the restore-point list) caught
+  their 403 and carried on. So the cycle "succeeded", the next minute asked again, and the
+  account could never climb back under its quota: one Activity log held 25 refusals in five
+  minutes. A metered backend now reports it (`IBackend.rateLimited`), the engine parks
+  automatic sync for a window from EVERY path that can hit a refusal, and a refused
+  backend stops sending requests for the rest of the cycle. The report also names the
+  cause it found instead of showing a raw status: that account was 3 devices on a 60-second
+  interval, which is more than 600 requests per 30 minutes before anyone types anything.
+
+- **A sync cycle asks the storage once, not once per question.** `listFiles`,
+  `listFilesWithTimes` and `downloadAll` each ran their own PROPFIND, and the restore-point
+  list asked twice more, for folders whose contents were identical. One PROPFIND per
+  backend instance now answers all of them (invalidated by any write), each peer file that
+  has not changed since the last download is merged from a local copy of its bytes (same
+  merge, same conflict resolution, same delete guard — only the round trip is skipped), and
+  the device list reads a name from the local cache before spending a request on it. With
+  three devices on a one-minute interval this is the difference between ~1300 requests per
+  window and well under a hundred.
+
+- **Restore points keep their device name and bookmark count while the shared index is
+  unreadable.** `konode_snap_index.json` is the only place a restore point records who
+  saved it and how many bookmarks it held, and a metered storage refuses it for whole
+  windows. The list then showed one bare "Bookmark restore point" per point — the newest
+  one named only because this device had created it. The last index this device managed to
+  read is now kept locally and used as a read-only fallback, so a refused index costs
+  nothing on screen. It is never written back, so it cannot resurrect a stale index over a
+  newer one. A folder that cannot be listed at all now shows the points this device knows
+  about instead of an empty list that reads like "you have no backups".
+
+- **The device name no longer carries a machine half the user cannot delete.**
+  `device_label` stored `<OS> · <browser> · <short id>`, so the Settings field read
+  `Mac · Edge · 451dbeb9`, editing it produced `Macbook · Edge · 451dbeb9`, and every
+  restore point inherited that hybrid. The label is now the user's own words only
+  (default: the plain OS name), with the browser and the 8-char id derived at display
+  time — the device list shows both next to the name, and restore points keep the id they
+  are matched by. Existing labels are migrated once on read: the trailing `· <8 hex>` and
+  `· <browser>` are stripped, names that merely look numeric (`工作机 · 20240101`) are left
+  alone, and a name the user typed is never overwritten.
+
+- **A peer's cached packets are scoped to the storage they came from.** File names are
+  `konode_<type>_<device_id>.json`, and the same device id can exist in two accounts (a
+  config imported with "keep this identity", or a folder copied between servers). Switching
+  the active backend would then merge the old account's data into the new one. The local
+  packet cache is keyed by origin + folder + account, so it never crosses that line.
+
 - **A storage that refuses to serve a peer's file no longer looks like a successful sync.**
   WebDAV, GitHub and Drive each skipped an unreadable peer file with a warning and carried
   on; the cycle then published this device's packet and reported "Synced" with FEWER

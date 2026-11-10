@@ -33,6 +33,7 @@ import { logger } from "@/lib/utils/logger";
 import { t } from "@/lib/utils/i18n";
 import { UPSTREAM_PROTOCOL, snapshotFileName, snapshotTimestamp } from "@/lib/compat/protocol";
 import { HttpError } from "@/lib/utils/retry";
+import { rememberPeerLabels } from "@/lib/utils/peer-labels";
 
 // Restore points are shared upstream data, so their names stay in the upstream namespace
 // in every compat mode. The names come from the frozen contract, not from local copy.
@@ -253,9 +254,47 @@ async function getIndex(backend: IBackend, settings: SyncSettings): Promise<Snap
 
   try {
     const list = JSON.parse(plain);
-    return Array.isArray(list) ? (list as SnapshotMeta[]) : [];
+    if (!Array.isArray(list)) return []; // readable but not a list → garbage, safe to replace
+    const metas = list as SnapshotMeta[];
+    // Keep a copy of what we just read. The index is the ONLY place a restore point
+    // says which device saved it and how many bookmarks it held, and a metered storage
+    // refuses it for whole windows at a time. Without this copy, every restore point
+    // the device could not re-read showed up as a bare "Bookmark restore point" — no
+    // device, no count — even though the file was sitting right there in the folder.
+    await writeSharedCache(metas);
+    return metas;
   } catch {
     return []; // readable but not a list → garbage, safe to replace
+  }
+}
+
+/**
+ * The last shared index this device managed to READ.
+ *
+ * A local fallback for the display only. It is never written back to the backend, so it
+ * cannot resurrect a stale index over a newer one — the shared file stays the single
+ * source of truth, and this only fills the gap while that file is out of reach.
+ */
+async function readSharedCache(): Promise<SnapshotMeta[] | null> {
+  try {
+    const r = await browser.storage.local.get(KEYS.SNAPSHOT_SHARED_CACHE);
+    const v = r[KEYS.SNAPSHOT_SHARED_CACHE];
+    return Array.isArray(v) ? v as SnapshotMeta[] : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeSharedCache(list: SnapshotMeta[]): Promise<void> {
+  try {
+    await browser.storage.local.set({
+      [KEYS.SNAPSHOT_SHARED_CACHE]: list
+        .filter((m) => m && typeof m.name === "string")
+        .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+        .slice(0, MAX_LOCAL_ANNOTATIONS),
+    });
+  } catch {
+    // Purely cosmetic: without the copy the list falls back to "Bookmark restore point".
   }
 }
 
@@ -294,6 +333,9 @@ async function mergeIndex(
     .filter((m) => alive.has(m.name))
     .sort((a, b) => b.timestamp - a.timestamp);
   await putIndex(backend, settings, merged);
+  // What we just published is also what this device would show if the storage stopped
+  // answering: the local copy of the index follows every write.
+  await writeSharedCache(merged);
   return merged;
 }
 
@@ -341,11 +383,16 @@ export function snapshotIsUnnamed(meta: SnapshotNameMeta): boolean {
   if (!label) return true;
   const short = shortDeviceId(meta.device_id);
   if (!short) return false;
+  // An 8-char device id inside a restore point's name means a machine wrote it: nobody
+  // types one by hand. That covers every build that baked an automatic name into `label`
+  // — including the ones whose device label has since been renamed, where the old
+  // startsWith(device) test stopped matching and the stale name froze on screen.
+  if (label.includes(short)) return true;
   const device = meta.device_label?.trim();
-  // Match on the full device label AND the 8-char id, not on a localized suffix: a
-  // name the user typed ("Macmini 升级前还原点") must never be swallowed, and a point
-  // saved under a different UI language has a different suffix anyway.
-  return device ? label.startsWith(device) && label.includes(short) : label.startsWith(short);
+  // Match on the full device label too, not on a localized suffix: a name the user typed
+  // ("Macmini 升级前还原点") must never be swallowed, and a point saved under a different
+  // UI language has a different suffix anyway.
+  return device ? label.startsWith(device) : false;
 }
 
 /** Write a snapshot of the current bookmark tree, then prune the rolling points to N. */
@@ -421,17 +468,55 @@ async function migrateLegacyIndex(
   return merged;
 }
 
+/**
+ * The restore points this device can describe WITHOUT the backend.
+ *
+ * Used when the storage cannot be asked — a rate-limit window refuses every request for
+ * half an hour, and an empty list or a wall of 403 text is the worst possible answer:
+ * the points are still there and this device already knows about some of them. The
+ * shared ones come from the last index it managed to read, the rest from its own index.
+ */
+export async function knownSnapshots(): Promise<SnapshotMeta[]> {
+  const local = await readLocalIndex();
+  const shared = await readSharedCache();
+  const byName = new Map<string, SnapshotMeta>();
+  for (const m of [...(shared ?? []), ...Object.values(local)]) byName.set(m.name, m);
+  return [...byName.values()].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
+}
+
 /** List restore points on the backend, newest first, annotated with known counts and names. */
 export async function listSnapshots(backend: IBackend, settings: SyncSettings): Promise<SnapshotMeta[]> {
   // A "keep forever" the storage refused earlier gets its rename here, on the first
   // visit that can reach the backend again. Refusals are swallowed inside the flush.
   await flushPendingPins(backend, settings);
-  const names = await allSnapshotNames(backend);
+  let names: string[];
+  try {
+    names = await allSnapshotNames(backend);
+  } catch (err) {
+    // The folder can't be listed right now — a rate-limited window, most of the time.
+    // The restore points are still there and this device still knows some of them, so
+    // show what is known instead of an empty list that reads like "you have no
+    // backups". The names and counts of the ones this device made are in the local
+    // index; the shared ones come from the last index this device managed to read.
+    logger.warn("Snapshots", `Couldn't list the restore points (${err instanceof Error ? err.message : err}); showing the ones this device knows about`);
+    return knownSnapshots();
+  }
   // An unreadable index costs the annotations, nothing more — the file list below is what
-  // says which restore points exist, so the list still works.
+  // says which restore points exist, so the list still works. And when the index itself
+  // is out of reach, the last copy this device read fills in what it can: the device that
+  // saved each point and how many bookmarks it held.
   const idx = (await migrateLegacyIndex(backend, settings, names))
     ?? (await getIndex(backend, settings))
+    ?? (await readSharedCache())
     ?? [];
+  // The index names the devices that saved these points. That is a second source of
+  // device names, and it is often the only one that survives a window in which no peer
+  // file could be read at all.
+  await rememberPeerLabels(
+    idx
+      .filter((m) => m?.device_id && m?.device_label)
+      .map((m) => ({ device_id: m.device_id as string, device_label: m.device_label as string })),
+  );
   const byName = new Map(idx.map((m) => [m.name, m]));
   const local = await readLocalIndex();
   const live = new Set(names);
@@ -549,9 +634,11 @@ export async function renameSnapshot(
   else delete next.label;
   byName.set(name, next);
   const alive = new Set(live);
-  await putIndex(backend, settings, [...byName.values()]
+  const merged = [...byName.values()]
     .filter((m) => alive.has(m.name))
-    .sort((a, b) => b.timestamp - a.timestamp));
+    .sort((a, b) => b.timestamp - a.timestamp);
+  await putIndex(backend, settings, merged);
+  await writeSharedCache(merged);
   await rememberLocal(next);
   logger.event("Snapshots", `Renamed ${name}`);
 }
