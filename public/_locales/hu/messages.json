@@ -433,7 +433,7 @@
     "message": "Ha bekapcsolod a titkosítást, az adatok még ezen az eszközön, feltöltés előtt titkosításra kerülnek. Így a tárhelyszolgáltató sem tudja elolvasni a tartalmukat."
   },
   "onb_e2ee_desc": {
-    "message": "AES-256-GCM. Ajánlott."
+    "message": "AES-256-GCM. Ha bekapcsolod, tartsd biztonságos helyen a jelszót – nem állítható vissza."
   },
   "onb_pass_placeholder": {
     "message": "Adj meg egy jelmondatot, vagy generálj egy titkosítási kulcsot."
@@ -572,15 +572,6 @@
         "content": "$1"
       }
     }
-  },
-  "onb_done_backend": {
-    "message": "A tárhely sikeresen csatlakoztatva"
-  },
-  "onb_done_autosync": {
-    "message": "A szinkronizálás automatikusan fut a háttérben"
-  },
-  "onb_done_adjust": {
-    "message": "A beállításokat bármikor módosíthatod"
   },
   "datatype_bookmarks_desc": {
     "message": "A teljes könyvjelzőfa, mappákkal és sorrenddel."
@@ -1785,12 +1776,6 @@
       }
     }
   },
-  "onb_welcome_device_name": {
-    "message": "Name this device"
-  },
-  "onb_welcome_device_hint": {
-    "message": "Browsers do not let extensions read your computer's name, so the automatic label is only a generic one. Enter a name you will recognise on your other devices, for example Mac mini M4pro."
-  },
   "onb_import_title": {
     "message": "Already have a backup?"
   },
@@ -1819,10 +1804,10 @@
     }
   },
   "onb_perm_title": {
-    "message": "This update needs your permission again"
+    "message": "Erősítsd meg a Kesonode által kért engedélyeket"
   },
   "onb_perm_desc": {
-    "message": "After an update these permissions must be confirmed before sync can continue. Click the button and your browser will show the permission prompt."
+    "message": "A Kesonode-nak ezekre az engedélyekre van szüksége a választott beállításhoz. Add meg őket, és a szinkronizálás folytatódik."
   },
   "onb_perm_grant": {
     "message": "Grant permissions"
@@ -1898,5 +1883,66 @@
   },
   "popup_first_sync_cta": {
     "message": "Választás"
+  },
+  "onb_step_progress": {
+    "message": "$CURRENT$. lépés / $TOTAL$",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "onb_later": {
+    "message": "Beállítás később"
+  },
+  "onb_err_no_types": {
+    "message": "Válassz legalább egy szinkronizálandó tartalmat – ha mind ki van kapcsolva, a Kesonode-nak nincs mit tennie."
+  },
+  "onb_perm_upcoming": {
+    "message": "Ezután a böngésző a következőket kéri:"
+  },
+  "perm_host_label": {
+    "message": "A tárhelyszervered"
+  },
+  "perm_denied_note": {
+    "message": "Ha elutasítod, ez az adattípus nem szinkronizálódik tovább. Minden más működik."
+  },
+  "onb_manage_title": {
+    "message": "A Kesonode már be van állítva"
+  },
+  "onb_manage_sub": {
+    "message": "Ez az oldal csak a jelenlegi beállítást mutatja. Módosítsd a Beállításokban, vagy futtasd újra a varázslót."
+  },
+  "onb_manage_perms_label": {
+    "message": "Engedélyek"
+  },
+  "onb_manage_perms_ok": {
+    "message": "Minden megvan"
+  },
+  "onb_manage_perms_missing": {
+    "message": "$COUNT$ hiányzik",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "onb_manage_reconfigure": {
+    "message": "Beállítás újra futtatása"
+  },
+  "onb_manage_reconfigure_confirm": {
+    "message": "Újrafuttatod a beállítást? A varázsló befejezésekor lecseréli a tárhelyet, a kijelöléseket és az eszköznevet."
+  },
+  "onb_done_summary": {
+    "message": "Első szinkronizálás"
+  },
+  "onb_done_multi_title": {
+    "message": "További eszközök hozzáadása"
+  },
+  "onb_done_multi_body": {
+    "message": "Telepítsd ott is a Kesonode-ot, és válaszd ugyanazt a tárhelyet. A könyvjelzők, lapok és a többi ott találkozik."
   }
 }

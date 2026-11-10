@@ -421,7 +421,7 @@
     "message": "如果开启加密，您的数据会在上传前先在此设备上加密。连您的存储提供商都无法读取其中的内容。"
   },
   "onb_e2ee_desc": {
-    "message": "AES-256-GCM。推荐。"
+    "message": "AES-256-GCM。开启后请自行保管好口令，丢失无法找回。"
   },
   "onb_pass_placeholder": {
     "message": "请选择一个密码短语，或生成加密密钥"
@@ -557,15 +557,6 @@
         "content": "$1"
       }
     }
-  },
-  "onb_done_backend": {
-    "message": "存储已成功连接"
-  },
-  "onb_done_autosync": {
-    "message": "同步在后台自动运行"
-  },
-  "onb_done_adjust": {
-    "message": "您可以随时更改设置"
   },
   "datatype_bookmarks_desc": {
     "message": "完整的书签树，包含文件夹和排序。"
@@ -1785,12 +1776,6 @@
   "opt_guard_cap_desc": {
     "message": "单轮变动超过此条目数，或超过整树的 30%（取较大者）即视为大幅变动。若你经常导入或整理大型文件夹，可调高。"
   },
-  "onb_welcome_device_name": {
-    "message": "给这台设备起个名字"
-  },
-  "onb_welcome_device_hint": {
-    "message": "浏览器不允许扩展读取电脑的名称，自动生成的只是系统名（如「Mac」）。请填写你能一眼认出的名字，例如「Mac mini M4pro」。"
-  },
   "onb_import_title": {
     "message": "已有配置备份？"
   },
@@ -1819,10 +1804,10 @@
     }
   },
   "onb_perm_title": {
-    "message": "新版本需要重新授权"
+    "message": "确认 Kesonode 需要的权限"
   },
   "onb_perm_desc": {
-    "message": "更新后需要你确认以下权限，同步才能继续。点击下方按钮，浏览器会弹出授权窗口。"
+    "message": "这些是你所选配置需要的权限。授予后同步即可继续。"
   },
   "onb_perm_grant": {
     "message": "立即授权"
@@ -1898,5 +1883,66 @@
   },
   "popup_first_sync_cta": {
     "message": "去选择"
+  },
+  "onb_step_progress": {
+    "message": "第 $CURRENT$ 步，共 $TOTAL$ 步",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "onb_later": {
+    "message": "稍后继续"
+  },
+  "onb_err_no_types": {
+    "message": "至少选择一项要同步的内容——全部关闭后 Kesonode 无事可做。"
+  },
+  "onb_perm_upcoming": {
+    "message": "接下来浏览器会请求："
+  },
+  "perm_host_label": {
+    "message": "你的存储服务器"
+  },
+  "perm_denied_note": {
+    "message": "拒绝后该类型停止同步，其他类型不受影响。"
+  },
+  "onb_manage_title": {
+    "message": "Kesonode 已完成配置"
+  },
+  "onb_manage_sub": {
+    "message": "本页只展示当前配置。需要修改请打开设置，或重新运行配置向导。"
+  },
+  "onb_manage_perms_label": {
+    "message": "权限"
+  },
+  "onb_manage_perms_ok": {
+    "message": "已全部授予"
+  },
+  "onb_manage_perms_missing": {
+    "message": "还缺 $COUNT$ 项",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "onb_manage_reconfigure": {
+    "message": "重新配置"
+  },
+  "onb_manage_reconfigure_confirm": {
+    "message": "重新运行配置向导？完成后会覆盖当前的存储、同步选项与设备名。"
+  },
+  "onb_done_summary": {
+    "message": "首次同步"
+  },
+  "onb_done_multi_title": {
+    "message": "添加其它设备"
+  },
+  "onb_done_multi_body": {
+    "message": "在另一台设备上安装 Kesonode，选择同一个存储，书签、标签页等会自动汇合。"
   }
 }

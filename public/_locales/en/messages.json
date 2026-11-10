@@ -544,7 +544,7 @@
     "message": "If you turn encryption on, your data is encrypted on this device before it is uploaded. Not even your storage provider can read what it contains."
   },
   "onb_e2ee_desc": {
-    "message": "AES-256-GCM. Recommended."
+    "message": "AES-256-GCM. If you turn this on, keep the passphrase safe — it cannot be recovered."
   },
   "onb_pass_placeholder": {
     "message": "Choose a passphrase, or generate an encryption key"
@@ -690,15 +690,6 @@
         "content": "$1"
       }
     }
-  },
-  "onb_done_backend": {
-    "message": "Storage connected successfully"
-  },
-  "onb_done_autosync": {
-    "message": "Syncing runs automatically in the background"
-  },
-  "onb_done_adjust": {
-    "message": "You can change the settings at any time"
   },
   "datatype_bookmarks_desc": {
     "message": "Full bookmark tree with folders and ordering.",
@@ -1994,12 +1985,6 @@
     "message": "Couldn't read the device list.",
     "description": "Reported through opt_devices_error when the extension replies in a shape the page did not expect. An empty list must never stand in for a list that failed to load."
   },
-  "onb_welcome_device_name": {
-    "message": "Name this device"
-  },
-  "onb_welcome_device_hint": {
-    "message": "Browsers do not let extensions read your computer's name, so the automatic label is only a generic one. Enter a name you will recognise on your other devices, for example Mac mini M4pro."
-  },
   "onb_import_title": {
     "message": "Already have a backup?"
   },
@@ -2028,10 +2013,10 @@
     }
   },
   "onb_perm_title": {
-    "message": "This update needs your permission again"
+    "message": "Confirm the permissions Kesonode needs"
   },
   "onb_perm_desc": {
-    "message": "After an update these permissions must be confirmed before sync can continue. Click the button and your browser will show the permission prompt."
+    "message": "Kesonode needs these permissions for the setup you chose. Grant them and sync continues."
   },
   "onb_perm_grant": {
     "message": "Grant permissions"
@@ -2107,5 +2092,85 @@
   },
   "popup_first_sync_cta": {
     "message": "Choose"
+  },
+  "onb_step_progress": {
+    "message": "Step $CURRENT$ of $TOTAL$",
+    "description": "Progress line above the setup wizard. $CURRENT$ is the step number, $TOTAL$ how many steps there are.",
+    "placeholders": {
+      "current": {
+        "content": "$1",
+        "example": "4"
+      },
+      "total": {
+        "content": "$2",
+        "example": "4"
+      }
+    }
+  },
+  "onb_later": {
+    "message": "Set up later",
+    "description": "Quiet link in the wizard header that closes the tab. The half-filled setup is kept for a day and can be resumed from the toolbar popup."
+  },
+  "onb_err_no_types": {
+    "message": "Pick at least one thing to sync — with all of them off, Kesonode has nothing to do.",
+    "description": "Shown on the 'What to sync?' step when every switch is off, so Continue is disabled."
+  },
+  "onb_perm_upcoming": {
+    "message": "Your browser will ask for:",
+    "description": "Lead-in above the list of permissions the Finish button is about to request from the browser."
+  },
+  "perm_host_label": {
+    "message": "Your storage server",
+    "description": "Name of a host permission in a permission list. The address itself (https://host/*) is printed under it, untranslated."
+  },
+  "perm_denied_note": {
+    "message": "If you decline, that data type stops syncing. Everything else keeps working.",
+    "description": "What happens if the user declines an optional permission. Reassures that the rest keeps working."
+  },
+  "onb_manage_title": {
+    "message": "Kesonode is already set up",
+    "description": "Heading of the page shown when someone opens onboarding.html on an install that is already set up."
+  },
+  "onb_manage_sub": {
+    "message": "This page only shows the current setup. Change it in Settings, or run the wizard again.",
+    "description": "Explains that this page is read-only and where to change things instead."
+  },
+  "onb_manage_perms_label": {
+    "message": "Permissions",
+    "description": "Row label in the summary of an existing setup: whether the permissions it needs are granted."
+  },
+  "onb_manage_perms_ok": {
+    "message": "All granted",
+    "description": "Value in the permissions row when nothing is missing."
+  },
+  "onb_manage_perms_missing": {
+    "message": "$COUNT$ missing",
+    "description": "Value in the permissions row when some are missing. $COUNT$ is how many.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "4"
+      }
+    }
+  },
+  "onb_manage_reconfigure": {
+    "message": "Run setup again",
+    "description": "Button that deliberately re-enters the setup wizard. It replaces the stored configuration when finished, so it is confirmed first."
+  },
+  "onb_manage_reconfigure_confirm": {
+    "message": "Run setup again? Finishing the wizard replaces your storage, your sync choices and your device name.",
+    "description": "Confirmation dialog before re-running setup. Says exactly what will be replaced, because finishing the wizard overwrites it."
+  },
+  "onb_done_summary": {
+    "message": "First sync",
+    "description": "Heading over the per-data-type counts on the final screen, so the page reports what happened instead of three fixed ticks."
+  },
+  "onb_done_multi_title": {
+    "message": "Add your other devices",
+    "description": "Heading of the second-device hint on the final screen. A sync extension does nothing until a second browser joins."
+  },
+  "onb_done_multi_body": {
+    "message": "Install Kesonode there and pick the same storage. Bookmarks, tabs and the rest will meet in the middle.",
+    "description": "Tells the user what to do on the next browser: install, then pick the same storage."
   }
 }

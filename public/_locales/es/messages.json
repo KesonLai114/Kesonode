@@ -421,7 +421,7 @@
     "message": "Si activas el cifrado, tus datos se cifrarán en este dispositivo antes de ser subidos. Ni siquiera tu proveedor de almacenamiento podrá leer su contenido."
   },
   "onb_e2ee_desc": {
-    "message": "AES-256-GCM. Recomendado."
+    "message": "AES-256-GCM. Si lo activas, guarda la frase de contraseña: no se puede recuperar."
   },
   "onb_pass_placeholder": {
     "message": "Elige una passphrase o genera una clave de cifrado"
@@ -557,15 +557,6 @@
         "content": "$1"
       }
     }
-  },
-  "onb_done_backend": {
-    "message": "El almacenamiento se conectó correctamente"
-  },
-  "onb_done_autosync": {
-    "message": "La sincronización se realiza automáticamente en segundo plano"
-  },
-  "onb_done_adjust": {
-    "message": "Puedes cambiar la configuración en cualquier momento"
   },
   "datatype_bookmarks_desc": {
     "message": "Árbol completo de marcadores con sus carpetas y ordenamiento."
@@ -1785,12 +1776,6 @@
       }
     }
   },
-  "onb_welcome_device_name": {
-    "message": "Name this device"
-  },
-  "onb_welcome_device_hint": {
-    "message": "Browsers do not let extensions read your computer's name, so the automatic label is only a generic one. Enter a name you will recognise on your other devices, for example Mac mini M4pro."
-  },
   "onb_import_title": {
     "message": "Already have a backup?"
   },
@@ -1819,10 +1804,10 @@
     }
   },
   "onb_perm_title": {
-    "message": "This update needs your permission again"
+    "message": "Confirma los permisos que Kesonode necesita"
   },
   "onb_perm_desc": {
-    "message": "After an update these permissions must be confirmed before sync can continue. Click the button and your browser will show the permission prompt."
+    "message": "Kesonode necesita estos permisos para la configuración que elegiste. Concédelos y la sincronización continúa."
   },
   "onb_perm_grant": {
     "message": "Grant permissions"
@@ -1898,5 +1883,66 @@
   },
   "popup_first_sync_cta": {
     "message": "Elegir"
+  },
+  "onb_step_progress": {
+    "message": "Paso $CURRENT$ de $TOTAL$",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "onb_later": {
+    "message": "Configurar más tarde"
+  },
+  "onb_err_no_types": {
+    "message": "Elige al menos un contenido que sincronizar: con todos desactivados, Kesonode no tiene nada que hacer."
+  },
+  "onb_perm_upcoming": {
+    "message": "A continuación el navegador pedirá:"
+  },
+  "perm_host_label": {
+    "message": "Tu servidor de almacenamiento"
+  },
+  "perm_denied_note": {
+    "message": "Si lo rechazas, ese tipo deja de sincronizarse. El resto sigue funcionando."
+  },
+  "onb_manage_title": {
+    "message": "Kesonode ya está configurado"
+  },
+  "onb_manage_sub": {
+    "message": "Esta página solo muestra la configuración actual. Cámbiala en Ajustes o vuelve a ejecutar el asistente."
+  },
+  "onb_manage_perms_label": {
+    "message": "Permisos"
+  },
+  "onb_manage_perms_ok": {
+    "message": "Todos concedidos"
+  },
+  "onb_manage_perms_missing": {
+    "message": "Faltan $COUNT$",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "onb_manage_reconfigure": {
+    "message": "Volver a ejecutar la configuración"
+  },
+  "onb_manage_reconfigure_confirm": {
+    "message": "¿Volver a ejecutar la configuración? Al terminar, el asistente reemplaza tu almacenamiento, tus opciones y el nombre del dispositivo."
+  },
+  "onb_done_summary": {
+    "message": "Primera sincronización"
+  },
+  "onb_done_multi_title": {
+    "message": "Añade tus otros dispositivos"
+  },
+  "onb_done_multi_body": {
+    "message": "Instala Kesonode allí y elige el mismo almacenamiento. Marcadores, pestañas y el resto se encontrarán."
   }
 }

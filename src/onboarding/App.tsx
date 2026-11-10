@@ -15,6 +15,7 @@ import {
   permissionsToEnable, tabGroupsAskable, missingPermissionsFor, type Availability,
 } from "@/lib/utils/capabilities";
 import { importSettingsBackupFromFile } from "@/lib/utils/settings-import";
+import { describePermission } from "@/lib/permission-copy";
 import {
   Bookmark,
   Clock, Puzzle, Globe, CheckCircle2, ArrowRight,
@@ -39,7 +40,7 @@ function BrandMark({ size = 14, color = "currentColor" }: { size?: number; color
 import { generateRecoveryKey, MIN_PASSPHRASE_LENGTH } from "@/lib/crypto/encryption";
 import {
   providerCards, providerById, providerLabel, nextcloudUrl, pcloudRegionOf, webdavUrlForCard,
-  type ProviderId,
+  providerFromConfig, type ProviderId,
 } from "@/lib/storage-providers";
 import { ProviderLogo } from "@/lib/provider-logos";
 
@@ -49,14 +50,36 @@ type Step =
   | "welcome" | "backend" | "data" | "encrypt" | "syncing" | "done" | "permissions" | "imported"
   // Asked only when the storage already holds another device's bookmarks: the sync is
   // paused until this is answered, so it belongs in the wizard the user is already in.
-  | "direction";
+  | "direction"
+  // Shown instead of the wizard when this install is ALREADY set up. See REASON below.
+  | "manage";
 
 const STEPS: Step[] = ["welcome", "backend", "data", "encrypt", "done"];
 const SETUP_STEPS: readonly Step[] = ["welcome", "backend", "data", "encrypt"];
-// An update opens this page just to re-grant permissions (see service-worker.ts). That
-// is a separate entry mode, not a setup to resume, so no draft is read back.
-const PERMISSION_MODE = typeof window !== "undefined"
-  && new URLSearchParams(window.location.search).get("reason") === "permissions";
+
+/**
+ * Which page this open is for.
+ *
+ * Three arrivals, three very different jobs:
+ *
+ * - `install` — nothing configured yet, walk the wizard.
+ * - `update` — a version may need permissions re-granted (see service-worker.ts). This
+ *   mode is READ-ONLY with respect to settings: it must never write them, because the
+ *   wizard's state is empty and finishing it would replace a real setup with defaults.
+ * - `manage` — an install that is already set up. It has no reason to run the wizard, and
+ *   running it used to be actively destructive: `finish()` overwrites `backends` with the
+ *   single card picked on screen and `enabled_types` with the wizard's defaults, so
+ *   reloading a finished tab, or revisiting a bookmarked onboarding.html, silently
+ *   replaced a working multi-backend setup with a one-backend, bookmarks-only one.
+ *
+ * `reason=reconfigure` is the one deliberate way back into the wizard once set up: the
+ * manage page's own button, behind a confirmation that says what will be replaced.
+ */
+const REASON = typeof window !== "undefined"
+  ? new URLSearchParams(window.location.search).get("reason")
+  : null;
+const PERMISSION_MODE = REASON === "permissions";
+const RECONFIGURE = REASON === "reconfigure";
 
 // Icon for the live sync-progress list (#3) — matches the data-types step. The label is
 // the shared `datatype_*` message, looked up at render.
@@ -82,13 +105,22 @@ const DIRECTION_OPTIONS: ReadonlyArray<{ choice: FirstSyncChoice; label: string;
 // ─── App ──────────────────────────────────────────────────────────────────
 
 export default function OnboardingApp() {
-  const [step, setStep] = useState<Step>("welcome");
+  // Seeded from the entry mode rather than always "welcome". The update page used to
+  // paint the welcome card — device-name field and all — for the one frame before its
+  // effect switched to the permission step, and a restored draft did the same to a user
+  // halfway through setup. A step that depends only on the URL needs no effect to reach.
+  const [step, setStep] = useState<Step>(PERMISSION_MODE ? "permissions" : "welcome");
   // The first page can restore a previously exported backup instead of walking through
   // setup, and an update can open this page only to re-grant permissions.
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
   const [missingPerms, setMissingPerms] = useState<{ permissions: string[]; origins: string[] }>({ permissions: [], origins: [] });
+  // The stored setup, when this install is already configured — the manage page renders
+  // from it and never writes to it. Separate from `current` reads elsewhere because this
+  // one is a snapshot taken at open, not something the wizard is editing.
+  const [configured, setConfigured] = useState<SyncSettings | null>(null);
+  const [configuredMissing, setConfiguredMissing] = useState<{ permissions: string[]; origins: string[] } | null>(null);
   const [permissionPhase, setPermissionPhase] = useState<"checking" | "needed" | "done" | "failed">("checking");
   const [permBusy, setPermBusy] = useState(false);
   const [permSlowHere, setPermSlowHere] = useState(false);
@@ -193,6 +225,23 @@ export default function OnboardingApp() {
   const backend: BackendType | null = provider ? providerById(provider).backend : null;
   const effectiveWebdavUrl = provider === "nextcloud" ? nextcloudUrl(ncHost, webdavUser) : webdavUrl;
 
+  /**
+   * The storage this install is actually using, named the way the user picked it.
+   *
+   * `active_backend` is an enum ("webdav"); the card they chose says "Koofr". A summary
+   * page that answers "WebDAV" to "where is my data" is technically true and useless.
+   */
+  const activeBackendLabel = (s: SyncSettings): string => {
+    const b = s.backends.find((x) => x.type === s.active_backend);
+    if (b?.type === "webdav") {
+      const pid = providerFromConfig("webdav", b.webdav?.url, b.webdav?.username);
+      return pid ? providerLabel(providerById(pid)) : "WebDAV";
+    }
+    if (b?.type === "gdrive") return "Google Drive";
+    if (b?.type === "github") return "GitHub";
+    return s.active_backend ?? "—";
+  };
+
   // Per-card WebDAV credentials, remembered while the wizard is open. The fields are
   // shared by every WebDAV card, so switching swaps them rather than wiping them —
   // clicking another card and back must not throw away what was already typed.
@@ -218,6 +267,23 @@ export default function OnboardingApp() {
   };
 
   const hintStyle = { fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.4 };
+
+  /**
+   * Forget the `?reason=` this page was opened with.
+   *
+   * The entry mode is read from the URL, so a tab that finished setup while still carrying
+   * `reason=reconfigure` would open the WIZARD again on reload — and finishing that a
+   * second time replaces the setup it just saved. Dropping the marker makes the next load
+   * arrive as "already set up", which is what it is. A page that refuses replaceState
+   * keeps its URL; the risk then is one more confirmation, not a silent overwrite.
+   */
+  const clearEntryReason = () => {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("reason");
+      window.history.replaceState(null, "", url.toString());
+    } catch { /* see above */ }
+  };
 
   // Sentences whose middle is a separate element: the URL is monospace, the emphasised
   // word is bold, and the storage provider's name must not be translated. `tParts` splits
@@ -276,6 +342,10 @@ export default function OnboardingApp() {
   const [syncTimedOut, setSyncTimedOut] = useState(false);
   const baselineRef = useRef<Record<string, number>>({});
   const enabledTypes = (["bookmarks", "extensions", "history", "sessions"] as const).filter((k) => dataTypes[k]);
+  // Everything off is not a setup: it saves an empty `enabled_types`, and the first sync
+  // then fails before it reaches the backend. The step that owns the choice refuses to
+  // move on instead, and says why.
+  const anyTypeOn = enabledTypes.length > 0;
 
   // The first sync is a question, not a transfer. When the storage already holds another
   // device's bookmarks, the worker pauses the sync and waits for a direction; that used to
@@ -330,6 +400,24 @@ export default function OnboardingApp() {
         // from its own state, showed a signed-in user as signed out, and sent them back
         // through Google's consent: on a phone, the same trip that lost the page.
         if (driveUser) setGdriveUser(driveUser);
+
+        // Already set up, and nobody asked to reconfigure. Show what is stored instead of
+        // the wizard. This is the guard that keeps a reloaded tab, a bookmark, or a link
+        // from walking a finished install through `finish()` — which would replace the
+        // backend list and the enabled data types with this page's empty defaults.
+        if (settings?.onboarding_completed && !RECONFIGURE) {
+          setConfigured(settings);
+          setDeviceLabel(detected);
+          setStep("manage");
+          // A summary page that cannot read the permission state must still render: an
+          // answer of "none missing" would be a lie, so the row shows the spinner and a
+          // failed read leaves it there rather than claiming everything is granted.
+          setConfiguredMissing(
+            await missingPermissionsFor(settings).catch(() => null),
+          );
+          return;
+        }
+
         if (!draft) {
           setDeviceLabel(detected);
           // Reloading this page mid-setup is ordinary (a crash, a closed window). The
@@ -459,6 +547,7 @@ export default function OnboardingApp() {
       // backup taken mid-setup may carry false), and drop the draft with its credentials.
       await request({ type: "SAVE_SETTINGS", payload: { onboarding_completed: true } });
       draftClosed.current = true;
+      clearEntryReason();
       await clearDraft().catch(() => {});
       // An imported setup may enable history/tabs/extensions that this browser has never
       // granted, and a WebDAV server whose host permission was never requested. Check the
@@ -509,6 +598,52 @@ export default function OnboardingApp() {
     return !!(effectiveWebdavUrl && webdavUser && webdavPass);
   };
 
+  /**
+   * The optional permissions this setup will ask for.
+   *
+   * Shared by the Finish click and the notice above it, so the list a user reads before
+   * pressing the button is literally the list the button requests. Two copies of this
+   * logic is how a screen ends up promising fewer permissions than it takes.
+   *
+   * Types this browser doesn't implement are left out: asking for `history` on a browser
+   * with no history API can only fail, and one unobtainable permission drags the whole
+   * combined request down with it — which is how a Fennec user ended up being told their
+   * WEBDAV permission was refused.
+   */
+  const plannedPermissions = (): string[] => {
+    const out: string[] = [];
+    for (const type of ["history", "sessions", "extensions"] as const) {
+      if (dataTypes[type] && availability[type]?.state !== "unsupported") {
+        out.push(...permissionsToEnable(type, askTabGroups));
+      }
+    }
+    return out;
+  };
+
+  /** The WebDAV origin this setup needs, or null when the address cannot be parsed. */
+  const webdavOrigin = (url: string): string | null => {
+    try {
+      return new URL(url).origin + "/*";
+    } catch {
+      return null;
+    }
+  };
+
+  /** The host permission this setup will ask for. Empty for a backend that needs none. */
+  const plannedOrigins = (): string[] => {
+    if (backend !== "webdav") return [];
+    const origin = webdavOrigin(effectiveWebdavUrl);
+    return origin ? [origin] : [];
+  };
+
+  // Read once per render for the notice above Finish. Narrower than what `finish()`
+  // sends on purpose: a permission already held resolves without a dialog, and listing it
+  // would promise a prompt that never appears — which reads as "it ignored my click".
+  const upcomingPermissions = (["history", "sessions", "extensions"] as const)
+    .filter((type) => dataTypes[type] && availability[type]?.state === "needs-permission")
+    .flatMap((type) => permissionsToEnable(type, askTabGroups));
+  const upcomingOrigins = plannedOrigins();
+
   const finish = async () => {
     setSetupError(null);
 
@@ -519,32 +654,26 @@ export default function OnboardingApp() {
       return;
     }
 
+    // Nothing to sync. Finishing anyway saved an empty `enabled_types` and then watched
+    // the first sync fail before it reached the backend, so the "all set" screen followed
+    // an error the user never saw. Send them back to the step that owns the choice.
+    if (!enabledTypes.length) {
+      setSetupError(t("onb_err_no_types"));
+      setStep("data");
+      return;
+    }
+
     // Request every optional permission this setup needs in ONE call, while we
     // still have the click's user gesture. A SECOND permissions.request() after an
     // await can be rejected for lacking a user gesture, which stranded WebDAV users
     // who also enabled an optional data type (origin request, then perms request).
     // The chosen data types (history/tabs/management) and — for WebDAV — the server
     // origin (an arbitrary host not in host_permissions) go in the same request.
-    //
-    // Types this browser doesn't implement are left out: asking for `history` on a
-    // browser with no history API can only fail, and one unobtainable permission drags
-    // the whole combined request down with it — which is how a Fennec user ended up
-    // being told their WEBDAV permission was refused.
-    const optPerms: string[] = [];
-    for (const type of ["history", "sessions", "extensions"] as const) {
-      if (dataTypes[type] && availability[type]?.state !== "unsupported") {
-        optPerms.push(...permissionsToEnable(type, askTabGroups));
-      }
-    }
-
-    const origins: string[] = [];
-    if (backend === "webdav") {
-      try {
-        origins.push(new URL(effectiveWebdavUrl).origin + "/*");
-      } catch {
-        setSetupError(t("onb_err_bad_webdav_url"));
-        return;
-      }
+    const optPerms = plannedPermissions();
+    const origins = plannedOrigins();
+    if (backend === "webdav" && origins.length === 0) {
+      setSetupError(t("onb_err_bad_webdav_url"));
+      return;
     }
 
     const seq = ++finishSeq.current;
@@ -629,6 +758,7 @@ export default function OnboardingApp() {
       // Everything in the draft is in the settings now, the credentials included, so the
       // copy goes: a token left behind there is one the user no longer knows about.
       draftClosed.current = true;
+      clearEntryReason();
       await clearDraft().catch(() => {});
 
       // Capture pre-sync counts, show the live progress step, then start the first
@@ -755,7 +885,7 @@ export default function OnboardingApp() {
   // ─── Render ───────────────────────────────────────────────────────────
 
   return (
-    <div style={S.root}>
+    <div className="onb-root" style={S.root}>
       <style>{CSS}</style>
 
       {/* One file picker for every screen that offers a backup import (welcome and the
@@ -767,21 +897,31 @@ export default function OnboardingApp() {
           if (file) void importBackup(file);
         }} />
 
-      {/* Progress */}
+      {/* Progress. A count and the dots, then the way out: closing the tab is how people
+          leave a setup they cannot finish right now, and saying so costs one line where
+          saying nothing left them reloading the page to see whether anything stuck. */}
       {SETUP_STEPS.includes(step) && (
         <div style={S.progress}>
-          {STEPS.filter(s => s !== "done").map((s, i) => (
-            <div key={s} style={{
-              ...S.dot,
-              background: STEPS.indexOf(step) >= i ? "var(--accent)" : "var(--border)",
-            }} />
-          ))}
+          <span style={S.progressLabel}>
+            {t("onb_step_progress", [String(SETUP_STEPS.indexOf(step) + 1), String(SETUP_STEPS.length)])}
+          </span>
+          <div style={S.dots} aria-hidden="true">
+            {SETUP_STEPS.map((s, i) => (
+              <div key={s} style={{
+                ...S.dot,
+                background: SETUP_STEPS.indexOf(step) >= i ? "var(--accent)" : "var(--border)",
+              }} />
+            ))}
+          </div>
+          <button type="button" style={S.laterBtn} onClick={() => window.close()}>
+            {t("onb_later")}
+          </button>
         </div>
       )}
 
       {/* ── Welcome ── */}
       {step === "welcome" && (
-        <div style={S.card}>
+        <div className="onb-card" style={S.card}>
           <div style={S.logoWrap}>
             <BrandMark size={32} color="white" />
           </div>
@@ -800,17 +940,10 @@ export default function OnboardingApp() {
               </div>
             ))}
           </div>
-          {/* Browsers do not expose the computer's own name ("Mac mini M4pro") to an
-              extension: the auto-detected label is only "Mac · Chromium · <id>". Ask for
-              a real name on the FIRST page, before two machines end up looking alike. */}
-          <div style={{ marginBottom: 18, textAlign: "left" }}>
-            <div style={S.backendName}>{t("onb_welcome_device_name")}</div>
-            <div style={{ ...S.backendDesc, marginBottom: 8 }}>{t("onb_welcome_device_hint")}</div>
-            <input style={S.input} dir="auto" value={deviceLabel}
-              onChange={(e) => setDeviceLabel(e.target.value)}
-              placeholder={t("onb_device_name_placeholder")}
-              aria-label={t("onb_welcome_device_name")} />
-          </div>
+          {/* The device-name field used to be here as well as on the sync step. Two inputs
+              for one setting read as "it didn't save", and the sync step is where the name
+              has context: it is how this device shows up in the session list beside the
+              data types it is sharing. It lives there only now. */}
           {/* A reinstall should not have to close the wizard and hunt through Settings. */}
           <div style={{ ...S.featureList, gap: 8, marginBottom: 20, padding: 14,
                         borderRadius: 14, border: "1px solid var(--border)" }}>
@@ -831,7 +964,7 @@ export default function OnboardingApp() {
 
       {/* ── Backend ── */}
       {step === "backend" && (
-        <div style={S.card}>
+        <div className="onb-card" style={S.card}>
           <h1 style={S.h1}>{t("onb_backend_title")}</h1>
           <p style={S.subtitle}>{t("onb_backend_subtitle")}</p>
 
@@ -1012,7 +1145,7 @@ export default function OnboardingApp() {
 
       {/* ── Data Types ── */}
       {step === "data" && (
-        <div style={S.card}>
+        <div className="onb-card" style={S.card}>
           <h1 style={S.h1}>{t("onb_data_title")}</h1>
           <p style={S.subtitle}>{t("onb_data_subtitle")}</p>
 
@@ -1115,12 +1248,19 @@ export default function OnboardingApp() {
             />
           </div>
 
+          {!anyTypeOn && (
+            <div style={{ ...S.errorRow, marginTop: 12 }}><XCircle size={12} /> {t("onb_err_no_types")}</div>
+          )}
           {setupError && (
             <div style={{ ...S.errorRow, marginTop: 12, marginBottom: 12 }}><XCircle size={12} /> {setupError}</div>
           )}
           <div style={S.navRow}>
             <button style={S.btnSecondary} onClick={() => { setSetupError(null); setStep("backend"); }}>{t("common_back")}</button>
-            <button style={{ ...S.btnPrimary, flex: 1 }} onClick={() => setStep("encrypt")}>
+            <button
+              style={{ ...S.btnPrimary, flex: 1, opacity: anyTypeOn ? 1 : 0.45, cursor: anyTypeOn ? "pointer" : "not-allowed" }}
+              onClick={() => setStep("encrypt")}
+              disabled={!anyTypeOn}
+            >
               {t("common_continue")} <ArrowRight size={14} />
             </button>
           </div>
@@ -1128,7 +1268,7 @@ export default function OnboardingApp() {
       )}
 
       {step === "encrypt" && (
-        <div style={S.card}>
+        <div className="onb-card" style={S.card}>
           <h1 style={S.h1}>{t("onb_encrypt_title")}</h1>
           <p style={S.subtitle}>{t("onb_encrypt_subtitle")}</p>
 
@@ -1213,6 +1353,34 @@ export default function OnboardingApp() {
             </div>
           )}
 
+          {/* Say what this button is about to ask for. The permission request fires on
+              the click, so this is the last moment the user can see it coming: an
+              unexplained browser dialog straight after "Finish & Sync" is how a setup
+              ends with a declined permission and a data type that silently never syncs. */}
+          {(upcomingPermissions.length > 0 || upcomingOrigins.length > 0) && (
+            <div style={S.permPreview}>
+              <div style={S.permPreviewLead}>{t("onb_perm_upcoming")}</div>
+              {upcomingPermissions.map((p) => {
+                const copy = describePermission(p);
+                return (
+                  <div key={p} style={S.permPreviewRow} title={p}>
+                    <CheckCircle2 size={12} color="var(--text-secondary)" />
+                    <span>{copy ? t(copy.nameKey) : p}</span>
+                  </div>
+                );
+              })}
+              {upcomingOrigins.map((o) => (
+                <div key={o} style={{ ...S.permPreviewRow, alignItems: "flex-start" }} title={o}>
+                  <Globe size={12} color="var(--text-secondary)" style={{ marginTop: 3, flexShrink: 0 }} />
+                  <span>
+                    {t("perm_host_label")}
+                    <code style={S.permCode}>{o}</code>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {setupError && (
             <div style={{ ...S.errorRow, marginBottom: 12 }}><XCircle size={12} /> {setupError}</div>
           )}
@@ -1233,7 +1401,7 @@ export default function OnboardingApp() {
 
       {/* ── First sync: which side wins ── */}
       {step === "direction" && (
-        <div style={S.card}>
+        <div className="onb-card" style={S.card}>
           <h1 style={S.h1}>{t("opt_first_sync_head")}</h1>
           <p style={S.subtitle}>{t("onb_direction_subtitle")}</p>
 
@@ -1287,7 +1455,7 @@ export default function OnboardingApp() {
 
       {/* ── Syncing (live progress) ── */}
       {step === "syncing" && (
-        <div style={S.card}>
+        <div className="onb-card" style={S.card}>
           <h1 style={S.h1}>{t(syncError ? "onb_sync_error_title" : "onb_sync_title")}</h1>
           <p style={S.subtitle}>{t(syncError ? "onb_sync_error_subtitle" : "onb_sync_subtitle")}</p>
 
@@ -1301,13 +1469,22 @@ export default function OnboardingApp() {
                     <Icon size={16} color={done ? "var(--accent)" : "var(--text-secondary)"} />
                     <div style={{ fontSize: 14, color: "var(--text-primary)" }}>{t(`datatype_${key}`)}</div>
                   </div>
-                  {done ? (
-                    <CheckCircle2 size={16} color="var(--accent)" />
-                  ) : syncError ? (
-                    <XCircle size={16} color="var(--text-disabled)" />
-                  ) : (
-                    <Loader2 size={16} className="spin" color="var(--text-secondary)" />
-                  )}
+                  {/* The count is the only evidence the user gets that anything is
+                      happening: a spinner for twenty seconds on a large history is
+                      indistinguishable from a hung page. Baseline-relative, so a type
+                      whose count did not move still reads as not-done. */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {(syncCounts[key] ?? 0) > 0 && (
+                      <span style={S.count}>{syncCounts[key].toLocaleString()}</span>
+                    )}
+                    {done ? (
+                      <CheckCircle2 size={16} color="var(--accent)" />
+                    ) : syncError ? (
+                      <XCircle size={16} color="var(--text-disabled)" />
+                    ) : (
+                      <Loader2 size={16} className="spin" color="var(--text-secondary)" />
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1342,7 +1519,7 @@ export default function OnboardingApp() {
 
       {/* ── Done ── */}
       {step === "done" && (
-        <div style={{ ...S.card, textAlign: "center" }}>
+        <div className="onb-card" style={{ ...S.card, textAlign: "center" }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>🎉</div>
           <h1 style={S.h1}>{t("onb_done_title")}</h1>
           <p style={S.subtitle}>
@@ -1350,11 +1527,35 @@ export default function OnboardingApp() {
             <strong>{provider ? providerLabel(providerById(provider)) : backend === "gdrive" ? "Google Drive" : backend === "github" ? "GitHub" : "WebDAV"}</strong>
             {doneNote[1]}
           </p>
-          <div style={{ ...S.featureList, marginBottom: 24 }}>
-            <div style={S.featureRow}><span>✅</span><span style={{ fontSize: 14, color: "var(--text-secondary)" }}>{t("onb_done_backend")}</span></div>
-            <div style={S.featureRow}><span>✅</span><span style={{ fontSize: 14, color: "var(--text-secondary)" }}>{t("onb_done_autosync")}</span></div>
-            <div style={S.featureRow}><span>✅</span><span style={{ fontSize: 14, color: "var(--text-secondary)" }}>{t("onb_done_adjust")}</span></div>
+          {/* What actually happened, instead of three fixed ticks that were true before
+              the first byte moved. The counts are the same ones the progress step watched,
+              so a type that timed out still shows what it had uploaded. */}
+          {enabledTypes.length > 0 && (
+            <div style={{ ...S.dataList, textAlign: "left" }}>
+              <div style={S.summaryHead}>{t("onb_done_summary")}</div>
+              {enabledTypes.map((key) => {
+                const { Icon } = TYPE_META[key];
+                return (
+                  <div key={key} style={{ ...S.dataRow, cursor: "default" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <Icon size={16} color="var(--accent)" />
+                      <div style={{ fontSize: 14, color: "var(--text-primary)" }}>{t(`datatype_${key}`)}</div>
+                    </div>
+                    <span style={S.count}>{(syncCounts[key] ?? 0).toLocaleString()}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* A sync product whose user never installs it twice does nothing. This is the
+              only screen that knows the storage they just chose, so it is the only one
+              that can say "do the same thing over there". */}
+          <div style={S.multiBox}>
+            <div style={S.backendName}>{t("onb_done_multi_title")}</div>
+            <div style={{ ...S.backendDesc, lineHeight: 1.5 }}>{t("onb_done_multi_body")}</div>
           </div>
+
           <button style={S.btnPrimary} onClick={() => window.close()}>
             {t("common_close")} <ArrowRight size={16} />
           </button>
@@ -1369,7 +1570,7 @@ export default function OnboardingApp() {
 
       {/* ── After an update: re-grant permissions ── */}
       {step === "permissions" && (
-        <div style={S.card}>
+        <div className="onb-card" style={S.card}>
           <h1 style={S.h1}>{t("onb_perm_title")}</h1>
           <p style={S.subtitle}>{t("onb_perm_desc")}</p>
           {permissionPhase === "checking" && (
@@ -1377,16 +1578,39 @@ export default function OnboardingApp() {
           )}
           {(permissionPhase === "needed" || permissionPhase === "failed") && (
             <>
-              <div style={{ ...S.featureList, marginBottom: 18 }}>
-                {missingPerms.permissions.map((p) => (
-                  <div key={p} style={S.featureRow}><span>•</span>
-                    <span style={{ fontFamily: "monospace", fontSize: 13 }}>{p}</span></div>
-                ))}
+              {/* Named the way the rest of the product names them, with what each one is
+                  for. The identifier is kept as a tooltip rather than deleted: it is the
+                  word the browser's own settings screen shows, so it is what the user will
+                  be looking for when they go to grant it by hand (the only route on a
+                  browser that cannot prompt). */}
+              <div style={{ ...S.featureList, marginBottom: 14 }}>
+                {missingPerms.permissions.map((p) => {
+                  const copy = describePermission(p);
+                  return (
+                    <div key={p} style={{ ...S.featureRow, alignItems: "flex-start" }} title={p}>
+                      <Key size={14} color="var(--text-secondary)" style={{ marginTop: 3, flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontSize: 14, color: "var(--text-primary)" }}>{copy ? t(copy.nameKey) : p}</div>
+                        {copy?.purposeKey && (
+                          <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+                            {t(copy.purposeKey)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
                 {missingPerms.origins.map((o) => (
-                  <div key={o} style={S.featureRow}><span>•</span>
-                    <span style={{ fontFamily: "monospace", fontSize: 13 }}>{o}</span></div>
+                  <div key={o} style={{ ...S.featureRow, alignItems: "flex-start" }} title={o}>
+                    <Globe size={14} color="var(--text-secondary)" style={{ marginTop: 3, flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontSize: 14, color: "var(--text-primary)" }}>{t("perm_host_label")}</div>
+                      <code style={S.permCode}>{o}</code>
+                    </div>
+                  </div>
                 ))}
               </div>
+              <div style={{ ...S.backendDesc, marginBottom: 16, lineHeight: 1.5 }}>{t("perm_denied_note")}</div>
               {permissionPhase === "failed" && (
                 <div style={{ ...S.errorRow, marginBottom: 12 }}><XCircle size={12} /> {t("onb_perm_denied")}</div>
               )}
@@ -1419,9 +1643,99 @@ export default function OnboardingApp() {
         </div>
       )}
 
+      {/* ── Already set up: show what is stored, change nothing ── */}
+      {step === "manage" && configured && (
+        <div className="onb-card" style={S.card}>
+          <div style={S.logoWrap}>
+            <BrandMark size={32} color="white" />
+          </div>
+          <h1 style={S.h1}>{t("onb_manage_title")}</h1>
+          <p style={S.subtitle}>{t("onb_manage_sub")}</p>
+
+          <div style={{ ...S.dataList, marginBottom: 20 }}>
+            <div style={{ ...S.dataRow, cursor: "default" }}>
+              <span style={S.backendDesc}>{t("opt_nav_backend")}</span>
+              <span style={S.manageValue}>{activeBackendLabel(configured)}</span>
+            </div>
+            <div style={{ ...S.dataRow, cursor: "default", alignItems: "flex-start" }}>
+              <span style={S.backendDesc}>{t("opt_nav_data")}</span>
+              <span style={{ ...S.manageValue, maxWidth: "62%", textAlign: "right", lineHeight: 1.5 }}>
+                {configured.enabled_types.length
+                  ? configured.enabled_types.map((k) => t(`datatype_${k}`)).join(" · ")
+                  : "—"}
+              </span>
+            </div>
+            <div style={{ ...S.dataRow, cursor: "default" }}>
+              <span style={S.backendDesc}>{t("common_e2ee")}</span>
+              <span style={S.manageValue}>
+                {configured.encryption_enabled ? "AES-256-GCM" : t("opt_unencrypted")}
+              </span>
+            </div>
+            <div style={{ ...S.dataRow, cursor: "default" }}>
+              <span style={S.backendDesc}>{t("opt_nav_device")}</span>
+              <span style={S.manageValue} dir="auto">{configured.device_label || "—"}</span>
+            </div>
+            <div style={{ ...S.dataRow, cursor: "default", alignItems: "center" }}>
+              <span style={S.backendDesc}>{t("onb_manage_perms_label")}</span>
+              {configuredMissing === null ? (
+                <Loader2 size={14} className="spin" color="var(--text-secondary)" />
+              ) : configuredMissing.permissions.length || configuredMissing.origins.length ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ ...S.manageValue, color: "var(--danger)" }}>
+                    {t("onb_manage_perms_missing", String(configuredMissing.permissions.length + configuredMissing.origins.length))}
+                  </span>
+                  <button
+                    type="button"
+                    style={S.linkBtn}
+                    onClick={() => {
+                      setMissingPerms(configuredMissing);
+                      setPermissionPhase("needed");
+                      setStep("permissions");
+                    }}
+                  >
+                    {t("onb_perm_grant")}
+                  </button>
+                </div>
+              ) : (
+                <span style={{ ...S.manageValue, color: "var(--success)" }}>
+                  <CheckCircle2 size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                  {t("onb_manage_perms_ok")}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <button style={S.btnPrimary} onClick={() => browser.runtime.openOptionsPage()}>
+            {t("common_open_settings")} <ArrowRight size={16} />
+          </button>
+          {/* The only way back into the wizard once set up. Confirmed first, because
+              finishing it replaces the storage, the data types and the device name. */}
+          <button
+            style={{ ...S.btnSecondary, marginTop: 8, width: "100%", justifyContent: "center" }}
+            onClick={() => {
+              if (!window.confirm(t("onb_manage_reconfigure_confirm"))) return;
+              // Mark the URL, so a reload halfway through the wizard comes back to the
+              // wizard rather than to this page.
+              try {
+                const url = new URL(window.location.href);
+                url.searchParams.set("reason", "reconfigure");
+                window.history.replaceState(null, "", url.toString());
+              } catch { /* a page that refuses replaceState still works; it just reloads to manage */ }
+              setConfigured(null);
+              setStep("welcome");
+            }}
+          >
+            {t("onb_manage_reconfigure")}
+          </button>
+          <button style={{ ...S.linkBtn, marginTop: 12, alignSelf: "center" }} onClick={() => window.close()}>
+            {t("common_close")}
+          </button>
+        </div>
+      )}
+
       {/* ── Backup restored, no setup needed ── */}
       {step === "imported" && (
-        <div style={{ ...S.card, textAlign: "center" }}>
+        <div className="onb-card" style={{ ...S.card, textAlign: "center" }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
           <h1 style={S.h1}>{t("onb_import_done_title")}</h1>
           <p style={S.subtitle}>{t("onb_import_done_desc")}</p>
@@ -1441,22 +1755,27 @@ export default function OnboardingApp() {
 const S: Record<string, React.CSSProperties> = {
   root: {
     minHeight: "100vh", background: "var(--bg)",
-    display: "flex", alignItems: "flex-start", justifyContent: "center",
-    padding: "40px 16px 60px",
+    display: "flex", flexDirection: "column", alignItems: "center",
     fontFamily: "-apple-system, 'Google Sans', BlinkMacSystemFont, 'Segoe UI', sans-serif",
   },
   progress: {
-    position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)",
-    display: "flex", gap: 6,
+    width: "100%", maxWidth: 480,
+    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+    marginBottom: 12, padding: "0 2px",
+  },
+  progressLabel: { fontSize: 12, color: "var(--text-secondary)", flexShrink: 0 },
+  dots: { display: "flex", gap: 6 },
+  laterBtn: {
+    background: "none", border: "none", padding: 0, flexShrink: 0,
+    fontFamily: "inherit", fontSize: 12, color: "var(--text-secondary)",
+    cursor: "pointer", textDecoration: "underline",
   },
   dot: { width: 24, height: 4, borderRadius: 2, transition: "background .2s" },
   card: {
     width: "100%", maxWidth: 480,
     background: "var(--bg-card)",
     borderRadius: 20,
-    padding: "36px 36px 30px",
     boxShadow: "0 1px 2px rgba(17,21,26,.04), 0 12px 28px -8px rgba(17,21,26,.12), 0 0 0 1px rgba(17,21,26,.05)",
-    marginTop: 20,
   },
   logoWrap: {
     width: 56, height: 56, borderRadius: 16,
@@ -1551,6 +1870,31 @@ const S: Record<string, React.CSSProperties> = {
     boxShadow: "0 1px 2px rgba(0,0,0,.2)",
   },
   navRow: { display: "flex", alignItems: "stretch", gap: 12, marginTop: 20 },
+  // What the Finish button is about to ask the browser for, in the user's words.
+  permPreview: {
+    border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px",
+    marginBottom: 14, display: "flex", flexDirection: "column", gap: 8,
+  },
+  permPreviewLead: { fontSize: 12, color: "var(--text-secondary)", fontWeight: 500 },
+  permPreviewRow: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-primary)" },
+  permCode: {
+    display: "block", fontFamily: "monospace", fontSize: 11, color: "var(--text-secondary)",
+    wordBreak: "break-all", marginTop: 2,
+  },
+  count: { fontSize: 12, color: "var(--text-secondary)", fontVariantNumeric: "tabular-nums" },
+  summaryHead: {
+    padding: "10px 16px", borderBottom: "1px solid var(--border)",
+    fontSize: 12, color: "var(--text-secondary)",
+  },
+  multiBox: {
+    border: "1px solid var(--border)", borderRadius: 14, padding: "14px 16px",
+    marginBottom: 20, textAlign: "left",
+  },
+  manageValue: { fontSize: 13, color: "var(--text-primary)" },
+  linkBtn: {
+    background: "none", border: "none", padding: 0, fontFamily: "inherit",
+    fontSize: 12, color: "var(--accent)", cursor: "pointer",
+  },
 };
 
 const CSS = `
@@ -1560,6 +1904,16 @@ const CSS = `
      options page. */
   html, body, #root { margin: 0; padding: 0; background: var(--bg); font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
   * { box-sizing: border-box; }
+  /* Page and card padding live here, not in the inline styles, so the phone breakpoint
+     below can actually reach them: an inline padding declaration beats any class. 36px
+     inside a 360px viewport left roughly 256px for a provider card with a logo, a name,
+     a description and a radio — and this wizard runs on Firefox for Android and Orion. */
+  .onb-root { padding: 40px 16px 60px; }
+  .onb-card { padding: 36px 36px 30px; }
+  @media (max-width: 520px) {
+    .onb-root { padding: 20px 12px 40px; }
+    .onb-card { padding: 24px 18px 20px; border-radius: 16px; }
+  }
   .spin { animation: spin .8s linear infinite; display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
   button:hover { opacity: .9; }

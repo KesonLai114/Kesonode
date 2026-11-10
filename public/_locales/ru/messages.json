@@ -433,7 +433,7 @@
     "message": "Если включить шифрование, данные шифруются на этом устройстве перед отправкой. Даже ваш сервис хранения не сможет прочитать их содержимое."
   },
   "onb_e2ee_desc": {
-    "message": "AES-256-GCM. Рекомендуется."
+    "message": "AES-256-GCM. Если включите, храните парольную фразу в надёжном месте — её нельзя восстановить."
   },
   "onb_pass_placeholder": {
     "message": "Придумайте парольную фразу или сгенерируйте ключ шифрования"
@@ -572,15 +572,6 @@
         "content": "$1"
       }
     }
-  },
-  "onb_done_backend": {
-    "message": "Хранилище успешно подключено"
-  },
-  "onb_done_autosync": {
-    "message": "Синхронизация выполняется автоматически в фоновом режиме"
-  },
-  "onb_done_adjust": {
-    "message": "Настройки можно изменить в любой момент"
   },
   "datatype_bookmarks_desc": {
     "message": "Всё дерево закладок с папками и порядком."
@@ -1785,12 +1776,6 @@
       }
     }
   },
-  "onb_welcome_device_name": {
-    "message": "Name this device"
-  },
-  "onb_welcome_device_hint": {
-    "message": "Browsers do not let extensions read your computer's name, so the automatic label is only a generic one. Enter a name you will recognise on your other devices, for example Mac mini M4pro."
-  },
   "onb_import_title": {
     "message": "Already have a backup?"
   },
@@ -1819,10 +1804,10 @@
     }
   },
   "onb_perm_title": {
-    "message": "This update needs your permission again"
+    "message": "Подтвердите разрешения, которые нужны Kesonode"
   },
   "onb_perm_desc": {
-    "message": "After an update these permissions must be confirmed before sync can continue. Click the button and your browser will show the permission prompt."
+    "message": "Kesonode нужны эти разрешения для выбранной настройки. Выдайте их, и синхронизация продолжится."
   },
   "onb_perm_grant": {
     "message": "Grant permissions"
@@ -1898,5 +1883,66 @@
   },
   "popup_first_sync_cta": {
     "message": "Выбрать"
+  },
+  "onb_step_progress": {
+    "message": "Шаг $CURRENT$ из $TOTAL$",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "onb_later": {
+    "message": "Настроить позже"
+  },
+  "onb_err_no_types": {
+    "message": "Выберите хотя бы один тип данных — если всё выключено, Kesonode нечего синхронизировать."
+  },
+  "onb_perm_upcoming": {
+    "message": "Далее браузер запросит:"
+  },
+  "perm_host_label": {
+    "message": "Ваш сервер хранения"
+  },
+  "perm_denied_note": {
+    "message": "Если отклонить, этот тип данных перестанет синхронизироваться. Остальное продолжит работать."
+  },
+  "onb_manage_title": {
+    "message": "Kesonode уже настроен"
+  },
+  "onb_manage_sub": {
+    "message": "Здесь показана только текущая настройка. Измените её в настройках или запустите мастер заново."
+  },
+  "onb_manage_perms_label": {
+    "message": "Разрешения"
+  },
+  "onb_manage_perms_ok": {
+    "message": "Все выданы"
+  },
+  "onb_manage_perms_missing": {
+    "message": "Не хватает: $COUNT$",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "onb_manage_reconfigure": {
+    "message": "Запустить настройку заново"
+  },
+  "onb_manage_reconfigure_confirm": {
+    "message": "Запустить настройку заново? По завершении мастер заменит хранилище, выбор данных и имя устройства."
+  },
+  "onb_done_summary": {
+    "message": "Первая синхронизация"
+  },
+  "onb_done_multi_title": {
+    "message": "Добавьте другие устройства"
+  },
+  "onb_done_multi_body": {
+    "message": "Установите Kesonode там и выберите то же хранилище. Закладки, вкладки и остальное встретятся."
   }
 }

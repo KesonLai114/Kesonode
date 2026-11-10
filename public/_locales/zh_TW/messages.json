@@ -433,7 +433,7 @@
     "message": "如果開啟加密，你的資料會在上傳前先在這台裝置上加密。連你的儲存空間供應商都讀不到裡面是什麼。"
   },
   "onb_e2ee_desc": {
-    "message": "AES-256-GCM。建議開啟。"
+    "message": "AES-256-GCM。開啟後請自行保管好口令，遺失無法找回。"
   },
   "onb_pass_placeholder": {
     "message": "設定一組通關密語，或產生一把加密金鑰"
@@ -572,15 +572,6 @@
         "content": "$1"
       }
     }
-  },
-  "onb_done_backend": {
-    "message": "儲存空間已成功連線"
-  },
-  "onb_done_autosync": {
-    "message": "同步會在背景自動執行"
-  },
-  "onb_done_adjust": {
-    "message": "你隨時可以更改設定"
   },
   "datatype_bookmarks_desc": {
     "message": "完整的書籤樹，含資料夾和排序。"
@@ -1785,12 +1776,6 @@
       }
     }
   },
-  "onb_welcome_device_name": {
-    "message": "為這台裝置命名"
-  },
-  "onb_welcome_device_hint": {
-    "message": "瀏覽器不允許擴充功能讀取電腦名稱，自動產生的只是系統名（如「Mac」）。請填寫你能一眼認出的名字，例如「Mac mini M4pro」。"
-  },
   "onb_import_title": {
     "message": "已有設定備份？"
   },
@@ -1819,10 +1804,10 @@
     }
   },
   "onb_perm_title": {
-    "message": "新版本需要重新授權"
+    "message": "確認 Kesonode 需要的權限"
   },
   "onb_perm_desc": {
-    "message": "更新後需要你確認以下權限，同步才能繼續。點擊下方按鈕，瀏覽器會彈出授權視窗。"
+    "message": "這些是你所選設定需要的權限。授予後同步即可繼續。"
   },
   "onb_perm_grant": {
     "message": "立即授權"
@@ -1898,5 +1883,66 @@
   },
   "popup_first_sync_cta": {
     "message": "去選擇"
+  },
+  "onb_step_progress": {
+    "message": "第 $CURRENT$ 步，共 $TOTAL$ 步",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "onb_later": {
+    "message": "稍後繼續"
+  },
+  "onb_err_no_types": {
+    "message": "至少選擇一項要同步的內容——全部關閉後 Kesonode 無事可做。"
+  },
+  "onb_perm_upcoming": {
+    "message": "接下來瀏覽器會要求："
+  },
+  "perm_host_label": {
+    "message": "你的儲存伺服器"
+  },
+  "perm_denied_note": {
+    "message": "拒絕後該類型停止同步，其他類型不受影響。"
+  },
+  "onb_manage_title": {
+    "message": "Kesonode 已完成設定"
+  },
+  "onb_manage_sub": {
+    "message": "本頁只顯示目前設定。需要修改請開啟設定，或重新執行設定精靈。"
+  },
+  "onb_manage_perms_label": {
+    "message": "權限"
+  },
+  "onb_manage_perms_ok": {
+    "message": "已全部授予"
+  },
+  "onb_manage_perms_missing": {
+    "message": "還缺 $COUNT$ 項",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "onb_manage_reconfigure": {
+    "message": "重新設定"
+  },
+  "onb_manage_reconfigure_confirm": {
+    "message": "重新執行設定精靈？完成後會覆蓋目前的儲存、同步選項與裝置名稱。"
+  },
+  "onb_done_summary": {
+    "message": "首次同步"
+  },
+  "onb_done_multi_title": {
+    "message": "新增其它裝置"
+  },
+  "onb_done_multi_body": {
+    "message": "在另一台裝置上安裝 Kesonode，選擇同一個儲存，書籤、分頁等會自動匯合。"
   }
 }
