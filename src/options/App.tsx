@@ -486,6 +486,13 @@ export default function OptionsApp() {
 
   // Activity tab data (fetched once on mount; see the effect below).
   const [syncState, setSyncState] = useState<SyncState | null>(null);
+  // When the periodic alarm next fires, or null for "no automatic sync". Read from the
+  // worker rather than guessed from `last_sync + interval`: see the message's comment.
+  const [nextSyncAt, setNextSyncAt] = useState<number | null>(null);
+  // "3 minutes ago" is computed at render, so a page left open would keep saying three
+  // minutes forever. This is the tick that makes it age; 30 s is the granularity the
+  // phrase itself has.
+  const [now, setNow] = useState(() => Date.now());
   const [devices, setDevices] = useState<DeviceInfo[] | null>(null);
   const [devicesError, setDevicesError] = useState<string | null>(null);
   const [forgetting, setForgetting] = useState<string | null>(null);
@@ -528,6 +535,18 @@ export default function OptionsApp() {
     }).catch(() => { /* the peer cache is a display nicety; a read failure must not blank Settings */ });
   }, []);
 
+  /**
+   * The next scheduled pull, asked of the worker (which asks the alarm).
+   *
+   * A failed read keeps the previous answer instead of clearing it: "we could not ask" and
+   * "automatic sync is off" are different facts, and printing the second when the first is
+   * true would be a claim about the user's settings they never made.
+   */
+  const loadSchedule = useCallback(async () => {
+    const r = await request({ type: "GET_SYNC_SCHEDULE" });
+    if (r.ok && r.res.type === "SYNC_SCHEDULE") setNextSyncAt(r.res.payload.next_at);
+  }, []);
+
   useEffect(() => {
     load();
     void browser.storage.local.get(KEYS.GDRIVE_SESSION).then((r) => {
@@ -537,7 +556,8 @@ export default function OptionsApp() {
       if (s) setGdriveUser({ email: s.email ?? "", displayName: s.displayName ?? "" });
     }).catch(() => { /* no session to show is the normal case, not an error */ });
     loadRemoteExtensions();
-  }, [load, loadRemoteExtensions]);
+    void loadSchedule();
+  }, [load, loadRemoteExtensions, loadSchedule]);
 
   // Keyed on the availability the permission listener already refreshes rather than on the
   // mount, because the permission can come and go while Settings is open: read once, this
@@ -657,6 +677,21 @@ export default function OptionsApp() {
   }, [activeNav, loadSnapshots]);
 
   /**
+   * The status bar's two moving parts: when the next pull is due, and how long ago the last
+   * one was. Asked on the way onto the tab, and kept honest by a tick — the relative phrase
+   * is computed at render, so without one a page left open says "3 minutes ago" all morning.
+   * Only while Activity is on screen: a Settings tab behind another window has no reason to
+   * re-render every 30 seconds.
+   */
+  useEffect(() => {
+    if (activeNav !== "activity") return;
+    void loadSchedule();
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [activeNav, loadSchedule]);
+
+  /**
    * Settings follows the sync while it is open, the way the popup does.
    *
    * Everything on Activity was read once: the stats and the Blocked deletion card on mount,
@@ -703,11 +738,15 @@ export default function OptionsApp() {
     lastStatus.current = status;
     if (!finished) return;
     loadRemoteExtensions();
+    // The cycle that just ended both wrote `last_sync` and advanced the alarm, so the bar's
+    // two answers are stale from this moment — cheap to re-ask, and false if we don't.
+    setNow(Date.now());
+    void loadSchedule();
     if (activeNav !== "activity") return;
     if (document.visibilityState !== "visible") { missedWhileHidden.current = true; return; }
     void loadDevices();
     void loadSnapshots(true);
-  }, [syncState?.status, activeNav, loadDevices, loadSnapshots, loadRemoteExtensions]);
+  }, [syncState?.status, activeNav, loadDevices, loadSnapshots, loadRemoteExtensions, loadSchedule]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -1052,6 +1091,9 @@ export default function OptionsApp() {
     const dav = settings.backends.find((b) => b.type === "webdav")?.webdav;
     setSavedProvider(providerFromConfig(settings.active_backend, dav?.url, dav?.username));
     setSavedFingerprint(settingsFingerprint(settings));
+    // Automatic sync and the interval both act on the alarm, so a saved change moves the
+    // "next sync" answer on the Activity tab without a sync having run.
+    void loadSchedule();
     setSaving(false); setSaveOk(true);
     setTimeout(() => setSaveOk(false), 2500);
   };
@@ -2323,6 +2365,15 @@ export default function OptionsApp() {
             // right above 143 yellow warning icons.
             const errorCount = audit.filter((e) => (e.level ?? (e.ok ? "ok" : "error")) === "error").length;
             const noticeCount = audit.filter((e) => e.level === "notice").length;
+            // Tone and wording come from the same status the popup colours by, so the two
+            // surfaces cannot disagree about whether the sync is healthy.
+            const syncStatus = syncState?.status ?? "idle";
+            const syncTone = syncStatus === "syncing" ? "busy"
+              : syncStatus === "error" ? "bad"
+              : syncStatus === "conflict" ? "warn"
+              : syncStatus === "success" ? "ok" : "";
+            // Unknown settings (still loading) must not dim every chip as if it were off.
+            const enabledTypes: DataType[] | null = settings?.enabled_types ?? null;
             return (
               <div className="section-wrap">
                 <h1 className="page-title">{t("opt_activity_head")}</h1>
@@ -2353,6 +2404,69 @@ export default function OptionsApp() {
 
                 <div className="settings-section">
                   <div className="settings-card-head">{t("opt_sync_activity_section")}</div>
+
+                  {/* ── Is it working? ──
+                      Nothing on this page answered that. The tiles below count what moved
+                      and when it last happened, which reads as "something is happening" even
+                      while every cycle fails, and the one place the failure WAS written was
+                      the popup's banner — invisible to anyone sitting in Settings, which is
+                      exactly where you go when sync looks wrong. */}
+                  <div className="sync-bar">
+                    <div className="sync-bar-main">
+                      <span className={`sync-bar-dot ${syncTone}`} aria-hidden="true" />
+                      <div className="sync-bar-text">
+                        <div className="sync-bar-title">{t(`status_${syncStatus}`)}</div>
+                        {syncStatus === "error" && syncState?.last_error && (
+                          <div className="sync-bar-error">{syncState.last_error}</div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="sync-bar-facts">
+                      <div>
+                        {/* Not "Last sync": that label is already on the tile below, where it
+                            carries the exact moment. Here the question is freshness, so the
+                            label says so and the two rows stop reading as a duplicate. */}
+                        <div className="sync-fact-label">{t("opt_status_since_last_sync")}</div>
+                        {/* Relative, with the exact moment on hover: "3 minutes ago" is the
+                            question people actually have, and a clock time alone needs the
+                            reader to do the subtraction. */}
+                        <div
+                          className="sync-fact-value"
+                          title={syncState?.last_sync ? new Date(syncState.last_sync).toLocaleString() : undefined}
+                        >
+                          {syncState?.last_sync
+                            ? relativeTime(syncState.last_sync, now, catalogueLocale())
+                            : t("stream_never")}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="sync-fact-label">{t("opt_status_next_sync")}</div>
+                        {/* null means the alarm is gone, i.e. automatic sync is off — not
+                            "unknown", so it says so instead of leaving a blank. */}
+                        <div className="sync-fact-value">
+                          {nextSyncAt === null
+                            ? t("opt_status_next_off")
+                            : new Date(nextSyncAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* What has actually gone across, per type. The type switches are on
+                      another tab, so "why is history always 0" needed somewhere to look. */}
+                  <div className="sync-types">
+                    <span className="sync-types-label">{t("opt_status_totals")}</span>
+                    {DATA_TYPES.map((type) => {
+                      const on = enabledTypes === null || enabledTypes.includes(type);
+                      return (
+                        <span key={type} className={`sync-type ${on ? "" : "off"}`}>
+                          {t(`datatype_${type}`)}
+                          <b>{syncState?.sync_counts?.[type] ?? 0}</b>
+                        </span>
+                      );
+                    })}
+                  </div>
+
                   <div className="stat-grid">
                     <div className="stat-tile"><div className="stat-value">{formatBytes(syncState?.bytes_transferred ?? 0)}</div><div className="stat-label">{t("opt_stat_transferred")}</div></div>
                     <div className="stat-tile"><div className="stat-value">{totalSyncRuns}</div><div className="stat-label">{t("opt_stat_runs")}</div></div>
@@ -3363,6 +3477,40 @@ const STYLES = `
   .stat-value { font-size: var(--fs-lg); font-weight: 600; color: var(--text-primary); line-height: 1.15; word-break: break-word; }
   .stat-value-sm { font-size: var(--fs-md); }
   .stat-label { font-size: var(--fs-xs); color: var(--text-secondary); }
+
+  /* ─── Sync status bar ──────────────────────────────────────────────────────
+     Above the numbers, because "is it working" is read before "how much moved".
+     Same colour language as the popup's dot: accent while it runs, accent on
+     success, red on failure, amber on a question left waiting. */
+  .sync-bar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--sp-lg); padding: var(--sp-xl); }
+  .sync-bar-main { display: flex; align-items: flex-start; gap: var(--sp-md); min-width: 0; }
+  /* Nudged off the cap height so the dot reads level with the first line of the title,
+     not with the top of the line box. */
+  .sync-bar-dot { margin-top: 6px; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--text-secondary); }
+  .sync-bar-dot.ok { background: var(--success); }
+  .sync-bar-dot.busy { background: var(--accent); }
+  .sync-bar-dot.bad { background: var(--danger); }
+  .sync-bar-dot.warn { background: var(--warn-border); }
+  .sync-bar-text { min-width: 0; }
+  .sync-bar-title { font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); }
+  /* Backend errors are sentences built from a URL and a status code, with no spaces to
+     break on: anywhere is the only wrapping that keeps them inside the card. */
+  .sync-bar-error { margin-top: var(--sp-3xs); font-size: var(--fs-xs); color: var(--danger); line-height: 1.45; overflow-wrap: anywhere; }
+  .sync-bar-facts { display: flex; flex-wrap: wrap; gap: var(--sp-xl); }
+  .sync-fact-label { font-family: var(--font-mono); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); }
+  .sync-fact-value { margin-top: var(--sp-3xs); font-size: var(--fs-sm); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+  .sync-types { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-sm); padding: 0 var(--sp-xl) var(--sp-xl); }
+  .sync-types-label { font-family: var(--font-mono); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); margin-right: var(--sp-2xs); }
+  .sync-type { display: inline-flex; align-items: baseline; gap: var(--sp-xs); padding: 3px var(--sp-ms); border: 1px solid var(--border); border-radius: 999px; font-size: var(--fs-xs); color: var(--text-secondary); }
+  .sync-type b { font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  /* A type that is switched off still shows its (frozen) total: dimmed says "this is why
+     it never moves", which a hidden chip would leave unexplained. */
+  .sync-type.off { opacity: .45; }
+
+  /* The bar and the chips sit between the card head and the tiles, so the tiles need the
+     divider back — their 1px gaps only separate them from each other. */
+  .settings-section > .stat-grid { border-top: 1px solid var(--border); }
 
   .spin { animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }

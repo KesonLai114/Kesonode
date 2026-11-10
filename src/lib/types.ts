@@ -744,6 +744,12 @@ export interface SnapshotMeta {
 export type ExtensionMessage =
   | { type: "SYNC_NOW"; payload?: { data_type?: DataType } }
   | { type: "GET_STATE" }
+  // When the periodic alarm will next fire, as epoch milliseconds (null when automatic sync
+  // is off). Read from the ALARM, not from `last_sync + interval`: a manual sync does not
+  // restart the timer, the guard and the rate-limit backoff delay a cycle without touching
+  // the interval, and the browser clamps the period it stores. Anything derived from the
+  // settings would therefore be a guess printed where a fact is expected.
+  | { type: "GET_SYNC_SCHEDULE" }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; payload: Partial<SyncSettings> }
   // Carry configuration across an extension-ID change. EXPORT answers SETTINGS_BACKUP;
@@ -809,6 +815,7 @@ export interface DeviceInfo {
 
 export type ExtensionResponse =
   | { type: "STATE"; payload: SyncState }
+  | { type: "SYNC_SCHEDULE"; payload: { next_at: number | null } }
   | { type: "SETTINGS"; payload: SyncSettings }
   | { type: "SETTINGS_BACKUP"; payload: SettingsBackup }
   | { type: "OK" }

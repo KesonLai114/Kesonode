@@ -1163,6 +1163,18 @@
   "opt_stat_last_sync": {
     "message": "Ultima sincronizzazione"
   },
+  "opt_status_since_last_sync": {
+    "message": "Dall'ultima sincronizzazione"
+  },
+  "opt_status_next_sync": {
+    "message": "Prossima sincronizzazione"
+  },
+  "opt_status_next_off": {
+    "message": "Solo manuale"
+  },
+  "opt_status_totals": {
+    "message": "Totali per tipo"
+  },
   "opt_devices_section": {
     "message": "Dispositivi"
   },

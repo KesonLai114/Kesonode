@@ -1163,6 +1163,18 @@
   "opt_stat_last_sync": {
     "message": "上次同步"
   },
+  "opt_status_since_last_sync": {
+    "message": "距上次同步"
+  },
+  "opt_status_next_sync": {
+    "message": "下次同步"
+  },
+  "opt_status_next_off": {
+    "message": "僅手動"
+  },
+  "opt_status_totals": {
+    "message": "各類型累計"
+  },
   "opt_devices_section": {
     "message": "裝置"
   },

@@ -1361,6 +1361,18 @@
   "opt_stat_last_sync": {
     "message": "Last sync"
   },
+  "opt_status_since_last_sync": {
+    "message": "Since last sync"
+  },
+  "opt_status_next_sync": {
+    "message": "Next sync"
+  },
+  "opt_status_next_off": {
+    "message": "Manual only"
+  },
+  "opt_status_totals": {
+    "message": "Totals per type"
+  },
   "opt_devices_section": {
     "message": "Devices"
   },

@@ -11,7 +11,8 @@ import { reviewPageFor } from "@/lib/store-review";
 import { STATE_UPDATE } from "@/lib/constants";
 import { streamState, streamInputFor, streamColor, streamLabelKey } from "@/popup/stream-state";
 import { groupConflictsByDevice } from "@/popup/conflict-groups";
-import { t, plural } from "@/lib/utils/i18n";
+import { t, plural, catalogueLocale } from "@/lib/utils/i18n";
+import { relativeTime } from "@/lib/device-activity";
 import { dataTypeApiPresent, hasPermission } from "@/lib/utils/capabilities";
 import {
   RefreshCw, Settings, Bookmark, Clock, Globe,
@@ -373,9 +374,12 @@ export default function PopupApp() {
   // Suppressed while the setup card is up: on a fresh install both are true, and the
   // card already says the same thing in a more useful way.
   const showNoBackend = settingsLoaded && !hasBackend && !showSetupCard;
-  const lastSync = state?.last_sync
-    ? new Date(state.last_sync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : null;
+  // Relative, not the clock. "16:42" only answers "when" for someone who already knows
+  // what time it is; the question behind it is "is this fresh", and after a gap long enough
+  // to matter the digits stopped reading as a sync time at all. Same wording as the device
+  // list uses ("3 hours ago"), so one phrase means one thing across the extension. It ages
+  // with the STATE_UPDATE the status line already follows; the exact moment is a hover away.
+  const lastSync = state?.last_sync ? relativeTime(state.last_sync, Date.now(), catalogueLocale()) : null;
   // Show the chosen provider's name (e.g. "Koofr"), not the raw backend type
   // ("webdav") — several providers map to the WebDAV backend.
   const backendLabel = (() => {
@@ -419,7 +423,14 @@ export default function PopupApp() {
           <span className={`text-sm font-medium ${statusCfg.color}`}>{t(`status_${status}`)}</span>
         </div>
         <div className="flex items-center gap-2">
-          {lastSync && <span className="font-mono text-[14px] tabular-nums text-sk-muted">{lastSync}</span>}
+          {lastSync && (
+            <span
+              className="text-[12px] text-sk-muted"
+              title={state?.last_sync ? new Date(state.last_sync).toLocaleString() : undefined}
+            >
+              {lastSync}
+            </span>
+          )}
           <button
             onClick={openOptions}
             aria-label={t("popup_settings_aria")}

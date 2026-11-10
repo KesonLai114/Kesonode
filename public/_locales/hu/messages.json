@@ -1163,6 +1163,18 @@
   "opt_stat_last_sync": {
     "message": "Utolsó szinkronizálás"
   },
+  "opt_status_since_last_sync": {
+    "message": "Utolsó szinkronizálás óta"
+  },
+  "opt_status_next_sync": {
+    "message": "Következő szinkronizálás"
+  },
+  "opt_status_next_off": {
+    "message": "Csak kézi"
+  },
+  "opt_status_totals": {
+    "message": "Típusonkénti összesítés"
+  },
   "opt_devices_section": {
     "message": "Eszközök"
   },

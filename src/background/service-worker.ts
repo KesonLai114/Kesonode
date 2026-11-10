@@ -227,6 +227,14 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       return { type: "STATE", payload: state };
     }
 
+    case "GET_SYNC_SCHEDULE": {
+      // `scheduledTime` is the browser's own answer, so it already accounts for a periodic
+      // alarm that has not been recreated since the interval last changed. Older engines
+      // (and a cleared alarm) simply answer undefined: no time to promise.
+      const alarm = await browser.alarms.get(SYNC_ALARM);
+      return { type: "SYNC_SCHEDULE", payload: { next_at: alarm?.scheduledTime ?? null } };
+    }
+
     case "GET_SETTINGS": {
       const settings = await getSettings();
       return { type: "SETTINGS", payload: settings };
