@@ -263,8 +263,29 @@ describe.each(languages.filter((l) => l !== "en"))("the %s catalogue", (lang) =>
   });
 });
 
-describe("t() and plural()", () => {
-  it("returns the message, with substitutions applied", () => {
+describe("the first-sync answer is worded once", () => {
+  // Two screens now ask the same question: the setup wizard (the first thing a new
+  // install shows) and Settings → Activity (where it can be answered again later). The
+  // three answers have consequences — one of them clears this browser's bookmarks — so a
+  // screen that describes them differently from the other is how someone agrees to
+  // something they did not read. Both must resolve the same keys, not their own copies.
+  const ANSWER_KEYS = [
+    "opt_first_sync_merge", "opt_first_sync_merge_desc",
+    "opt_first_sync_remote", "opt_first_sync_remote_desc",
+    "opt_first_sync_local", "opt_first_sync_local_desc",
+  ];
+  const at = (p: string) => readFileSync(resolve(__dirname, p), "utf8");
+
+  it.each([
+    ["the setup wizard", "../../onboarding/App.tsx"],
+    ["Settings → Activity", "../../options/first-sync-section.tsx"],
+  ])("%s offers all three", (_name, file) => {
+    const src = at(file);
+    expect(ANSWER_KEYS.filter((k) => !src.includes(`"${k}"`))).toEqual([]);
+  });
+});
+
+describe("t() and plural()", () => {  it("returns the message, with substitutions applied", () => {
     expect(t("popup_sync_now")).toBe("Sync now");
     expect(t("popup_recovery_notice", "412")).toContain("(412 bookmarks)");
   });

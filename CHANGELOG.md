@@ -49,6 +49,20 @@ All notable changes to Konode. Format loosely follows
   identical. The welcome screen now carries the name field (shared with the storage step)
   and says why it has to be typed; Settings → Device says the same under its field.
 
+- **The first-sync direction question is asked in the setup wizard, where the sync was
+  paused waiting for it.** Choosing a side was implemented on Settings → Activity, so a
+  fresh install that met another device's bookmarks ran its progress step into the
+  20-second timeout and left the user on a "done" screen with nothing synced and no
+  visible next step — the answer lived on a screen nobody opens on their first day. The
+  wizard now watches for `first_sync_pending` and, before it times out, shows the three
+  answers (Merge / Use the remote copy / Use the copy in this browser) on a step of its
+  own, taken from the same message keys Activity uses so the two screens cannot come to
+  describe the consequences differently. Answering resumes the progress step and finishes
+  the remaining data types; closing the page instead is safe and is said on screen — sync
+  stays paused, and the question is still waiting in Activity. Reloading the wizard midway
+  now returns to that question rather than to "welcome" for an install whose settings were
+  already saved.
+
 ### Fixed
 
 - **A rate-limited WebDAV account now actually backs off, instead of retrying every

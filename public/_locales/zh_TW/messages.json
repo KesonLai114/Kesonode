@@ -34,7 +34,7 @@
     "message": "立即同步"
   },
   "extension_name": {
-    "message": "Kesonode | 私人書籤與分頁同步 v1.5.11"
+    "message": "Kesonode | 私人書籤與分頁同步 v1.5.12"
   },
   "extension_description": {
     "message": "隱私優先的瀏覽器同步，資料存放在你自己的空間：Google Drive、WebDAV、GitHub。"
@@ -512,6 +512,33 @@
         "content": "$1"
       }
     }
+  },
+  "onb_direction_subtitle": {
+    "message": "雲端已有其他裝置的書籤。在合併或上傳之前，先決定以哪一邊為準——這個選擇只問一次。"
+  },
+  "onb_direction_peers_one": {
+    "message": "雲端已有 1 台其他裝置的書籤。",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
+  "onb_direction_peers_other": {
+    "message": "雲端已有 $COUNT$ 台其他裝置的書籤。",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
+  "onb_direction_apply": {
+    "message": "依這個方向同步"
+  },
+  "onb_direction_hint": {
+    "message": "拿不準也沒關係：在你選擇之前不會合併任何東西，也可以先關掉，稍後在 設定 → 活動 裡作答。"
   },
   "onb_sync_title": {
     "message": "正在同步你的資料…"

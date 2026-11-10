@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef, Fragment } from "react";
 import { sendMessage, request } from "@/lib/utils/messaging";
 import { browser } from "@/lib/utils/ext";
-import { t, tParts } from "@/lib/utils/i18n";
+import { t, tParts, plural } from "@/lib/utils/i18n";
 import { interactiveSignIn, isDriveAuthAvailable, getStoredGDriveUser } from "@/lib/backends/gdrive-oauth";
 import { loadDraft, saveDraft, clearDraft, type DraftStep } from "@/lib/onboarding-draft";
 
 // Some engines (notably iOS WebKit, e.g. Orion) don't support interactive Google
 // sign-in; gate the Drive option so users aren't sent into a dead end.
 const DRIVE_AVAILABLE = isDriveAuthAvailable();
-import type { BackendType, BookmarkExclusion, DataType, SyncSettings } from "@/lib/types";
+import type { BackendType, BookmarkExclusion, DataType, FirstSyncChoice, SyncSettings } from "@/lib/types";
 import { BookmarkExclusionTree } from "@/lib/ui/bookmark-exclusion-tree";
 import {
   allDataTypeAvailability, ensurePermissionWatched, unsupportedReason,
@@ -18,7 +18,7 @@ import { importSettingsBackupFromFile } from "@/lib/utils/settings-import";
 import {
   Bookmark,
   Clock, Puzzle, Globe, CheckCircle2, ArrowRight,
-  Loader2, XCircle, Eye, EyeOff, Lock, Key,
+  Loader2, XCircle, Eye, EyeOff, Lock, Key, GitMerge,
 } from "lucide-react";
 // Kesonode brand mark — the glyph only; the container supplies the blue tile.
 // Mirrors the sync arrows + node in public/icons/icon.svg.
@@ -45,7 +45,11 @@ import { ProviderLogo } from "@/lib/provider-logos";
 
 // ─── Steps ────────────────────────────────────────────────────────────────
 
-type Step = "welcome" | "backend" | "data" | "encrypt" | "syncing" | "done" | "permissions" | "imported";
+type Step =
+  | "welcome" | "backend" | "data" | "encrypt" | "syncing" | "done" | "permissions" | "imported"
+  // Asked only when the storage already holds another device's bookmarks: the sync is
+  // paused until this is answered, so it belongs in the wizard the user is already in.
+  | "direction";
 
 const STEPS: Step[] = ["welcome", "backend", "data", "encrypt", "done"];
 const SETUP_STEPS: readonly Step[] = ["welcome", "backend", "data", "encrypt"];
@@ -62,6 +66,18 @@ const TYPE_META: Record<"bookmarks" | "extensions" | "history" | "sessions", { I
   history:    { Icon: Clock    },
   sessions:   { Icon: Globe    },
 };
+
+/**
+ * The three answers to "which side wins", worded by the SAME messages Settings → Activity
+ * uses. Two copies of this text would drift apart, and the consequence of the two screens
+ * disagreeing about what "use the remote copy" does is a user losing their bookmarks.
+ * Merge is first because it is the recommendation and the one that deletes nothing.
+ */
+const DIRECTION_OPTIONS: ReadonlyArray<{ choice: FirstSyncChoice; label: string; desc: string }> = [
+  { choice: "merge",  label: "opt_first_sync_merge",  desc: "opt_first_sync_merge_desc"  },
+  { choice: "remote", label: "opt_first_sync_remote", desc: "opt_first_sync_remote_desc" },
+  { choice: "local",  label: "opt_first_sync_local",  desc: "opt_first_sync_local_desc"  },
+];
 
 // ─── App ──────────────────────────────────────────────────────────────────
 
@@ -261,6 +277,16 @@ export default function OnboardingApp() {
   const baselineRef = useRef<Record<string, number>>({});
   const enabledTypes = (["bookmarks", "extensions", "history", "sessions"] as const).filter((k) => dataTypes[k]);
 
+  // The first sync is a question, not a transfer. When the storage already holds another
+  // device's bookmarks, the worker pauses the sync and waits for a direction; that used to
+  // surface only in Settings → Activity, so setup finished with nothing synced and no
+  // visible next step. The question is asked HERE instead, and `firstSyncPeers` is the
+  // count it reports (null until the probe has run).
+  const [firstSyncPeers, setFirstSyncPeers] = useState<number | null>(null);
+  const [directionChoice, setDirectionChoice] = useState<FirstSyncChoice>("merge");
+  const [directionBusy, setDirectionBusy] = useState(false);
+  const [directionError, setDirectionError] = useState<string | null>(null);
+
   // E2EE validation (a generated key is exact, so it skips the double-entry confirm).
   const confirmNeeded = encEnabled && encPass.length > 0 && encPass !== encGenerated;
   const passMissing = encEnabled && !encPass;
@@ -291,12 +317,14 @@ export default function OnboardingApp() {
     if (PERMISSION_MODE) { setRestored(true); return; }
     void (async () => {
       try {
-        const [res, draft, driveUser] = await Promise.all([
+        const [res, draft, driveUser, stateRes] = await Promise.all([
           request({ type: "GET_SETTINGS" }),
           loadDraft().catch(() => null),
           getStoredGDriveUser().catch(() => null),
+          request({ type: "GET_STATE" }),
         ]);
-        const detected = res.ok && res.res.type === "SETTINGS" ? res.res.payload.device_label ?? "" : "";
+        const settings = res.ok && res.res.type === "SETTINGS" ? res.res.payload : null;
+        const detected = settings?.device_label ?? "";
         // interactiveSignIn stores the session as it completes, so a sign-in that finished
         // before the page went away is still here. The wizard used to know about it only
         // from its own state, showed a signed-in user as signed out, and sent them back
@@ -304,6 +332,26 @@ export default function OnboardingApp() {
         if (driveUser) setGdriveUser(driveUser);
         if (!draft) {
           setDeviceLabel(detected);
+          // Reloading this page mid-setup is ordinary (a crash, a closed window). The
+          // settings are already saved by then, so the one thing still open can be the
+          // unanswered first-sync question — and showing "welcome" to an install that
+          // finished while the sync waits for that answer is a dead end.
+          const pending = stateRes.ok && stateRes.res.type === "STATE"
+            ? stateRes.res.payload.first_sync_pending : null;
+          if (pending) {
+            setFirstSyncPeers(pending.peer_count);
+            // Take the types that are actually ON, so the progress step after the answer
+            // waits for the same ones the worker is going to sync. Bookmarks is the
+            // fallback when the settings read failed — the question is about bookmarks.
+            const on = settings?.enabled_types ?? ["bookmarks"];
+            setDataTypes({
+              bookmarks: on.includes("bookmarks"),
+              extensions: on.includes("extensions"),
+              history: on.includes("history"),
+              sessions: on.includes("sessions"),
+            });
+            setStep("direction");
+          }
           return;
         }
         setDeviceLabel(draft.deviceLabel || detected);
@@ -359,6 +407,16 @@ export default function OnboardingApp() {
       if (cancelled || !res.ok || res.res.type !== "STATE") return;
       const st = res.res.payload;
       setSyncCounts(st.sync_counts);
+      // Nothing is merged and no counter moves while this is set, so the old behaviour
+      // was a spinner that ran into the 20-second timeout and then told the user to go
+      // and find the answer in Settings. Ask it here, in the window they are already in.
+      if (st.first_sync_pending) {
+        clearInterval(id);
+        setFirstSyncPeers(st.first_sync_pending.peer_count);
+        setDirectionError(null);
+        setStep("direction");
+        return;
+      }
       if (st.status === "error" && st.last_error) {
         clearInterval(id);
         setSyncError(st.last_error);
@@ -587,6 +645,37 @@ export default function OnboardingApp() {
       void sendMessage({ type: "SYNC_NOW" }).catch(() => {});
     } finally {
       setSaving(false);
+    }
+  };
+
+  /**
+   * Answer the first-sync question here, then let the progress step finish.
+   *
+   * Applying the answer already publishes this device's bookmarks — that is why the click
+   * returns only once the upload is done — so the counters climb for bookmarks by
+   * themselves. Any other enabled type still needs its own pass, hence the second
+   * SYNC_NOW. The baseline is left alone on purpose: it was taken before either call, so
+   * every type's tick still means "this one actually moved".
+   */
+  const applyDirection = async () => {
+    if (directionBusy) return;
+    setDirectionBusy(true);
+    setDirectionError(null);
+    try {
+      const sent = await request({ type: "FIRST_SYNC_CHOICE", payload: { choice: directionChoice } });
+      if (!sent.ok) {
+        // "Use the remote copy" can legitimately fail — an encrypted peer this device
+        // cannot read, or a storage that dropped the file. Keep the question on screen
+        // with the reason instead of moving on as if it had been applied.
+        setDirectionError(sent.error);
+        return;
+      }
+      setSyncError(null);
+      setSyncTimedOut(false);
+      setStep("syncing");
+      void sendMessage({ type: "SYNC_NOW" }).catch(() => {});
+    } finally {
+      setDirectionBusy(false);
     }
   };
 
@@ -1139,6 +1228,60 @@ export default function OnboardingApp() {
               {awaitingPerm && saving ? t("onb_waiting_permission") : saving ? t("onb_setting_up") : t("onb_finish_sync")}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ── First sync: which side wins ── */}
+      {step === "direction" && (
+        <div style={S.card}>
+          <h1 style={S.h1}>{t("opt_first_sync_head")}</h1>
+          <p style={S.subtitle}>{t("onb_direction_subtitle")}</p>
+
+          {firstSyncPeers !== null && firstSyncPeers > 0 && (
+            <div style={{ ...hintStyle, marginBottom: 12 }}>
+              {plural("onb_direction_peers", firstSyncPeers, [String(firstSyncPeers)])}
+            </div>
+          )}
+
+          <div style={S.backendList} role="radiogroup" aria-label={t("opt_first_sync_head")}>
+            {DIRECTION_OPTIONS.map((o) => {
+              const on = directionChoice === o.choice;
+              return (
+                <div
+                  key={o.choice}
+                  style={{ ...S.backendCard, ...(on ? S.backendSelected : {}) }}
+                  role="radio"
+                  aria-checked={on}
+                  tabIndex={0}
+                  onClick={() => setDirectionChoice(o.choice)}
+                  onKeyDown={(e) => {
+                    if (e.key === " " || e.key === "Enter") { e.preventDefault(); setDirectionChoice(o.choice); }
+                  }}
+                >
+                  <div style={S.backendHeader}>
+                    <div>
+                      <div style={S.backendName}>{t(o.label)}</div>
+                      <div style={S.backendDesc}>{t(o.desc)}</div>
+                    </div>
+                    <div style={{ ...S.radio, ...(on ? S.radioChecked : {}) }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {directionError && (
+            <div style={{ ...S.errorRow, marginBottom: 12 }} role="alert">
+              <XCircle size={12} /> {directionError}
+            </div>
+          )}
+
+          <button style={S.btnPrimary} disabled={directionBusy} onClick={() => void applyDirection()}>
+            {directionBusy
+              ? <><Loader2 size={16} className="spin" /> {t("opt_first_sync_busy")}</>
+              : <><GitMerge size={16} /> {t("onb_direction_apply")}</>}
+          </button>
+          <div style={{ ...hintStyle, marginTop: 12, textAlign: "center" }}>{t("onb_direction_hint")}</div>
         </div>
       )}
 

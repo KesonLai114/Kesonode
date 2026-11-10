@@ -498,6 +498,33 @@
       }
     }
   },
+  "onb_direction_subtitle": {
+    "message": "云端已有其它设备的书签。在合并或上传之前，先决定以哪边为准——这个选择只问一次。"
+  },
+  "onb_direction_peers_one": {
+    "message": "云端已有 1 台其它设备的书签。",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
+  "onb_direction_peers_other": {
+    "message": "云端已有 $COUNT$ 台其它设备的书签。",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
+  "onb_direction_apply": {
+    "message": "按这个方向同步"
+  },
+  "onb_direction_hint": {
+    "message": "拿不准也没关系：在你选择之前不会合并任何东西，也可以先关掉，稍后在 设置 → 活动 里作答。"
+  },
   "onb_sync_title": {
     "message": "正在同步您的数据…"
   },
@@ -553,7 +580,7 @@
     "message": "扩展列表，显示缺失的扩展及其安装链接。"
   },
   "extension_name": {
-    "message": "Kesonode | 私人书签与标签页同步 v1.5.11"
+    "message": "Kesonode | 私人书签与标签页同步 v1.5.12"
   },
   "onb_err_perms_no_prompt": {
     "message": "此浏览器无法显示权限提示，因此 Kesonode 无法请求所需的访问权限。请在浏览器扩展设置的 Kesonode 权限页面上授予权限，然后再次点击完成。"

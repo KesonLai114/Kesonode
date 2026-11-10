@@ -498,6 +498,33 @@
       }
     }
   },
+  "onb_direction_subtitle": {
+    "message": "Tus otros dispositivos ya tienen marcadores en este almacenamiento. Decide qué lado prevalece antes de fusionar o publicar nada: esta pregunta solo se hace una vez."
+  },
+  "onb_direction_peers_one": {
+    "message": "1 dispositivo más tiene marcadores aquí.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
+  "onb_direction_peers_other": {
+    "message": "$COUNT$ dispositivos más tienen marcadores aquí.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
+  "onb_direction_apply": {
+    "message": "Sincronizar con esta opción"
+  },
+  "onb_direction_hint": {
+    "message": "¿No lo tienes claro? No se combina nada hasta que elijas: puedes cerrar esto y responder más tarde en Ajustes → Actividad."
+  },
   "onb_sync_title": {
     "message": "Sincronizando tus datos…"
   },
@@ -553,7 +580,7 @@
     "message": "Lista de extensiones, en la que se muestran las faltantes con enlaces de instalación."
   },
   "extension_name": {
-    "message": "Kesonode | Sincronización privada de marcadores y pestañas v1.5.11"
+    "message": "Kesonode | Sincronización privada de marcadores y pestañas v1.5.12"
   },
   "onb_err_perms_no_prompt": {
     "message": "Este navegador no puede mostrar mensajes de solicitud de permisos, por lo que Kesonode no pudo solicitar el acceso que necesita. Concédelo en la pantalla de permisos de Kesonode, en la configuración de extensiones de tu navegador, y luego vuelve a presionar Finalizar."

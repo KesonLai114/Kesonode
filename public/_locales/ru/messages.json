@@ -22,7 +22,7 @@
     "message": "ru"
   },
   "extension_name": {
-    "message": "Kesonode | Синхронизация закладок и вкладок v1.5.11"
+    "message": "Kesonode | Синхронизация закладок и вкладок v1.5.12"
   },
   "extension_description": {
     "message": "Приватная синхронизация браузера с вашим собственным хранилищем: Google Drive, WebDAV, GitHub."
@@ -512,6 +512,33 @@
         "content": "$1"
       }
     }
+  },
+  "onb_direction_subtitle": {
+    "message": "На других ваших устройствах в этом хранилище уже есть закладки. Прежде чем что-либо объединять или публиковать, решите, чья версия главнее — этот вопрос задаётся один раз."
+  },
+  "onb_direction_peers_one": {
+    "message": "Здесь есть закладки ещё с 1 устройства.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
+  "onb_direction_peers_other": {
+    "message": "Здесь есть закладки ещё с $COUNT$ устройств.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
+  "onb_direction_apply": {
+    "message": "Синхронизировать с этим выбором"
+  },
+  "onb_direction_hint": {
+    "message": "Не уверены? Пока вы не выберете, ничего не объединяется — можно закрыть это окно и ответить позже в разделе «Настройки → Активность»."
   },
   "onb_sync_title": {
     "message": "Синхронизация данных…"
