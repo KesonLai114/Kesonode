@@ -26,8 +26,47 @@ export class GitHubBackend implements IBackend {
   readonly type = "github" as const;
   /** Peer files this sync could not read; the engine surfaces these as a visible problem. */
   readonly failedPeers: string[] = [];
+  /**
+   * Did the GitHub API meter us during this backend's use?
+   *
+   * GitHub answers an exhausted quota with **403**, not 429, and says so in headers rather
+   * than in the status: `x-ratelimit-remaining: 0` for the hourly limit, `retry-after` for
+   * the secondary (burst) one. Read as a plain 403 it looked like a permissions problem, so
+   * the cycle failed with "GitHub list failed: 403" every minute and never backed off. The
+   * engine reads this after a cycle and parks automatic sync for a whole window. Per-instance
+   * working state, never part of the wire format.
+   */
+  rateLimited = false;
 
   constructor(private config: BackendConfig) {}
+
+  /** Is this response GitHub saying "over your rate limit" rather than "not allowed"? */
+  private isRateLimited(res: Response): boolean {
+    if (res.status !== 403 && res.status !== 429) return false;
+    if (res.status === 429) return true;
+    let remaining: string | null = null;
+    let retryAfter: string | null = null;
+    try {
+      remaining = res.headers?.get?.("x-ratelimit-remaining") ?? null;
+      retryAfter = res.headers?.get?.("retry-after") ?? null;
+    } catch {
+      return false; // a stubbed or exotic Response without headers
+    }
+    return remaining === "0" || !!retryAfter;
+  }
+
+  /**
+   * The error for a failed response, with a rate-limit refusal named as such and flagged so
+   * the engine can park automatic sync instead of repeating it every interval.
+   */
+  private httpError(res: Response, message: string): HttpError {
+    const limited = this.isRateLimited(res);
+    if (limited) {
+      this.rateLimited = true;
+      return new HttpError(res.status, `${message} ${rateLimitMessage("GitHub")}`, true);
+    }
+    return new HttpError(res.status, message);
+  }
 
   isConfigured(): boolean {
     const gh = this.config.github;
@@ -91,7 +130,7 @@ export class GitHubBackend implements IBackend {
         );
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          throw new HttpError(res.status, `GitHub upload failed: ${res.status}. ${err.message ?? ""}`);
+          throw this.httpError(res, `GitHub upload failed: ${res.status}. ${err.message ?? ""}`);
         }
 
         logger.info("GitHub.upload", `${packet.data_type} → ${filename}`);
@@ -155,8 +194,8 @@ export class GitHubBackend implements IBackend {
       // the error surfaced later as an unexplained upload failure instead, once per data
       // type, with nothing pointing at the real cause.
       if (!initRes.ok) {
-        throw new HttpError(
-          initRes.status,
+        throw this.httpError(
+          initRes,
           `Couldn't initialize '${this.repoSlug}': writing the first commit failed (HTTP ${initRes.status}). The token likely doesn't have Contents: write on this repository.`
         );
       }
@@ -178,7 +217,7 @@ export class GitHubBackend implements IBackend {
     // withRetry can back off and re-read, instead of silently omitting the sha and
     // turning a transient read failure into a spurious 409/422 create attempt.
     if (res.status === 404) return null;
-    if (!res.ok) throw new HttpError(res.status, `GitHub SHA read failed: ${res.status}`);
+    if (!res.ok) throw this.httpError(res, `GitHub SHA read failed: ${res.status}`);
     return (await res.json()).sha ?? null;
   }
 
@@ -193,7 +232,7 @@ export class GitHubBackend implements IBackend {
       // surfaces, instead of silently masquerading as "no peers" (which would hide the
       // peers' data and let this device overwrite the group with its own).
       if (res.status === 404) return [];
-      if (!res.ok) throw new HttpError(res.status, `GitHub list failed: ${res.status}`);
+      if (!res.ok) throw this.httpError(res, `GitHub list failed: ${res.status}`);
       const files: Array<{ name: string }> = await res.json();
       const matches = files.filter(f =>
         isPeerFileName(f.name, data_type) &&
@@ -210,7 +249,7 @@ export class GitHubBackend implements IBackend {
               `${GITHUB_API}/repos/${this.repoSlug}/contents/${this.path}/${m.name}?ref=${this.branch}`,
               { headers: { ...this.headers(), Accept: "application/vnd.github.raw+json" }, cache: "no-store" }
             );
-            if (!res.ok) throw new HttpError(res.status, `HTTP ${res.status}`);
+            if (!res.ok) throw this.httpError(res, `HTTP ${res.status}`);
             return res;
           });
         } catch (err) {
@@ -229,6 +268,10 @@ export class GitHubBackend implements IBackend {
         try {
           packets.push(JSON.parse(await r.text()) as SyncPacket);
         } catch {
+          // Recorded, not just logged: the owner skips a re-upload while its checksum
+          // still matches, so a file that is corrupt at rest never rewrites itself. Left
+          // silent it became a permanent divergence that reported "Synced".
+          this.failedPeers.push(`${m.name} (unreadable JSON)`);
           logger.warn("GitHub.downloadAll", `Skipping unreadable sync file: ${m.name}`);
         }
       }
@@ -250,7 +293,7 @@ export class GitHubBackend implements IBackend {
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          throw new HttpError(res.status, `GitHub putFile failed: ${res.status}. ${err.message ?? ""}`);
+          throw this.httpError(res, `GitHub putFile failed: ${res.status}. ${err.message ?? ""}`);
         }
       },
       { maxAttempts: 5, shouldRetry: (e) => defaultShouldRetry(e) || (e instanceof HttpError && e.status === 409) }
@@ -264,7 +307,7 @@ export class GitHubBackend implements IBackend {
         { headers: { ...this.headers(), Accept: "application/vnd.github.raw+json" }, cache: "no-store" }
       );
       if (res.status === 404) return null;
-      if (!res.ok) throw new HttpError(res.status, `GitHub getFile failed: ${res.status}`);
+      if (!res.ok) throw this.httpError(res, `GitHub getFile failed: ${res.status}`);
       return res.text();
     });
   }
@@ -276,7 +319,7 @@ export class GitHubBackend implements IBackend {
         { headers: this.headers(), cache: "no-store" }
       );
       if (res.status === 404) return [];
-      if (!res.ok) throw new HttpError(res.status, `GitHub list failed: ${res.status}`);
+      if (!res.ok) throw this.httpError(res, `GitHub list failed: ${res.status}`);
       const files: Array<{ name: string }> = await res.json();
       return files.map(f => f.name).filter(n => n.startsWith(prefix));
     });
@@ -291,7 +334,7 @@ export class GitHubBackend implements IBackend {
         method: "DELETE", headers: this.headers(),
         body: JSON.stringify({ message: `snapshot: delete ${name}`, sha, branch: this.branch }),
       });
-      if (!res.ok && res.status !== 404) throw new HttpError(res.status, `GitHub DELETE failed: ${res.status}`);
+      if (!res.ok && res.status !== 404) throw this.httpError(res, `GitHub DELETE failed: ${res.status}`);
     });
   }
 

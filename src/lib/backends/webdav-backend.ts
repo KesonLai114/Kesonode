@@ -485,6 +485,10 @@ export class WebDAVBackend implements IBackend {
         // 避免恶意/畸形后端用超大文件耗尽内存、拖死 Service Worker。
         const lenHeader = r?.headers?.get("content-length");
         if (lenHeader && Number(lenHeader) > MAX_PACKET_BYTES) {
+          // Reported, not just skipped. Every cycle would otherwise drop this peer in
+          // silence while the sync said "Synced" — one browser's data simply never
+          // merging, for as long as the file stays that big.
+          this.failedPeers.push(`${entry.name} (${lenHeader} bytes, over the ${Math.round(MAX_PACKET_BYTES / 1024 / 1024)} MB limit)`);
           logger.warn(
             "WebDAV.downloadAll",
             `Skipping oversized peer file (${lenHeader} bytes): ${entry.name}`
@@ -493,6 +497,7 @@ export class WebDAVBackend implements IBackend {
         }
         const body = await r.text();
         if (body.length > MAX_PACKET_BYTES) {
+          this.failedPeers.push(`${entry.name} (${body.length} bytes, over the ${Math.round(MAX_PACKET_BYTES / 1024 / 1024)} MB limit)`);
           logger.warn(
             "WebDAV.downloadAll",
             `Skipping oversized peer file (${body.length} bytes): ${entry.name}`
@@ -509,6 +514,12 @@ export class WebDAVBackend implements IBackend {
           // must not abort the whole sync — skip it; the owner rewrites it next sync.
           // Name only: an href is a full DAV path, which on Nextcloud/ownCloud embeds
           // the account username (see the note in upload()).
+          //
+          // Recorded as a failed peer because "the owner rewrites it next sync" is only
+          // true if its payload CHANGES: `uploadIfChanged` skips an unchanged payload, so
+          // a file that is corrupt at rest can sit there for months. Silently skipping it
+          // meant a permanent divergence that the UI called a clean sync.
+          this.failedPeers.push(`${entry.name} (unreadable JSON)`);
           logger.warn("WebDAV.downloadAll", `Skipping unreadable sync file: ${entry.name}`);
         }
       }

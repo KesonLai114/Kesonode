@@ -614,7 +614,7 @@ export class SyncEngine {
       const unreadable = [...new Set(backend.failedPeers ?? [])];
       if (unreadable.length) {
         problems.push(
-          `Couldn't read ${unreadable.length} device file(s) from the storage (${unreadable.slice(0, 2).join(", ")}${unreadable.length > 2 ? ", …" : ""}). Their data was NOT merged this sync — check that the storage is reachable; Settings → Activity shows the HTTP status for each file.`
+          `Couldn't read ${unreadable.length} device file(s) from the storage (${unreadable.slice(0, 2).join(", ")}${unreadable.length > 2 ? ", …" : ""}). Their data was NOT merged this sync — Settings → Activity names each file and why.`
         );
       }
       const prevState = await getState();
@@ -1324,7 +1324,9 @@ export class SyncEngine {
 
   /**
    * Apply the user's answer and publish immediately — an answer that waits out the sync
-   * interval reads as a dead button. The two destructive answers get a restore point first.
+   * interval reads as a dead button. The two destructive answers get a restore point first,
+   * and for "use the remote copy" that restore point is a PRECONDITION rather than a
+   * courtesy: no snapshot, no replacement.
    *
    * Nothing here invents a new shared file type: "remote" only rewrites THIS browser's
    * bookmarks, "local" only deletes peers' existing bookmark files, and both then publish
@@ -1336,7 +1338,20 @@ export class SyncEngine {
     if (choice !== "merge") {
       try { await this.snapshotNow({ origin: "manual" }); }
       catch (err) {
-        logger.warn("FirstSync", `Couldn't save a restore point before the ${choice} choice: ${err instanceof Error ? err.message : err}`);
+        const why = err instanceof Error ? err.message : String(err);
+        // "remote" REPLACES this browser's bookmark tree, so everything the chosen peer
+        // does not hold is gone from here — the one answer in Kesonode that can destroy
+        // local data with a single click. It must not run without the restore point it can
+        // be undone from: a line in the log is not a backup. Nothing has been touched at
+        // this point, the question stays open, and the user can retry or pick again.
+        // "local" only deletes PEER files, which their owners re-upload, so a refused
+        // snapshot there is noise rather than a hazard.
+        if (choice === "remote") {
+          throw new Error(
+            `Couldn't save a restore point before replacing this device's bookmarks, so nothing was changed. ${why}`
+          );
+        }
+        logger.warn("FirstSync", `Couldn't save a restore point before the ${choice} choice: ${why}`);
       }
     }
 

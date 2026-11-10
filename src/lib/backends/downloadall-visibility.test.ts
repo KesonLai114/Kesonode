@@ -202,3 +202,70 @@ describe("downloadAll — transient storage errors", () => {
     expect(backend.failedPeers).toHaveLength(1);
   });
 });
+
+// A file that is PRESENT but unreadable is the other half of the same problem: the peer is
+// skipped, so its data never merges, and the cycle used to call that a clean sync. These are
+// not transient either. `uploadIfChanged` on the owner skips a re-upload while its checksum
+// still matches, so a file that is corrupt at rest — or too big for the download guard —
+// never rewrites itself. Left out of `failedPeers` that is a permanent divergence the UI
+// reports as "Synced", forever.
+describe("downloadAll — a peer file we cannot read is reported, not skipped in silence", () => {
+  it("WebDAV: an unparseable peer file counts as a failed peer", async () => {
+    vi.stubGlobal("fetch", (_url: string, init?: { method?: string }) => {
+      if (init?.method === "PROPFIND") {
+        return Promise.resolve({ ok: true, status: 207, text: () => Promise.resolve(LISTING) } as Response);
+      }
+      return Promise.resolve({
+        ok: true, status: 200, headers: { get: () => null },
+        text: () => Promise.resolve("{ truncated"),
+      } as unknown as Response);
+    });
+
+    const backend = new WebDAVBackend(webdavCfg);
+    expect(await backend.downloadAll("extensions", "me")).toEqual([]);
+    const reported = backend.failedPeers.join(" ");
+    expect(reported).toContain(PEER);
+    expect(reported).toContain("unreadable");
+  });
+
+  it("WebDAV: an oversized peer file is named, with the size that got it skipped", async () => {
+    vi.stubGlobal("fetch", (_url: string, init?: { method?: string }) => {
+      if (init?.method === "PROPFIND") {
+        return Promise.resolve({ ok: true, status: 207, text: () => Promise.resolve(LISTING) } as Response);
+      }
+      return Promise.resolve({
+        ok: true, status: 200,
+        headers: { get: (k: string) => (k.toLowerCase() === "content-length" ? "40000000" : null) },
+        text: () => Promise.resolve(""),
+      } as unknown as Response);
+    });
+
+    const backend = new WebDAVBackend(webdavCfg);
+    expect(await backend.downloadAll("extensions", "me")).toEqual([]);
+    const reported = backend.failedPeers.join(" ");
+    expect(reported).toContain(PEER);
+    expect(reported).toContain("40000000");
+  });
+
+  it("GitHub: an unparseable peer file counts as a failed peer", async () => {
+    let call = 0;
+    vi.stubGlobal("fetch", () => {
+      call++;
+      const isListing = call === 1; // the listing, then the file it named
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve(isListing ? [{ name: PEER }] : {}),
+        text: () => Promise.resolve(isListing ? "" : "not json"),
+      } as unknown as Response);
+    });
+
+    const cfg: BackendConfig = {
+      type: "github", label: "GitHub", enabled: true,
+      github: { token: "t", repo: "owner/repo" },
+    };
+    const backend = new GitHubBackend(cfg);
+    await backend.downloadAll("extensions", "me");
+
+    expect(backend.failedPeers.join(" ")).toContain("unreadable");
+  });
+});

@@ -65,6 +65,34 @@ All notable changes to Konode. Format loosely follows
 
 ### Fixed
 
+- **Drive and GitHub rate limits now park the sync the same way WebDAV's do.** The
+  30-minute cooldown keyed off `HttpError.rateLimited`, which only the WebDAV backend ever
+  set — and neither of the other two providers says "slow down" in a status code. Drive
+  answers with **403** and puts `rateLimitExceeded` / `quotaExceeded` in
+  `error.errors[0].reason`; GitHub answers with **403** plus `x-ratelimit-remaining: 0`, or
+  `retry-after` for its secondary limit. Read as ordinary hard errors, both produced
+  "Drive list failed: 403" once a minute, forever, and spent the next window's quota on the
+  same refusal — the Nutstore failure mode in a different costume. Both backends now
+  classify the refusal (`IBackend.rateLimited`), say what to do about it, and Drive's
+  `storageQuotaExceeded` gets its own message, because an out-of-space Drive is not
+  something waiting fixes.
+
+- **"Use the remote copy" no longer replaces a bookmark tree it could not back up first.**
+  The first-sync answer that rebuilds this browser's bookmarks from a peer used to save a
+  restore point and carry on if that failed — a warning in the log instead of a backup, on
+  the one action that can destroy local data in a single click. A failed restore point now
+  aborts before anything is touched, keeps the question on screen with the reason, and
+  leaves the answer open. The other destructive answer (delete the peers' files) still only
+  warns: it deletes nothing on this device, and those devices re-upload.
+
+- **A peer file that is present but unreadable is reported, not skipped in silence.**
+  `downloadAll` skips an oversized file (25 MB guard) or a corrupt one so the other peers
+  still merge, but neither was recorded as a failed peer — so the cycle called itself clean
+  with one device's data missing from the merge, every time. It does not heal by itself
+  either: `uploadIfChanged` skips a re-upload while the owner's checksum still matches, so a
+  file that is corrupt at rest stays corrupt. Both cases now go into `failedPeers` with the
+  size or the reason, which is what turns it into a visible problem.
+
 - **A rate-limited WebDAV account now actually backs off, instead of retrying every
   minute for as long as it stays over quota.** Nutstore's free plan allows 600 requests
   per 30 minutes, counted across every app using the account, and answers 403 rather than

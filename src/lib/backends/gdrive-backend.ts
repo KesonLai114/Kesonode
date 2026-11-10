@@ -12,6 +12,38 @@ const FOLDER_MIME = "application/vnd.google-apps.folder";
 // own name through driveFolderName(). Resolved at CALL time, not at module load: the mode
 // is a live setting, and a const here would keep writing into the old folder silently.
 
+/**
+ * The Drive error reasons that mean "the account is over its request quota", not "this
+ * request was wrong".
+ *
+ * Drive almost never answers 429: it refuses with **403** and puts the machine-readable
+ * cause in the body (`error.errors[0].reason`). Read as an ordinary 403, that put Drive in
+ * the same class as a bad folder id, so the cycle reported "Drive list failed: 403" every
+ * minute and never backed off — the exact shape that made a free Nutstore account
+ * permanently over its own quota before WebDAV learned to park itself. A quota window is
+ * time-boxed, so the only useful response is to stop asking until it has passed.
+ */
+const DRIVE_RATE_REASONS = new Set([
+  "rateLimitExceeded",
+  "userRateLimitExceeded",
+  "quotaExceeded",
+  "dailyLimitExceeded",
+]);
+
+/** Drive's `error.errors[0].reason`, or null when the response carries none. */
+async function driveErrorReason(res: Response): Promise<string | null> {
+  if (res.status === 429) return "rateLimitExceeded"; // the plain form, when it is used
+  if (res.status !== 403) return null;
+  try {
+    // clone() so a caller that still wants the body (upload reads the message) can.
+    if (typeof res.clone !== "function") return null;
+    const body = (await res.clone().json()) as { error?: { errors?: Array<{ reason?: string }> } };
+    return body?.error?.errors?.[0]?.reason ?? null;
+  } catch {
+    return null; // empty or non-JSON body: an ordinary 403
+  }
+}
+
 /** The subset of a Drive file we need in order to choose between duplicates. */
 export interface DriveFileRef {
   id: string;
@@ -49,9 +81,39 @@ export class GDriveBackend implements IBackend {
   readonly type = "gdrive" as const;
   /** Peer files this sync could not read; the engine surfaces these as a visible problem. */
   readonly failedPeers: string[] = [];
+  /**
+   * Did Drive meter us during this backend's use? Set from the 403 reasons Drive actually
+   * uses for a quota (see DRIVE_RATE_REASONS). The engine reads it after a cycle and parks
+   * automatic sync for a whole window, instead of asking again every minute and spending
+   * the next window's quota too. Per-instance working state, never part of the wire format.
+   */
+  rateLimited = false;
   private folderId: string | null = null;
 
   constructor(private config: BackendConfig) {}
+
+  /**
+   * The error for a failed response, with Drive's quota refusals recognised for what they
+   * are. Everything else keeps the plain message: a 401 is described by the auth paths, and
+   * a 404 by the caller.
+   */
+  private async httpError(res: Response, message: string): Promise<HttpError> {
+    const reason = await driveErrorReason(res);
+    const limited = reason !== null && DRIVE_RATE_REASONS.has(reason);
+    if (limited) {
+      this.rateLimited = true;
+      return new HttpError(res.status, `${message} ${rateLimitMessage("Google Drive")}`, true);
+    }
+    if (reason === "storageQuotaExceeded") {
+      // Not a rate limit: nothing gets uploaded until space is freed, and no amount of
+      // waiting or retrying changes that. Say so once, in the words of the fix.
+      return new HttpError(
+        res.status,
+        `${message} Your Google Drive is out of space, so nothing can be uploaded until some is freed.`,
+      );
+    }
+    return new HttpError(res.status, reason ? `${message} (${reason})` : message);
+  }
 
   isConfigured(): boolean { return true; }
 
@@ -89,7 +151,7 @@ export class GDriveBackend implements IBackend {
     // a single transient 500 failed the whole cycle and put an error in the Activity log.
     return withRetry(async () => {
       const res = await fetch(`${DRIVE_API}/files?q=${q}&fields=files(id,name,createdTime)`, { headers: h });
-      if (!res.ok) throw new HttpError(res.status, `Drive folder lookup failed: ${res.status}`);
+      if (!res.ok) throw await this.httpError(res, `Drive folder lookup failed: ${res.status}`);
       return ((await res.json()).files ?? []) as DriveFileRef[];
     });
   }
@@ -150,7 +212,7 @@ export class GDriveBackend implements IBackend {
       method: "POST", headers: h,
       body: JSON.stringify({ name: driveFolderName(), mimeType: FOLDER_MIME }),
     });
-    if (!create.ok) throw new HttpError(create.status, `Drive folder create failed: ${create.status}`);
+    if (!create.ok) throw await this.httpError(create, `Drive folder create failed: ${create.status}`);
     const created = await create.json();
     if (!created.id) throw new Error("Drive folder create returned no id");
 
@@ -186,7 +248,7 @@ export class GDriveBackend implements IBackend {
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: content,
         });
-        if (!res.ok) throw new HttpError(res.status, `Drive update failed: ${res.status}`);
+        if (!res.ok) throw await this.httpError(res, `Drive update failed: ${res.status}`);
       } else {
         // Drive's multipart upload expects multipart/related (metadata part then
         // media part) — a FormData multipart/form-data body is silently ignored
@@ -204,7 +266,7 @@ export class GDriveBackend implements IBackend {
           headers: { Authorization: `Bearer ${token}`, "Content-Type": `multipart/related; boundary=${boundary}` },
           body,
         });
-        if (!res.ok) throw new HttpError(res.status, `Drive create failed: ${res.status}`);
+        if (!res.ok) throw await this.httpError(res, `Drive create failed: ${res.status}`);
       }
       logger.info("GDrive.upload", `${packet.data_type} → ${filename}`);
     });
@@ -223,7 +285,7 @@ export class GDriveBackend implements IBackend {
         : `name contains '${data_type}_'`;
       const q = encodeURIComponent(`${nameQuery} and '${folderId}' in parents and trashed=false`);
       const listRes = await fetch(`${DRIVE_API}/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc`, { headers: h, cache: "no-store" });
-      if (!listRes.ok) throw new HttpError(listRes.status, `Drive list failed: ${listRes.status}`);
+      if (!listRes.ok) throw await this.httpError(listRes, `Drive list failed: ${listRes.status}`);
       const { files } = await listRes.json();
       if (!files?.length) return [];
       // Every peer file (newest first), minus our own, and at most ONE file per device.
@@ -254,7 +316,9 @@ export class GDriveBackend implements IBackend {
         try {
           r = await withPeerRetry(async () => {
             const res = await fetch(`${DRIVE_API}/files/${f.id}?alt=media`, { headers: h, cache: "no-store" });
-            if (!res.ok) throw new HttpError(res.status, `HTTP ${res.status}`);
+            // Routed through httpError so a quota 403 is flagged `rateLimited` and the
+            // retry helper stops rather than spending the next window on the same refusal.
+            if (!res.ok) throw await this.httpError(res, `HTTP ${res.status}`);
             return res;
           });
         } catch (err) {
@@ -273,6 +337,10 @@ export class GDriveBackend implements IBackend {
         try {
           packets.push(JSON.parse(await r.text()) as SyncPacket);
         } catch {
+          // Not merely "unreadable this time": uploadIfChanged on the owner skips a
+          // re-upload while its checksum matches, so a file that is corrupt at rest stays
+          // corrupt. Recording it is what stops a permanent, silent divergence.
+          this.failedPeers.push(`${f.name} (unreadable JSON)`);
           logger.warn("GDrive.downloadAll", `Skipping unreadable sync file: ${f.name}`);
         }
       }
@@ -283,7 +351,7 @@ export class GDriveBackend implements IBackend {
   private async findFileId(name: string, folderId: string, h: HeadersInit): Promise<string | null> {
     const q = encodeURIComponent(`name='${name}' and '${folderId}' in parents and trashed=false`);
     const res = await fetch(`${DRIVE_API}/files?q=${q}&fields=files(id,createdTime)`, { headers: h });
-    if (!res.ok) throw new HttpError(res.status, `Drive lookup failed: ${res.status}`);
+    if (!res.ok) throw await this.httpError(res, `Drive lookup failed: ${res.status}`);
     const files = ((await res.json()).files ?? []) as DriveFileRef[];
     if (files.length > 1) {
       // A retried upload whose create response was lost can leave two files with the same
@@ -306,7 +374,7 @@ export class GDriveBackend implements IBackend {
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: content,
         });
-        if (!res.ok) throw new HttpError(res.status, `Drive update failed: ${res.status}`);
+        if (!res.ok) throw await this.httpError(res, `Drive update failed: ${res.status}`);
       } else {
         const boundary = `konode_snap_${name.length}_${content.length}`;
         const metadata = JSON.stringify({ name, parents: [folderId], mimeType: "application/json" });
@@ -321,7 +389,7 @@ export class GDriveBackend implements IBackend {
           headers: { Authorization: `Bearer ${token}`, "Content-Type": `multipart/related; boundary=${boundary}` },
           body,
         });
-        if (!res.ok) throw new HttpError(res.status, `Drive create failed: ${res.status}`);
+        if (!res.ok) throw await this.httpError(res, `Drive create failed: ${res.status}`);
       }
     });
   }
@@ -334,7 +402,7 @@ export class GDriveBackend implements IBackend {
       if (!id) return null;
       const r = await fetch(`${DRIVE_API}/files/${id}?alt=media`, { headers: h, cache: "no-store" });
       if (r.status === 404) return null;
-      if (!r.ok) throw new HttpError(r.status, `Drive GET failed: ${r.status}`);
+      if (!r.ok) throw await this.httpError(r, `Drive GET failed: ${r.status}`);
       return r.text();
     });
   }
@@ -346,7 +414,7 @@ export class GDriveBackend implements IBackend {
       // Drive's `contains` is a loose token match, so filter to a real startsWith below.
       const q = encodeURIComponent(`name contains '${prefix}' and '${folderId}' in parents and trashed=false`);
       const res = await fetch(`${DRIVE_API}/files?q=${q}&fields=files(name)`, { headers: h, cache: "no-store" });
-      if (!res.ok) throw new HttpError(res.status, `Drive list failed: ${res.status}`);
+      if (!res.ok) throw await this.httpError(res, `Drive list failed: ${res.status}`);
       const { files } = await res.json();
       return ((files ?? []) as Array<{ name: string }>).map(f => f.name).filter(n => n.startsWith(prefix));
     });
@@ -358,7 +426,7 @@ export class GDriveBackend implements IBackend {
       const h = await this.authHeaders();
       const q = encodeURIComponent(`name contains '${prefix}' and '${folderId}' in parents and trashed=false`);
       const res = await fetch(`${DRIVE_API}/files?q=${q}&fields=files(name,modifiedTime)`, { headers: h, cache: "no-store" });
-      if (!res.ok) throw new HttpError(res.status, `Drive list failed: ${res.status}`);
+      if (!res.ok) throw await this.httpError(res, `Drive list failed: ${res.status}`);
       const { files } = await res.json();
       return ((files ?? []) as Array<{ name: string; modifiedTime?: string }>)
         .filter(f => f.name.startsWith(prefix))
@@ -376,7 +444,7 @@ export class GDriveBackend implements IBackend {
       const id = await this.findFileId(name, folderId, h);
       if (!id) return;
       const res = await fetch(`${DRIVE_API}/files/${id}`, { method: "DELETE", headers: h });
-      if (!res.ok && res.status !== 404) throw new HttpError(res.status, `Drive DELETE failed: ${res.status}`);
+      if (!res.ok && res.status !== 404) throw await this.httpError(res, `Drive DELETE failed: ${res.status}`);
     });
   }
 
