@@ -418,10 +418,25 @@ export class WebDAVBackend implements IBackend {
       for (const entry of peers) {
         const href = entry.href;
         let fullUrl: string;
-        try { fullUrl = new URL(href, this.w.url).href; } catch { continue; }
+        try { fullUrl = new URL(href, this.w.url).href; } catch {
+          // Recorded, not just skipped: a peer file the listing named and we then dropped
+          // is exactly the "Synced, with one device missing" report failedPeers exists to
+          // prevent. Also what turns a first-sync "nothing could be read" into a reason.
+          this.failedPeers.push(`${entry.name} (unparseable href)`);
+          continue;
+        }
         let target: URL;
-        try { target = new URL(fullUrl); } catch { continue; }
+        try { target = new URL(fullUrl); } catch {
+          this.failedPeers.push(`${entry.name} (unparseable href)`);
+          continue;
+        }
         if (target.origin !== baseOrigin || !isSecureBackendUrl(fullUrl)) {
+          // The one cause of this that is worth naming to the user: a NAS or reverse proxy
+          // whose PROPFIND answers with hrefs on another scheme/port/host. The storage is
+          // reachable, the login is fine, and every peer file is refused all the same.
+          this.failedPeers.push(
+            `${entry.name} (the server listed it on ${target.origin} instead of ${baseOrigin}, and credentials are not sent there)`
+          );
           logger.warn(
             "WebDAV.downloadAll",
             `Skipping peer file with untrusted href (${target.origin}): credentials are not sent off-server.`

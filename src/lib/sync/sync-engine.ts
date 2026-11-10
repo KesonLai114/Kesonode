@@ -1412,12 +1412,30 @@ export class SyncEngine {
     }
 
     if (choice === "remote") {
-      const peers = orderPeersByTime(
-        await this.withBackend((b) => b.downloadAll("bookmarks", this.settings.device_id))
-      );
-      if (!peers.length) {
-        throw new Error("No other device's bookmarks could be read from the storage. Nothing was changed; try again once it is reachable.");
-      }
+      const read = await this.withBackend(async (b) => {
+        const peers = orderPeersByTime(await b.downloadAll("bookmarks", this.settings.device_id));
+        if (peers.length) {
+          return { peers, failed: [] as string[], rateLimited: false, peerFileThere: true };
+        }
+        const failed = [...(b.failedPeers ?? [])];
+        // One listing, on the failure path only. "The folder holds no peer file" and "it
+        // holds one we cannot read" need different advice, and an empty array cannot tell
+        // them apart. Cached on WebDAV, so this is a request only where it must be.
+        let peerFileThere = false;
+        try {
+          const names = (await Promise.all(listPrefixes("bookmarks").map((p) => b.listFiles(p)))).flat();
+          peerFileThere = names.some((n) => {
+            const id = peerDeviceIdFromName(n, "bookmarks");
+            return !!id && id !== this.settings.device_id;
+          });
+        } catch {
+          // The storage refusing the listing is not new information: `failed` already
+          // says what it refused, and a refusal here must not replace that with itself.
+        }
+        return { peers, failed, rateLimited: b.rateLimited === true, peerFileThere };
+      });
+      const peers = read.peers;
+      if (!peers.length) throw new Error(this.explainNoRemoteCopy(read));
       // openPacket() enforces the packet version, E2EE agreement and the SHA-256 checksum.
       const payload = await this.openPacket(peers[0]);
       await importBookmarks(payload, "replace", this.settings.conflict_strategy, this.settings.bulk_delete_percent, 0);
@@ -1459,6 +1477,39 @@ export class SyncEngine {
     const cleared = await setState({ first_sync_pending: null });
     this.onStateChange(cleared);
     await this.sync(["bookmarks"], { force: true });
+  }
+
+  /**
+   * Why "use the remote copy" found nothing to copy.
+   *
+   * `downloadAll` answers with an empty array for four unrelated situations — no peer
+   * file at all, a file the storage refuses (403/quota/503), a file over the size limit,
+   * and a file whose bytes are not JSON — and it skips each of them by design, so one bad
+   * file cannot stop the rest of a merge. Here there is no rest: that single file IS the
+   * answer, so the reason is the message. Sending the user to "try again once it is
+   * reachable" was right for exactly one of the four and misled them on the other three —
+   * most tellingly on a WebDAV whose PROPFIND hrefs point at another origin, where the
+   * storage is perfectly reachable and every peer file is refused for a different reason.
+   *
+   * The per-file reasons the backend recorded are the message; the folder probe only
+   * distinguishes "nothing there" from "there but unreadable".
+   */
+  private explainNoRemoteCopy(read: {
+    failed: string[];
+    rateLimited: boolean;
+    peerFileThere: boolean;
+  }): string {
+    const detail = read.failed.length
+      ? `The other device's bookmark file is in the sync folder but could not be read: ${
+        read.failed.slice(0, 3).join("; ")
+      }${read.failed.length > 3 ? ` (and ${read.failed.length - 3} more)` : ""}.`
+      : read.peerFileThere
+        ? "The other device's bookmark file is in the sync folder, but the storage would not serve it."
+        : "The sync folder no longer holds another device's bookmark file, so there is no copy to take.";
+    const next = read.rateLimited
+      ? "The storage is refusing requests for now (quota or rate limit), so choosing again will not help until that window passes."
+      : "Settings → Activity has the log lines for the failed read (\"Couldn't download\", or \"Skipping peer file\") — check the folder and the connection against those.";
+    return `${detail} Nothing was changed: this device's bookmarks are untouched and the question stays open. ${next}`;
   }
 
   /** Write a snapshot of the current bookmark tree to the backend.

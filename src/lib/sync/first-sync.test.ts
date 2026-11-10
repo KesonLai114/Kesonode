@@ -14,6 +14,9 @@ const h = vi.hoisted(() => ({
   listFails: false,
   peerFailures: [] as string[],
   deleteFails: false,
+  // Set to make downloadAll answer [] while failedPeers already names the reason, which
+  // is exactly what a backend does when a peer file exists and cannot be read.
+  downloadFails: false,
 }));
 
 vi.mock("@/lib/backends/abstract-backend", () => ({
@@ -38,11 +41,13 @@ vi.mock("@/lib/backends/abstract-backend", () => ({
       h.blobs.set(`konode_${p.data_type}_${p.device_id}.json`, JSON.stringify(p));
     },
     downloadAll: async (dataType: string, excludeDeviceId?: string) =>
-      [...h.blobs.values()]
-        .map((raw) => {
-          try { return JSON.parse(raw) as SyncPacket; } catch { return null; }
-        })
-        .filter((p): p is SyncPacket => !!p && p.data_type === dataType && p.device_id !== excludeDeviceId),
+      h.downloadFails
+        ? []
+        : [...h.blobs.values()]
+          .map((raw) => {
+            try { return JSON.parse(raw) as SyncPacket; } catch { return null; }
+          })
+          .filter((p): p is SyncPacket => !!p && p.data_type === dataType && p.device_id !== excludeDeviceId),
     listVersions: async () => [],
     testConnection: async () => ({ ok: true, message: "" }),
   }),
@@ -119,6 +124,7 @@ beforeEach(() => {
   h.listFails = false;
   h.peerFailures.length = 0;
   h.deleteFails = false;
+  h.downloadFails = false;
 });
 
 describe("first sync chooses a direction before anything is merged", () => {
@@ -233,5 +239,35 @@ describe("first sync chooses a direction before anything is merged", () => {
     await expect(e.chooseFirstSync("local")).rejects.toThrow(/could not be removed/);
     expect((await getFirstSync())?.done ?? false).toBe(false); // still open for a retry
     expect(h.blobs.has("konode_bookmarks_peer.json")).toBe(true);
+  });
+
+  it("remote repeats the storage's own reason when the peer file cannot be read", async () => {
+    await seedLocal();
+    await putPeer("peer", ["https://peer.example/"]);
+    const e = engine();
+    await e.sync();
+
+    // The file is there and listed; fetching it is what fails. "try again once it is
+    // reachable" is useless advice for a 403/oversize/corrupt file, and the reason was
+    // already recorded — it just never reached the user.
+    h.downloadFails = true;
+    h.peerFailures.push("konode_bookmarks_peer.json (HTTP 403)");
+
+    await expect(e.chooseFirstSync("remote")).rejects.toThrow(/HTTP 403/);
+    expect((await getFirstSync())?.done ?? false).toBe(false); // the question stays open
+    expect(await localUrls()).toEqual(["https://local.example/"]); // untouched
+  });
+
+  it("remote says the folder holds no peer file when it has been emptied by hand", async () => {
+    await seedLocal();
+    await putPeer("peer", ["https://peer.example/"]);
+    const e = engine();
+    await e.sync();
+
+    h.blobs.delete("konode_bookmarks_peer.json"); // tidied away in the storage
+
+    await expect(e.chooseFirstSync("remote")).rejects.toThrow(/no longer holds another device's bookmark file/);
+    expect((await getFirstSync())?.done ?? false).toBe(false);
+    expect(await localUrls()).toEqual(["https://local.example/"]);
   });
 });
