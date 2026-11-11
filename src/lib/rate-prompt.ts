@@ -44,7 +44,8 @@ export async function noteCleanSync(now: number = Date.now()): Promise<boolean> 
 
 /**
  * Whether the popup is showing something the user has to deal with: an error, a conflict,
- * a held-back deletion. The card never sits beside one.
+ * a held-back deletion, or the unanswered first-sync direction. The card never sits
+ * beside one.
  *
  * "syncing" is not on the list, and it cannot be judged on its own: a sync clears the last
  * error the moment it starts, so a device failing every minute looks clean for the second
@@ -53,11 +54,11 @@ export async function noteCleanSync(now: number = Date.now()): Promise<boolean> 
  * blinks in between two failures.
  */
 export function stateNeedsUser(
-  st: Pick<SyncState, "status" | "last_error" | "recovery_notice" | "pending_conflicts"> | null,
+  st: Pick<SyncState, "status" | "last_error" | "recovery_notice" | "pending_conflicts" | "first_sync_pending"> | null,
 ): boolean {
   if (!st) return false;
   return st.status === "error" || st.status === "conflict" || !!st.last_error ||
-    !!st.recovery_notice || (st.pending_conflicts?.length ?? 0) > 0;
+    !!st.recovery_notice || (st.pending_conflicts?.length ?? 0) > 0 || !!st.first_sync_pending;
 }
 
 /** Whether the card has earned its one showing. The popup's own conditions come on top. */

@@ -277,7 +277,7 @@
     "message": "Usa il tuo indirizzo Fastmail completo come nome utente e una password per l'app con accesso a Files (WebDAV)."
   },
   "extension_name": {
-    "message": "Kesonode | Sync privata di segnalibri e schede v1.5.14"
+    "message": "Kesonode | Sync privata di segnalibri e schede v1.5.17"
   },
   "popup_setup_title": {
     "message": "Completa la configurazione di Kesonode"
@@ -538,7 +538,7 @@
     "message": "Sincronizza con questa scelta"
   },
   "onb_direction_hint": {
-    "message": "Non sei sicuro? Nulla viene unito finché non scegli: puoi chiudere e rispondere più tardi in Impostazioni → Attività."
+    "message": "Non sei sicuro? Nulla viene unito finché non scegli: puoi chiudere; il popup di Kesonode ti ricorderà di completare la scelta."
   },
   "onb_sync_title": {
     "message": "Sincronizzazione dei dati in corso…"
@@ -936,6 +936,73 @@
   "opt_bulk_delete_desc": {
     "message": "Una rete di sicurezza: se le eliminazioni di un altro dispositivo dovessero rimuovere più di questa percentuale dei tuoi segnalibri locali, l'unione le ignora (protegge da una sincronizzazione corrotta che cancellerebbe il tuo albero). Aumentala se elimini spesso in blocco."
   },
+  "opt_baseline_label": {
+    "message": "Base dei segnalibri"
+  },
+  "opt_baseline_desc": {
+    "message": "Il browser a cui è stato allineato il gruppo. Gli altri browser lo applicano una volta e poi tornano a unire in entrambe le direzioni."
+  },
+  "opt_baseline_none": {
+    "message": "Non impostata: i segnalibri vengono uniti in entrambe le direzioni."
+  },
+  "opt_baseline_mine": {
+    "message": "Questo browser · $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "11 nov 2026, 10:42"
+      }
+    }
+  },
+  "opt_baseline_other": {
+    "message": "$DEVICE$ · $TIME$",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      },
+      "time": {
+        "content": "$2",
+        "example": "11 nov 2026, 10:42"
+      }
+    }
+  },
+  "opt_baseline_loading": {
+    "message": "Lettura…"
+  },
+  "opt_baseline_unavailable": {
+    "message": "Impossibile leggere la base dallo spazio di archiviazione."
+  },
+  "opt_baseline_cached": {
+    "message": "· ultimo valore noto"
+  },
+  "opt_baseline_waiting": {
+    "message": "Questo browser non è ancora allineato a $DEVICE$; lo sarà alla prossima sincronizzazione.",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      }
+    }
+  },
+  "opt_baseline_set": {
+    "message": "Usa questo browser come base"
+  },
+  "opt_baseline_clear": {
+    "message": "Rimuovi la base"
+  },
+  "opt_baseline_confirm_set": {
+    "message": "Gli altri browser sostituiranno i propri segnalibri con la copia di questo browser una volta. Ognuno salva prima il proprio punto di ripristino; poi la sincronizzazione torna bidirezionale."
+  },
+  "opt_baseline_confirm_clear": {
+    "message": "I segnalibri restano invariati su ogni browser e la sincronizzazione torna bidirezionale."
+  },
+  "opt_baseline_set_done": {
+    "message": "Questo browser è ora la base. Gli altri si allineeranno alla prossima sincronizzazione."
+  },
+  "opt_baseline_cleared": {
+    "message": "Base rimossa. I segnalibri tornano a unirsi in entrambe le direzioni."
+  },
   "bm_exclude_label": {
     "message": "Escludi segnalibri dalla sincronizzazione"
   },
@@ -1172,8 +1239,23 @@
   "opt_status_next_off": {
     "message": "Solo manuale"
   },
+  "opt_status_paused": {
+    "message": "In pausa fino alle $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "18:42"
+      }
+    }
+  },
+  "opt_status_paused_hint": {
+    "message": "La sincronizzazione automatica sta aspettando la fine della finestra di limite di richieste dello spazio di archiviazione (o di un errore ripetuto). Premi Sincronizza ora nel popup per riprovare subito."
+  },
   "opt_status_totals": {
-    "message": "Totali per tipo"
+    "message": "Elementi per tipo"
+  },
+  "opt_status_totals_hint": {
+    "message": "Quanti elementi di ciascun tipo ha sincronizzato l'ultima volta questo dispositivo: segnalibri come link, cronologia nell'intervallo configurato, estensioni installate qui e sessioni come sessioni di altri dispositivi ripristinabili."
   },
   "opt_devices_section": {
     "message": "Dispositivi"
@@ -1431,6 +1513,9 @@
   },
   "opt_snap_empty": {
     "message": "Ancora nessun punto di ripristino. Creane uno qui sopra, oppure ne verrà salvato uno automaticamente se un'eliminazione insolita viene bloccata."
+  },
+  "opt_snap_partial": {
+    "message": "Al momento non è possibile elencare lo spazio di archiviazione (probabilmente una finestra di limite di richieste), quindi vengono mostrati solo i punti di ripristino che questo dispositivo conosce già. Quelli creati su altri dispositivi appariranno quando tornerà a rispondere: non è stato eliminato nulla."
   },
   "opt_snap_count_one": {
     "message": "$COUNT$ segnalibro",
@@ -1867,12 +1952,6 @@
   "opt_first_sync_head": {
     "message": "Prima sincronizzazione: scegli la direzione"
   },
-  "opt_first_sync_head_sub": {
-    "message": "Quando questo browser e gli altri dispositivi hanno già dei preferiti, decidi prima quale lato prevale. Puoi scegliere di nuovo qui in qualsiasi momento."
-  },
-  "opt_first_sync_pending": {
-    "message": "La sincronizzazione è in pausa finché non scegli. Gli altri dispositivi hanno già dei preferiti nell’archivio."
-  },
   "opt_first_sync_merge": {
     "message": "Unisci (consigliato)"
   },
@@ -1886,10 +1965,10 @@
     "message": "Cancella i preferiti di questo browser e li ricostruisce dal dispositivo più recente. Prima viene salvato un punto di ripristino, ma i preferiti presenti solo qui vanno persi."
   },
   "opt_first_sync_local": {
-    "message": "Usa la copia di questo browser"
+    "message": "Usa questo browser come base"
   },
   "opt_first_sync_local_desc": {
-    "message": "Elimina dall’archivio i file dei preferiti degli altri dispositivi, lasciando solo questo albero. Chiudi prima Kesonode sugli altri dispositivi, altrimenti caricheranno di nuovo i loro preferiti."
+    "message": "Gli altri browser sostituiscono i propri segnalibri con la copia di questo browser una volta e salvano prima il proprio punto di ripristino. Poi la sincronizzazione torna bidirezionale, quindi le modifiche successive di ogni browser arrivano comunque ovunque."
   },
   "opt_first_sync_busy": {
     "message": "Elaborazione…"

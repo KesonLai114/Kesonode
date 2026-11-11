@@ -22,7 +22,7 @@
     "message": "hu"
   },
   "extension_name": {
-    "message": "Kesonode | Privát könyvjelző- és lapszinkron v1.5.14"
+    "message": "Kesonode | Privát könyvjelző- és lapszinkron v1.5.17"
   },
   "extension_description": {
     "message": "Adatvédelem-központú böngésző-szinkronizálás a saját tárhelyedre: Google Drive, WebDAV, GitHub."
@@ -538,7 +538,7 @@
     "message": "Szinkronizálás ezzel a választással"
   },
   "onb_direction_hint": {
-    "message": "Nem biztos? Amíg nem választasz, semmi nem olvad össze – bezárhatod ezt, és később a Beállítások → Aktivitás alatt is válaszolhatsz."
+    "message": "Nem biztos? Amíg nem választasz, semmi nem olvad össze – bezárhatod ezt; a Kesonode felugró ablaka emlékeztet, hogy fejezd be a választást."
   },
   "onb_sync_title": {
     "message": "Adatok szinkronizálása…"
@@ -936,6 +936,73 @@
   "opt_bulk_delete_desc": {
     "message": "Védőháló: ha egy másik eszköz törlései a helyi könyvjelzőidnek ennél nagyobb részét vinnék el, az összefésülés kihagyja őket (ez védi a könyvjelzőfádat egy hibás szinkronizálástól). Növeld, ha rendszeresen törölsz nagy tételben."
   },
+  "opt_baseline_label": {
+    "message": "Könyvjelző-alap"
+  },
+  "opt_baseline_desc": {
+    "message": "Az a böngésző, amelyhez a csoport igazodott. A többi böngésző egyszer alkalmazza, utána ismét kétirányú az egyesítés."
+  },
+  "opt_baseline_none": {
+    "message": "Nincs beállítva – a könyvjelzők kétirányban egyesülnek."
+  },
+  "opt_baseline_mine": {
+    "message": "Ez a böngésző · $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "2026. nov. 11. 10:42"
+      }
+    }
+  },
+  "opt_baseline_other": {
+    "message": "$DEVICE$ · $TIME$",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      },
+      "time": {
+        "content": "$2",
+        "example": "2026. nov. 11. 10:42"
+      }
+    }
+  },
+  "opt_baseline_loading": {
+    "message": "Olvasás…"
+  },
+  "opt_baseline_unavailable": {
+    "message": "Az alap nem olvasható be a tárhelyről."
+  },
+  "opt_baseline_cached": {
+    "message": "· utolsó ismert érték"
+  },
+  "opt_baseline_waiting": {
+    "message": "Ez a böngésző még nem igazodott a következőhöz: $DEVICE$; ez a következő szinkronizáláskor történik meg.",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      }
+    }
+  },
+  "opt_baseline_set": {
+    "message": "Ez a böngésző legyen az alap"
+  },
+  "opt_baseline_clear": {
+    "message": "Alap törlése"
+  },
+  "opt_baseline_confirm_set": {
+    "message": "A többi böngésző egyszer lecseréli a könyvjelzőit ennek a böngészőnek a másolatára. Mindegyik előbb menti a saját visszaállítási pontját, utána pedig ismét kétirányú a szinkronizálás."
+  },
+  "opt_baseline_confirm_clear": {
+    "message": "A könyvjelzők minden böngészőben megmaradnak, és a szinkronizálás ismét kétirányú lesz."
+  },
+  "opt_baseline_set_done": {
+    "message": "Ez a böngésző mostantól az alap. A többi böngésző a következő szinkronizáláskor igazodik hozzá."
+  },
+  "opt_baseline_cleared": {
+    "message": "Az alap törölve. A könyvjelzők ismét kétirányban egyesülnek."
+  },
   "bm_exclude_label": {
     "message": "Könyvjelzők kizárása a szinkronból"
   },
@@ -1172,8 +1239,23 @@
   "opt_status_next_off": {
     "message": "Csak kézi"
   },
+  "opt_status_paused": {
+    "message": "Szünetel $TIME$-ig",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "18:42"
+      }
+    }
+  },
+  "opt_status_paused_hint": {
+    "message": "Az automatikus szinkronizálás a tárhely kéréskorlátjának lejártára vár (vagy egy ismétlődő hibára). A felugró ablak „Szinkronizálás most” gombjával azonnal újrapróbálhatja."
+  },
   "opt_status_totals": {
-    "message": "Típusonkénti összesítés"
+    "message": "Elemek típusonként"
+  },
+  "opt_status_totals_hint": {
+    "message": "Hány elemet szinkronizált legutóbb ez az eszköz típusonként: könyvjelzők hivatkozásként, előzmények a beállított időtartamban, az itt telepített kiegészítők, a munkamenetek pedig más eszközök visszaállítható munkameneteiként."
   },
   "opt_devices_section": {
     "message": "Eszközök"
@@ -1431,6 +1513,9 @@
   },
   "opt_snap_empty": {
     "message": "Még nincs visszaállítási pont. Készíts egyet fent, vagy automatikusan mentődik, ha a Kesonode egyszer blokkol egy szokatlan törlést."
+  },
+  "opt_snap_partial": {
+    "message": "A tárhely most nem listázható (valószínűleg kéréskorlátos időszak), ezért csak azok a visszaállítási pontok láthatók, amelyeket ez az eszköz már ismer. A más eszközökön készültek akkor jelennek meg, amikor újra válaszol — semmi nem törlődött."
   },
   "opt_snap_count_one": {
     "message": "$COUNT$ könyvjelző",
@@ -1867,12 +1952,6 @@
   "opt_first_sync_head": {
     "message": "Első szinkronizálás: irány választása"
   },
-  "opt_first_sync_head_sub": {
-    "message": "Ha ebben a böngészőben és a többi eszközön is vannak már könyvjelzők, előbb döntsd el, melyik legyen a meghatározó. Itt később bármikor újra választhatsz."
-  },
-  "opt_first_sync_pending": {
-    "message": "A szinkronizálás szünetel, amíg nem választasz. A többi eszköznek már vannak könyvjelzői a tárolóban."
-  },
   "opt_first_sync_merge": {
     "message": "Összefésülés (ajánlott)"
   },
@@ -1886,10 +1965,10 @@
     "message": "Törli a böngésző könyvjelzőit, és a legfrissebb másik eszközéből építi újra. Előtte visszaállítási pont készül, de az csak itt meglévő könyvjelzők elvesznek."
   },
   "opt_first_sync_local": {
-    "message": "A böngésző példányának használata"
+    "message": "Ez a böngésző legyen az alap"
   },
   "opt_first_sync_local_desc": {
-    "message": "Törli a többi eszköz könyvjelzőfájljait a tárolóból, így csak ez a fa marad. Előbb zárd be a Kesonode-ot a többi eszközön, különben újra feltöltik a sajátjukat."
+    "message": "A többi böngésző egyszer lecseréli a könyvjelzőit ennek a böngészőnek a másolatára, és előtte mindegyik menti a saját visszaállítási pontját. Utána ismét kétirányú a szinkronizálás, így a későbbi módosítások minden böngészőből továbbra is mindenhová eljutnak."
   },
   "opt_first_sync_busy": {
     "message": "Folyamatban…"

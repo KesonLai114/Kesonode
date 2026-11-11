@@ -34,7 +34,7 @@
     "message": "立即同步"
   },
   "extension_name": {
-    "message": "Kesonode | 私人書籤與分頁同步 v1.5.14"
+    "message": "Kesonode | 私人書籤與分頁同步 v1.5.17"
   },
   "extension_description": {
     "message": "隱私優先的瀏覽器同步，資料存放在你自己的空間：Google Drive、WebDAV、GitHub。"
@@ -538,7 +538,7 @@
     "message": "依這個方向同步"
   },
   "onb_direction_hint": {
-    "message": "拿不準也沒關係：在你選擇之前不會合併任何東西，也可以先關掉，稍後在 設定 → 活動 裡作答。"
+    "message": "拿不準也沒關係：在你選擇之前不會合併任何東西，可以先關掉，稍後開啟 Kesonode 的彈窗會提醒你繼續作答。"
   },
   "onb_sync_title": {
     "message": "正在同步你的資料…"
@@ -936,6 +936,73 @@
   "opt_bulk_delete_desc": {
     "message": "一道安全防線：如果某台裝置要刪掉的書籤超過你本機書籤的這個比例，合併時就會跳過它們（避免一次壞掉的同步清空你的書籤樹）。如果你本來就常常大量刪除，可以調高。"
   },
+  "opt_baseline_label": {
+    "message": "書籤基準"
+  },
+  "opt_baseline_desc": {
+    "message": "已對齊到的瀏覽器；其他瀏覽器套用一次後，恢復雙向合併。"
+  },
+  "opt_baseline_none": {
+    "message": "未設定 — 書籤雙向合併。"
+  },
+  "opt_baseline_mine": {
+    "message": "本機 · $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "2026年11月11日 10:42"
+      }
+    }
+  },
+  "opt_baseline_other": {
+    "message": "$DEVICE$ · $TIME$",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      },
+      "time": {
+        "content": "$2",
+        "example": "2026年11月11日 10:42"
+      }
+    }
+  },
+  "opt_baseline_loading": {
+    "message": "正在讀取…"
+  },
+  "opt_baseline_unavailable": {
+    "message": "無法從儲存空間讀取基準設定。"
+  },
+  "opt_baseline_cached": {
+    "message": "· 上次讀取的值"
+  },
+  "opt_baseline_waiting": {
+    "message": "本機尚未與 $DEVICE$ 對齊，將於下次同步時進行。",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      }
+    }
+  },
+  "opt_baseline_set": {
+    "message": "設本機為基準"
+  },
+  "opt_baseline_clear": {
+    "message": "清除基準"
+  },
+  "opt_baseline_confirm_set": {
+    "message": "其他瀏覽器將用本機的書籤取代一次。每個瀏覽器在取代前都會先儲存自己的還原點，之後恢復雙向同步。"
+  },
+  "opt_baseline_confirm_clear": {
+    "message": "各瀏覽器的書籤保持不變，同步恢復為雙向。"
+  },
+  "opt_baseline_set_done": {
+    "message": "已將本機設為基準。其他瀏覽器將於下次同步時對齊。"
+  },
+  "opt_baseline_cleared": {
+    "message": "基準已清除，書籤恢復雙向合併。"
+  },
   "bm_exclude_label": {
     "message": "將書籤排除在同步之外"
   },
@@ -1172,8 +1239,23 @@
   "opt_status_next_off": {
     "message": "僅手動"
   },
+  "opt_status_paused": {
+    "message": "已暫停至 $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "18:42"
+      }
+    }
+  },
+  "opt_status_paused_hint": {
+    "message": "自動同步正在等待儲存的限流視窗結束（或等待重複錯誤退避）。可在彈出視窗中點「立即同步」馬上重試。"
+  },
   "opt_status_totals": {
-    "message": "各類型累計"
+    "message": "各類型項目"
+  },
+  "opt_status_totals_hint": {
+    "message": "本裝置最近一次同步的項目數：書籤按連結數、歷史記錄按設定的時間範圍、擴充功能為本機安裝數，工作階段為其他裝置可還原的工作階段數。"
   },
   "opt_devices_section": {
     "message": "裝置"
@@ -1431,6 +1513,9 @@
   },
   "opt_snap_empty": {
     "message": "還沒有任何還原點。可以在上面建立一個，或是在異常刪除被攔下時自動儲存一個。"
+  },
+  "opt_snap_partial": {
+    "message": "暫時無法列出儲存中的還原點（多為限流視窗），這裡只顯示本機已知的還原點。其他裝置建立的會在儲存恢復回應後出現——沒有刪除任何內容。"
   },
   "opt_snap_count_one": {
     "message": "$COUNT$ 個書籤",
@@ -1867,12 +1952,6 @@
   "opt_first_sync_head": {
     "message": "首次同步：選擇同步方向"
   },
-  "opt_first_sync_head_sub": {
-    "message": "當本瀏覽器與其它裝置都已有書籤時，先決定以哪邊為準。之後也可以隨時回到這裡重新選擇。"
-  },
-  "opt_first_sync_pending": {
-    "message": "同步已暫停，等待你選擇：雲端已有其它裝置的書籤。"
-  },
   "opt_first_sync_merge": {
     "message": "合併（建議）"
   },
@@ -1886,10 +1965,10 @@
     "message": "清空本機書籤，按雲端最新那台裝置的書籤重建。會先自動儲存還原點，但本機獨有的書籤將不再保留。"
   },
   "opt_first_sync_local": {
-    "message": "以本機為準"
+    "message": "以本機為基準"
   },
   "opt_first_sync_local_desc": {
-    "message": "刪除雲端其它裝置的書籤檔，只保留本機這份。其它裝置若在線會重新上傳自己的書籤，請先關閉它們。"
+    "message": "其他瀏覽器會用本機的書籤取代一次，取代前各自儲存還原點。之後恢復雙向同步，各瀏覽器之後的新變更仍會互相同步。"
   },
   "opt_first_sync_busy": {
     "message": "處理中…"

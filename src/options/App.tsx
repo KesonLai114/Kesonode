@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from "react";
-import type { SyncSettings, SyncState, BackendType, DataType, BackendConfig, SyncExtension, SnapshotMeta, DeviceInfo, DeviceBrowser } from "@/lib/types";
+import type { SyncSettings, SyncState, BackendType, DataType, BackendConfig, SyncExtension, SnapshotMeta, DeviceInfo, DeviceBrowser, BaselineInfo } from "@/lib/types";
 import { sendMessage, request } from "@/lib/utils/messaging";
 import { t, tParts, plural, isolate, catalogueLocale } from "@/lib/utils/i18n";
 import { DORMANT_DEVICE_DAYS, isDormant, relativeTime } from "@/lib/device-activity";
@@ -53,7 +53,6 @@ import {
 import { BookmarkExclusionTree } from "@/lib/ui/bookmark-exclusion-tree";
 import { BookmarkList } from "@/lib/ui/bookmark-list";
 import { ConflictsSection } from "@/options/conflicts-section";
-import { FirstSyncSection } from "@/options/first-sync-section";
 // Shown in the About section. The manifest is the single source of truth for the
 // version — bump `package.json` and the build stamps it into the manifest.
 const APP_VERSION = browser.runtime.getManifest().version;
@@ -454,6 +453,10 @@ export default function OptionsApp() {
 
   // Activity tab: bookmark restore points (loaded when the tab opens).
   const [snapshots, setSnapshots] = useState<SnapshotMeta[]>([]);
+  // The count came from THIS device's records because the folder could not be listed.
+  // The rows are real; another device's point may simply be missing, and saying so is
+  // the difference between "still there, not shown yet" and "they disappeared".
+  const [snapPartial, setSnapPartial] = useState(false);
   // "Windows 10/11 · Chromium · b3f1c2d4" — the origin device, for a restore point's
   // default name and the supporting line. Empty when the shared index carried no device
   // info (older points), so the fallback stays "Bookmark restore point" alone.
@@ -473,6 +476,14 @@ export default function OptionsApp() {
   // "loading" | "ok" | an error message — so an empty list can be told apart from a
   // list we never managed to read. See the Activity effect below.
   const [snapLoad, setSnapLoad] = useState<"loading" | "ok" | string>("loading");
+  // The group's bookmark baseline. Shown on Activity and changed in Settings → Device,
+  // because the first-sync question is asked once and correcting it later must not mean
+  // re-importing a configuration.
+  const [baseline, setBaseline] = useState<BaselineInfo | null>(null);
+  const [baselineLoad, setBaselineLoad] = useState<"loading" | "ok" | string>("loading");
+  const [baselineBusy, setBaselineBusy] = useState(false);
+  const [baselineMsg, setBaselineMsg] = useState<string | null>(null);
+  const [baselineConfirm, setBaselineConfirm] = useState<"set" | "clear" | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   // Inline rename for one restore point, and the value being typed into it.
@@ -489,6 +500,10 @@ export default function OptionsApp() {
   // When the periodic alarm next fires, or null for "no automatic sync". Read from the
   // worker rather than guessed from `last_sync + interval`: see the message's comment.
   const [nextSyncAt, setNextSyncAt] = useState<number | null>(null);
+  // Automatic sync is parked until this time (rate-limit window or repeated-failure
+  // pause). The alarm still reports its normal next slot, which would otherwise promise a
+  // cycle that will be skipped.
+  const [syncPausedUntil, setSyncPausedUntil] = useState<number | null>(null);
   // "3 minutes ago" is computed at render, so a page left open would keep saying three
   // minutes forever. This is the tick that makes it age; 30 s is the granularity the
   // phrase itself has.
@@ -544,7 +559,10 @@ export default function OptionsApp() {
    */
   const loadSchedule = useCallback(async () => {
     const r = await request({ type: "GET_SYNC_SCHEDULE" });
-    if (r.ok && r.res.type === "SYNC_SCHEDULE") setNextSyncAt(r.res.payload.next_at);
+    if (r.ok && r.res.type === "SYNC_SCHEDULE") {
+      setNextSyncAt(r.res.payload.next_at);
+      setSyncPausedUntil(r.res.payload.paused_until);
+    }
   }, []);
 
   useEffect(() => {
@@ -667,7 +685,10 @@ export default function OptionsApp() {
     // dropped and the rejection was unhandled, so both read as "you have no backups".
     const r = await request({ type: "LIST_SNAPSHOTS" });
     if (!r.ok) { setSnapLoad(r.error); return; }
-    if (r.res.type === "SNAPSHOTS") setSnapshots(r.res.payload);
+    if (r.res.type === "SNAPSHOTS") {
+      setSnapshots(r.res.payload);
+      setSnapPartial(r.res.partial === true);
+    }
     setSnapLoad("ok");
   }, []);
 
@@ -675,6 +696,21 @@ export default function OptionsApp() {
     if (activeNav !== "activity") return;
     void loadSnapshots();
   }, [activeNav, loadSnapshots]);
+
+  // The shared marker, so Activity can say which browser the group is aligned to and
+  // Settings → Device can change it. Its own read state: "we could not ask" must not be
+  // printed as "no baseline is set", the same rule the device and restore-point lists follow.
+  const loadBaseline = useCallback(async () => {
+    const r = await request({ type: "GET_BASELINE" });
+    if (!r.ok) { setBaselineLoad(r.error); return; }
+    if (r.res.type === "BASELINE") { setBaseline(r.res.payload); setBaselineLoad("ok"); }
+    else setBaselineLoad(t("opt_devices_bad_reply"));
+  }, []);
+
+  useEffect(() => {
+    if (activeNav !== "activity" && activeNav !== "device") return;
+    void loadBaseline();
+  }, [activeNav, loadBaseline]);
 
   /**
    * The status bar's two moving parts: when the next pull is due, and how long ago the last
@@ -742,23 +778,31 @@ export default function OptionsApp() {
     // two answers are stale from this moment — cheap to re-ask, and false if we don't.
     setNow(Date.now());
     void loadSchedule();
-    if (activeNav !== "activity") return;
+    if (activeNav !== "activity" && activeNav !== "device") return;
     if (document.visibilityState !== "visible") { missedWhileHidden.current = true; return; }
-    void loadDevices();
-    void loadSnapshots(true);
-  }, [syncState?.status, activeNav, loadDevices, loadSnapshots, loadRemoteExtensions, loadSchedule]);
+    if (activeNav === "activity") {
+      void loadDevices();
+      void loadSnapshots(true);
+    }
+    // The marker can change on another browser, and adoption happens during the cycle
+    // that just finished, so both tabs' answer may be stale from this moment.
+    void loadBaseline();
+  }, [syncState?.status, activeNav, loadDevices, loadSnapshots, loadRemoteExtensions, loadSchedule, loadBaseline]);
 
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState !== "visible" || !missedWhileHidden.current) return;
-      if (activeNav !== "activity") return; // opening Activity reads both anyway
+      if (activeNav !== "activity" && activeNav !== "device") return; // opening the tab reads anyway
       missedWhileHidden.current = false;
-      void loadDevices();
-      void loadSnapshots(true);
+      if (activeNav === "activity") {
+        void loadDevices();
+        void loadSnapshots(true);
+      }
+      void loadBaseline();
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [activeNav, loadDevices, loadSnapshots]);
+  }, [activeNav, loadDevices, loadSnapshots, loadBaseline]);
 
   // Latch onboarding_completed the first time a working config is seen (backend
   // configured + a data type on), so the setup card doesn't reappear when the user
@@ -930,7 +974,7 @@ export default function OptionsApp() {
     try {
       const sent = await request({ type: "CREATE_SNAPSHOT", payload: { pinned } });
       if (!sent.ok) setSnapMsg(sent.error);
-      else if (sent.res.type === "SNAPSHOTS") { setSnapshots(sent.res.payload); setSnapMsg(t("opt_snap_saved")); }
+      else if (sent.res.type === "SNAPSHOTS") { setSnapshots(sent.res.payload); setSnapPartial(sent.res.partial === true); setSnapMsg(t("opt_snap_saved")); }
     } finally {
       setSnapBusy(false);
     }
@@ -941,7 +985,7 @@ export default function OptionsApp() {
     try {
       const sent = await request({ type: "RENAME_SNAPSHOT", payload: { name, label: renameValue } });
       if (!sent.ok) setSnapMsg(sent.error);
-      else if (sent.res.type === "SNAPSHOTS") { setSnapshots(sent.res.payload); setRenaming(null); }
+      else if (sent.res.type === "SNAPSHOTS") { setSnapshots(sent.res.payload); setSnapPartial(sent.res.partial === true); setRenaming(null); }
     } finally {
       setSnapBusy(false);
     }
@@ -952,7 +996,7 @@ export default function OptionsApp() {
     try {
       const sent = await request({ type: "PIN_SNAPSHOT", payload: { name, pinned } });
       if (!sent.ok) setSnapMsg(sent.error);
-      else if (sent.res.type === "SNAPSHOTS") setSnapshots(sent.res.payload);
+      else if (sent.res.type === "SNAPSHOTS") { setSnapshots(sent.res.payload); setSnapPartial(sent.res.partial === true); }
     } finally {
       setSnapBusy(false);
     }
@@ -966,6 +1010,39 @@ export default function OptionsApp() {
       else if (sent.res.type === "SNAPSHOT_RESTORED") setSnapMsg(plural("opt_snap_restored", sent.res.payload.restored));
     } finally {
       setSnapBusy(false);
+    }
+  };
+
+  // Designating this browser as the bookmark baseline. The worker saves a restore point,
+  // removes the peers' bookmark files and publishes the marker before answering, so the
+  // spinner covers the whole operation and the status row updates from its reply.
+  const setBaselineHere = async () => {
+    setBaselineBusy(true); setBaselineMsg(null); setBaselineConfirm(null);
+    try {
+      const r = await request({ type: "SET_BASELINE" });
+      if (!r.ok) setBaselineMsg(r.error);
+      else if (r.res.type === "BASELINE") {
+        setBaseline(r.res.payload);
+        setBaselineLoad("ok");
+        setBaselineMsg(t("opt_baseline_set_done"));
+      }
+    } finally {
+      setBaselineBusy(false);
+    }
+  };
+
+  const clearBaselineHere = async () => {
+    setBaselineBusy(true); setBaselineMsg(null); setBaselineConfirm(null);
+    try {
+      const r = await request({ type: "CLEAR_BASELINE" });
+      if (!r.ok) setBaselineMsg(r.error);
+      else if (r.res.type === "BASELINE") {
+        setBaseline(r.res.payload);
+        setBaselineLoad("ok");
+        setBaselineMsg(t("opt_baseline_cleared"));
+      }
+    } finally {
+      setBaselineBusy(false);
     }
   };
 
@@ -1003,7 +1080,7 @@ export default function OptionsApp() {
     try {
       const sent = await request({ type: "DELETE_SNAPSHOT", payload: { name } });
       if (!sent.ok) setSnapMsg(sent.error);
-      else if (sent.res.type === "SNAPSHOTS") { setSnapshots(sent.res.payload); setSnapMsg(t("opt_snap_deleted")); }
+      else if (sent.res.type === "SNAPSHOTS") { setSnapshots(sent.res.payload); setSnapPartial(sent.res.partial === true); setSnapMsg(t("opt_snap_deleted")); }
     } finally {
       setSnapBusy(false);
     }
@@ -1154,7 +1231,10 @@ export default function OptionsApp() {
     }
     setTesting(true); setTestStatus(null);
     try {
-      const sent = await request({ type: "TEST_BACKEND", payload: { backend: settings.active_backend } });
+      const sent = await request({
+        type: "TEST_BACKEND",
+        payload: { backend: settings.active_backend, config: getBackend(settings.active_backend) },
+      });
       if (!sent.ok) setTestStatus({ ok: false, message: sent.error });
       else if (sent.res.type === "TEST_RESULT") setTestStatus(sent.res.payload);
     } finally {
@@ -1460,14 +1540,20 @@ export default function OptionsApp() {
       const s = r[KEYS.GDRIVE_SESSION] as { email?: string; displayName?: string } | undefined;
       setGdriveUser(s ? { email: s.email ?? "", displayName: s.displayName ?? "" } : null);
       setConfigImportStatus("ok");
-      // A host permission can only be requested from a user gesture. When this call lost
-      // it (we just spent several awaits importing), Settings shows a dedicated button.
-      if (outcome.hostOrigin) {
-        const result = await ensurePermission({ origins: [outcome.hostOrigin] });
-        if (result !== "granted" && !(await hasPermission({ origins: [outcome.hostOrigin] }))) {
-          setWebdavAuthNeeded(outcome.hostOrigin);
-        }
+      // Deliberately NOT asking here. The import already spent the click's user gesture on
+      // the file read and the overwrite/risk questions, and `permissions.request()` outside
+      // one can only throw "This function must be called during a user gesture" — which the
+      // logger then recorded as a warning in Activity for a permission nobody refused. The
+      // row below owns a real button, and a click on THAT still carries the gesture.
+      if (outcome.hostOrigin && !(await hasPermission({ origins: [outcome.hostOrigin] }))) {
+        setWebdavAuthNeeded(outcome.hostOrigin);
       }
+      // A restored configuration has never synced in THIS browser. Without a cycle here it
+      // sits idle until the next alarm, and if this device already has bookmarks that
+      // cycle parks on the "which side wins" question — which the popup shows and bookmark
+      // changes respect by doing nothing. Start it now so the question surfaces while the
+      // user is still looking at the import they just made.
+      void sendMessage({ type: "SYNC_NOW" }).catch(() => {});
       setTimeout(() => setConfigImportStatus("idle"), 4000);
     } catch {
       setConfigImportStatus("error");
@@ -1553,10 +1639,45 @@ export default function OptionsApp() {
   const showSetupCard = !settings.onboarding_completed && !setupComplete;
 
   // Statistics-tab derived values.
-  const totalSyncRuns = syncState ? Object.values(syncState.sync_counts).reduce((a, b) => a + b, 0) : 0;
+  // Completed cycles, not the sum of per-type counters: a normal cycle bumps every
+  // enabled type, so summing them printed 683 + 682 = 1365 runs for ~683 cycles.
+  // States written before `sync_cycles` existed fall back to their largest count.
+  const totalSyncRuns = syncState
+    ? (syncState.sync_cycles ?? Math.max(0, ...Object.values(syncState.sync_counts)))
+    : 0;
   const lastSyncLabel = syncState?.last_sync
     ? new Date(syncState.last_sync).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
     : t("opt_stat_never");
+
+  // The group's bookmark baseline, named the way both tabs show it. "Mine" is this
+  // install's id; `adopted_at` trailing the marker means this browser has not been through
+  // its one-time replacement yet, which is a fact worth saying rather than leaving the
+  // user to wonder why its bookmarks still look different.
+  const baselineMine = baseline?.marker != null && baseline.marker.device_id === settings.device_id;
+  const baselineAwaiting = baseline?.marker != null && !baselineMine
+    && baseline.adopted_at !== baseline.marker.at;
+  // Cached means the storage could not answer, so the marker on screen may already have
+  // been replaced on another browser. Read is worth showing; acting on it is not.
+  const baselineReady = baselineLoad === "ok" && baseline?.cached !== true;
+  const baselineDeviceName = baseline?.marker
+    ? (baseline.marker.device_label?.trim() || baseline.marker.device_id.replace(/-/g, "").slice(0, 8))
+    : "";
+  const baselineTime = baseline?.marker
+    ? new Date(baseline.marker.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })
+    : "";
+  const baselineValue = baselineLoad === "loading"
+    ? t("opt_baseline_loading")
+    : baselineLoad !== "ok"
+      ? t("opt_baseline_unavailable")
+      : !baseline?.marker
+        ? t("opt_baseline_none")
+        : baselineMine
+          ? t("opt_baseline_mine", baselineTime)
+          : t("opt_baseline_other", [isolate(baselineDeviceName), baselineTime]);
+  const baselineNote = baselineLoad !== "ok" ? null
+    : baseline?.cached ? t("opt_baseline_cached")
+    : baselineAwaiting ? t("opt_baseline_waiting", isolate(baselineDeviceName))
+    : null;
 
   return (
     <div className="settings-root">
@@ -2309,6 +2430,81 @@ export default function OptionsApp() {
               </div>
 
               <div className="settings-section">
+                <div className="settings-card-head">
+                  {t("opt_baseline_label")}
+                  <span className="head-sub">{t("opt_baseline_desc")}</span>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{baselineValue}</div>
+                      {baselineNote && <div className="row-desc">{baselineNote}</div>}
+                      {/* A failed read keeps its diagnostic here, the way the device list
+                          does: the sentence above says what it means, this says why. */}
+                      {baselineLoad !== "loading" && baselineLoad !== "ok" && (
+                        <div className="row-desc" style={{ color: "var(--danger)" }}>{baselineLoad}</div>
+                      )}
+                      {/* The outcome has to be SAID: the marker lives in the storage and
+                          the reply can carry a refused delete or a failed restore point. */}
+                      {baselineMsg && <div className="row-desc">{baselineMsg}</div>}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                    {baselineConfirm === "set" ? (
+                      <>
+                        <button className="btn-secondary" onClick={() => setBaselineConfirm(null)} disabled={baselineBusy}>
+                          {t("opt_cancel")}
+                        </button>
+                        <button className="btn-secondary" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}
+                          onClick={setBaselineHere} disabled={baselineBusy}>
+                          {baselineBusy ? <Loader2 size={12} className="spin" /> : <Star size={12} />} {t("opt_baseline_set")}
+                        </button>
+                      </>
+                    ) : baselineConfirm === "clear" ? (
+                      <>
+                        <button className="btn-secondary" onClick={() => setBaselineConfirm(null)} disabled={baselineBusy}>
+                          {t("opt_cancel")}
+                        </button>
+                        <button className="btn-secondary" style={{ color: "var(--danger)" }}
+                          onClick={clearBaselineHere} disabled={baselineBusy}>
+                          {baselineBusy ? <Loader2 size={12} className="spin" /> : null} {t("opt_baseline_clear")}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {baselineReady && !baselineMine && (
+                          <button className="btn-secondary" disabled={baselineBusy}
+                            onClick={() => setBaselineConfirm("set")}>
+                            <Star size={12} /> {t("opt_baseline_set")}
+                          </button>
+                        )}
+                        {baselineReady && baseline?.marker && (
+                          <button className="btn-secondary" disabled={baselineBusy}
+                            onClick={() => setBaselineConfirm("clear")}>
+                            {t("opt_baseline_clear")}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+                {baselineConfirm === "set" && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div className="row-desc">{t("opt_baseline_confirm_set")}</div>
+                    </div>
+                  </div>
+                )}
+                {baselineConfirm === "clear" && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div className="row-desc">{t("opt_baseline_confirm_clear")}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="settings-section">
                 <div className="settings-card-head">{t("opt_conflict_section")}</div>
                 {([
                   { value: "lww",           labelKey: "opt_conflict_lww",    descKey: "opt_conflict_lww_desc" },
@@ -2379,18 +2575,6 @@ export default function OptionsApp() {
                 <h1 className="page-title">{t("opt_activity_head")}</h1>
                 <p className="page-subtitle">{t("opt_activity_head_sub")}</p>
 
-                {/* A first-sync direction question outranks the conflict cards: until it is
-                    answered, no merge has happened at all, so the conflicts below would be
-                    about a tree the user may be about to replace. Also the manual entry
-                    point for choosing the direction again after a storage outage. */}
-                <FirstSyncSection
-                  pending={!!syncState?.first_sync_pending}
-                  onResolved={async () => {
-                    const after = await request({ type: "GET_STATE" });
-                    if (after.ok && after.res.type === "STATE") setSyncState(after.res.payload);
-                  }}
-                />
-
                 {/* ── Conflicts (#35) ──
                     First on the tab, because the popup's Resolve button lands here and a
                     question waiting for an answer should not sit below the device list. */}
@@ -2441,30 +2625,47 @@ export default function OptionsApp() {
                       </div>
                       <div>
                         <div className="sync-fact-label">{t("opt_status_next_sync")}</div>
-                        {/* null means the alarm is gone, i.e. automatic sync is off — not
-                            "unknown", so it says so instead of leaving a blank. */}
-                        <div className="sync-fact-value">
-                          {nextSyncAt === null
-                            ? t("opt_status_next_off")
-                            : new Date(nextSyncAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {/* A parked worker still has a perfectly normal alarm time, so the
+                            periodic answer alone claimed the next cycle would run. When a
+                            cooldown/backoff is in force, say when auto sync resumes. */}
+                        <div className="sync-fact-value" title={syncPausedUntil !== null ? t("opt_status_paused_hint") : undefined}>
+                          {syncPausedUntil !== null
+                            ? t("opt_status_paused", new Date(syncPausedUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
+                            : nextSyncAt === null
+                              ? t("opt_status_next_off")
+                              : new Date(nextSyncAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* What has actually gone across, per type. The type switches are on
-                      another tab, so "why is history always 0" needed somewhere to look. */}
+                  {/* What has actually gone across, per type — ITEMS, not completed syncs
+                      (this printed "extensions 682" for a browser with a few dozen). The
+                      type switches are on another tab, so "why is history always 0" needed
+                      somewhere to look. */}
                   <div className="sync-types">
-                    <span className="sync-types-label">{t("opt_status_totals")}</span>
+                    <span className="sync-types-label" title={t("opt_status_totals_hint")}>{t("opt_status_totals")}</span>
                     {DATA_TYPES.map((type) => {
                       const on = enabledTypes === null || enabledTypes.includes(type);
                       return (
                         <span key={type} className={`sync-type ${on ? "" : "off"}`}>
                           {t(`datatype_${type}`)}
-                          <b>{syncState?.sync_counts?.[type] ?? 0}</b>
+                          <b>{(syncState?.sync_totals?.[type] ?? 0).toLocaleString()}</b>
                         </span>
                       );
                     })}
+                  </div>
+
+                  {/* Which browser the group's bookmarks were aligned to. A one-time
+                      "use this copy" answer is otherwise invisible afterwards, which made
+                      it look like the choice had been ignored. Changing it lives in
+                      Settings → Device, where the rest of the identity is. */}
+                  <div className="sync-baseline">
+                    <span className="sync-types-label">{t("opt_baseline_label")}</span>
+                    <span className="sync-baseline-value">
+                      {baselineValue}
+                      {baselineNote && <span className="sync-baseline-note">{baselineNote}</span>}
+                    </span>
                   </div>
 
                   <div className="stat-grid">
@@ -2688,6 +2889,15 @@ export default function OptionsApp() {
                       </button>
                     </div>
                   </div>
+                  {/* A short list built from this device's own records is not evidence that
+                      the other devices' points are gone. Say which one this is. */}
+                  {snapPartial && (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="row-desc"><AlertTriangle size={12} style={{ verticalAlign: "-2px", marginRight: 6 }} />{t("opt_snap_partial")}</div>
+                      </div>
+                    </div>
+                  )}
                   {snapLoad === "loading" ? (
                     <div className="settings-row">
                       <div className="settings-row-left"><div className="row-desc">{t("opt_snap_loading")}</div></div>
@@ -3507,6 +3717,11 @@ const STYLES = `
   /* A type that is switched off still shows its (frozen) total: dimmed says "this is why
      it never moves", which a hidden chip would leave unexplained. */
   .sync-type.off { opacity: .45; }
+
+  /* The group's bookmark baseline, under the per-type chips. */
+  .sync-baseline { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-sm); padding: 0 var(--sp-xl) var(--sp-md); }
+  .sync-baseline-value { font-size: var(--fs-sm); color: var(--text-primary); overflow-wrap: anywhere; }
+  .sync-baseline-note { margin-left: var(--sp-sm); font-size: var(--fs-xs); color: var(--text-secondary); }
 
   /* The bar and the chips sit between the card head and the tiles, so the tiles need the
      divider back — their 1px gaps only separate them from each other. */

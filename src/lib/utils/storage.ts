@@ -208,6 +208,8 @@ export const DEFAULT_STATE: SyncState = {
   failed_types: [],
   pending_conflicts: [],
   sync_counts: { bookmarks: 0, history: 0, sessions: 0, extensions: 0 },
+  sync_totals: { bookmarks: 0, history: 0, sessions: 0, extensions: 0 },
+  sync_cycles: 0,
   bytes_transferred: 0,
   recovery_notice: null,
   guard_notice: null,
@@ -273,6 +275,13 @@ export const KEYS = {
   // restored from another browser's config MUST make its own choice, not inherit one.
   // Never travels in a SyncPacket.
   FIRST_SYNC: "konode_first_sync",
+  // The last bookmark-baseline marker this device read, so Activity can still name it
+  // inside a rate-limit window. Read-only cache: the shared file stays the source of truth.
+  BASELINE_CACHE: "konode_baseline_cache",
+  // Which baseline generation THIS device has already applied. Per-install working state:
+  // a settings import that mints a new identity must not inherit "already aligned", or the
+  // browser would keep a tree that was never replaced. Never travels in a SyncPacket.
+  BASELINE_ADOPTED: "konode_baseline_adopted",
   // Local change guard (lib/sync/change-guard.ts): the last bookmark tree this device
   // published, and a once-per-incident latch for its restore point. Both are per-install
   // working state and never travel in a SyncPacket.
@@ -707,6 +716,16 @@ export async function importSettingsBackup(
     // stripped first, so importing an old backup doesn't paste `Mac · Edge · 451dbeb9`
     // into the new device's name.
     partial.device_label = defaultDeviceLabel();
+    // Upload checksums are keyed by data type and do NOT travel in a backup, so they still
+    // describe what the PREVIOUS identity published. A payload that happens to be
+    // unchanged (an extension list, a quiet history window) would then be skipped as
+    // "already uploaded" and the new id's file would never be written — the orphaned-file
+    // symptom getSettings() warns about. One re-upload per type costs little; a missing
+    // file costs the device its place in the group.
+    await browser.storage.local.remove(KEYS.UPLOAD_CHECKSUMS);
+    // "Already aligned with the group baseline" names the OLD identity's tree. This
+    // browser now publishes as someone else, so let it check the shared marker again.
+    await browser.storage.local.remove([KEYS.BASELINE_ADOPTED, KEYS.BASELINE_CACHE]);
   }
 
   const updated = await saveSettings(partial as Partial<SyncSettings>);
@@ -1455,17 +1474,25 @@ export async function clearStaleSyncLock(): Promise<boolean> {
  */
 export function normalizeRemoteSessions(raw: unknown): RemoteSessionEntry[] {
   if (!raw || typeof raw !== "object") return [];
+  // A session is a peer packet's content, so every part of it can be malformed. `tabs`
+  // must be a non-empty ARRAY of objects: a string also has a `length`, and a null entry
+  // reaches `t.url` in the popup's row and in the restore path.
+  const usable = (e: unknown): e is RemoteSessionEntry => {
+    const s = (e as { session?: { tabs?: unknown } } | null | undefined)?.session;
+    return !!s && Array.isArray(s.tabs) && s.tabs.length > 0
+      && s.tabs.every((t) => !!t && typeof t === "object");
+  };
   // Legacy single-object shape: { device_id, timestamp, session }
   if ("session" in (raw as Record<string, unknown>)) {
     const entry = raw as RemoteSessionEntry;
-    return entry.session?.tabs?.length ? [entry] : [];
+    return usable(entry) ? [entry] : [];
   }
   // Current map shape: { [device_id]: RemoteSessionEntry }
   // The timestamps are coalesced because they come from a peer's packet, which nothing
   // validates them in: one entry with a missing timestamp threw a TypeError out of this
   // sort, and the popup lost the whole session list to it.
   return Object.values(raw as Record<string, RemoteSessionEntry>)
-    .filter((e) => e?.session?.tabs?.length)
+    .filter(usable)
     .sort((a, b) => (b.timestamp ?? "").localeCompare(a.timestamp ?? ""));
 }
 
@@ -1644,6 +1671,23 @@ export async function setLastUploadChecksum(dataType: DataType, checksum: string
   const r = await browser.storage.local.get(KEYS.UPLOAD_CHECKSUMS);
   const map = { ...((r[KEYS.UPLOAD_CHECKSUMS] as Record<string, string>) ?? {}), [dataType]: checksum };
   await set(KEYS.UPLOAD_CHECKSUMS, map);
+}
+
+/**
+ * Forget ONE data type's "last uploaded" checksum so the next sync re-publishes it.
+ *
+ * For changes that only concern one type. Clearing the whole key (see
+ * `clearUploadChecksums`) makes every other type upload again too, which for history
+ * can be megabytes — on a metered storage that is the difference between a small
+ * publish and a quota window spent on files that did not change.
+ */
+export async function clearUploadChecksum(dataType: DataType): Promise<void> {
+  const r = await browser.storage.local.get(KEYS.UPLOAD_CHECKSUMS);
+  const map = r[KEYS.UPLOAD_CHECKSUMS] as Record<string, string> | undefined;
+  if (!map || !(dataType in map)) return;
+  const next = { ...map };
+  delete next[dataType];
+  await set(KEYS.UPLOAD_CHECKSUMS, next);
 }
 
 /**

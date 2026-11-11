@@ -91,9 +91,9 @@ const TYPE_META: Record<"bookmarks" | "extensions" | "history" | "sessions", { I
 };
 
 /**
- * The three answers to "which side wins", worded by the SAME messages Settings → Activity
- * uses. Two copies of this text would drift apart, and the consequence of the two screens
- * disagreeing about what "use the remote copy" does is a user losing their bookmarks.
+ * The three answers to "which side wins", worded by the shared `opt_first_sync_*`
+ * messages. The consequences are severe — one of them clears this browser's bookmarks —
+ * so the text lives in one place and is not reworded per screen.
  * Merge is first because it is the recommendation and the one that deletes nothing.
  */
 const DIRECTION_OPTIONS: ReadonlyArray<{ choice: FirstSyncChoice; label: string; desc: string }> = [
@@ -338,9 +338,22 @@ export default function OnboardingApp() {
   // so we poll GET_STATE and light up each enabled type as its sync_counts entry
   // climbs past the baseline captured when the user hit Finish.
   const [syncCounts, setSyncCounts] = useState<Record<string, number>>({});
+  // Item counts for the progress rows. `sync_counts` decides DONE (it ticks once per
+  // completed type), but printing it showed "1, 2, 3" where the user expects how much
+  // data moved. A type that has not finished its first sync yet has no total — the row
+  // simply shows no number.
+  const [syncTotals, setSyncTotals] = useState<Record<string, number>>({});
+  // A restored backup still owes this browser its first sync, and the optional
+  // permissions it needs may be granted one screen later.
+  const importedSyncPending = useRef(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncTimedOut, setSyncTimedOut] = useState(false);
   const baselineRef = useRef<Record<string, number>>({});
+  // A finished install reaches the direction step from the popup's notice, so `finish()`
+  // never ran and no baseline was captured. The progress step would then compare against
+  // `{}` — every type with any earlier sync would read as "already done" before the answer
+  // had even been applied. Seeded at the click instead (see applyDirection).
+  const needsBaselineBeforeAnswer = useRef(false);
   const enabledTypes = (["bookmarks", "extensions", "history", "sessions"] as const).filter((k) => dataTypes[k]);
   // Everything off is not a setup: it saves an empty `enabled_types`, and the first sync
   // then fails before it reaches the backend. The step that owns the choice refuses to
@@ -405,6 +418,29 @@ export default function OnboardingApp() {
         // the wizard. This is the guard that keeps a reloaded tab, a bookmark, or a link
         // from walking a finished install through `finish()` — which would replace the
         // backend list and the enabled data types with this page's empty defaults.
+        //
+        // The one exception is an unanswered first-sync question: the sync can find peers
+        // after the wizard has closed, and the popup's notice lands here. This is the
+        // only surface that asks it, so showing "already set up" would leave it unanswerable.
+        const pending = stateRes.ok && stateRes.res.type === "STATE"
+          ? stateRes.res.payload.first_sync_pending : null;
+        if (settings?.onboarding_completed && !RECONFIGURE && pending) {
+          setConfigured(settings);
+          setDeviceLabel(detected);
+          setFirstSyncPeers(pending.peer_count);
+          // No `finish()` on this path, so the progress screen needs a baseline taken at
+          // the click (see applyDirection).
+          needsBaselineBeforeAnswer.current = true;
+          const on = settings.enabled_types ?? ["bookmarks"];
+          setDataTypes({
+            bookmarks: on.includes("bookmarks"),
+            extensions: on.includes("extensions"),
+            history: on.includes("history"),
+            sessions: on.includes("sessions"),
+          });
+          setStep("direction");
+          return;
+        }
         if (settings?.onboarding_completed && !RECONFIGURE) {
           setConfigured(settings);
           setDeviceLabel(detected);
@@ -424,8 +460,6 @@ export default function OnboardingApp() {
           // settings are already saved by then, so the one thing still open can be the
           // unanswered first-sync question — and showing "welcome" to an install that
           // finished while the sync waits for that answer is a dead end.
-          const pending = stateRes.ok && stateRes.res.type === "STATE"
-            ? stateRes.res.payload.first_sync_pending : null;
           if (pending) {
             setFirstSyncPeers(pending.peer_count);
             // Take the types that are actually ON, so the progress step after the answer
@@ -495,6 +529,7 @@ export default function OnboardingApp() {
       if (cancelled || !res.ok || res.res.type !== "STATE") return;
       const st = res.res.payload;
       setSyncCounts(st.sync_counts);
+      setSyncTotals(st.sync_totals ?? {});
       // Nothing is merged and no counter moves while this is set, so the old behaviour
       // was a spinner that ran into the 20-second timeout and then told the user to go
       // and find the answer in Settings. Ask it here, in the window they are already in.
@@ -531,6 +566,38 @@ export default function OnboardingApp() {
     if (idx < STEPS.length - 1) setStep(STEPS[idx + 1]);
   };
 
+  /**
+   * Run the first sync right after a settings backup is restored.
+   *
+   * The import path used to stop on a "restored" screen. The backend and credentials were
+   * saved, but nothing was merged or published — and on a browser that already has
+   * bookmarks the next cycle parks on the "which side wins" question, which only THIS page
+   * and the popup can ask. Bookmark changes refuse to sync while it waits, so two installs
+   * with identical settings sat there without exchanging a single bookmark. The question
+   * is part of setup, and setup is still on screen: run the sync and let the direction
+   * step ask it now.
+   */
+  const startImportedSync = async (enabled: readonly string[] | undefined) => {
+    const on = enabled ?? ["bookmarks"];
+    // The progress step waits for the types that are actually ON. It reads `dataTypes`,
+    // so seed it from the imported settings rather than this page's empty defaults.
+    setDataTypes({
+      bookmarks: on.includes("bookmarks"),
+      extensions: on.includes("extensions"),
+      history: on.includes("history"),
+      sessions: on.includes("sessions"),
+    });
+    const st = await request({ type: "GET_STATE" });
+    const state = st.ok && st.res.type === "STATE" ? st.res.payload : null;
+    baselineRef.current = state ? { ...state.sync_counts } : {};
+    setSyncCounts(baselineRef.current);
+    setSyncTotals(state?.sync_totals ?? {});
+    setSyncError(null);
+    setSyncTimedOut(false);
+    setStep("syncing");
+    void sendMessage({ type: "SYNC_NOW" }).catch(() => {});
+  };
+
   /** Restore a settings backup from the FIRST page, so a reinstall never has to close
    *  the wizard and hunt for Settings → Advanced. */
   const importBackup = async (file: File) => {
@@ -553,18 +620,29 @@ export default function OnboardingApp() {
       // granted, and a WebDAV server whose host permission was never requested. Check the
       // settings as they stand now, with the reported origin as a belt.
       const after = await request({ type: "GET_SETTINGS" });
-      const missing: { permissions: string[]; origins: string[] } = after.ok && after.res.type === "SETTINGS"
-        ? await missingPermissionsFor(after.res.payload)
+      const imported = after.ok && after.res.type === "SETTINGS" ? after.res.payload : null;
+      const missing: { permissions: string[]; origins: string[] } = imported
+        ? await missingPermissionsFor(imported)
         : { permissions: [], origins: [] };
       if (outcome.hostOrigin && !missing.origins.includes(outcome.hostOrigin)) {
         missing.origins.push(outcome.hostOrigin);
       }
+      const enabled = imported?.enabled_types ?? [];
+      // Nothing turned on is a valid configuration, and a sync of nothing would sit on the
+      // progress screen until it timed out. The plain "restored" screen is the right end
+      // for that case; anything else owes this browser a first sync (see startImportedSync).
+      if (!enabled.length) {
+        setStep("imported");
+        return;
+      }
+      importedSyncPending.current = true;
       if (missing.permissions.length || missing.origins.length) {
         setMissingPerms(missing);
         setPermissionPhase("needed");
         setStep("permissions");
       } else {
-        setStep("imported");
+        importedSyncPending.current = false;
+        await startImportedSync(enabled);
       }
     } catch (err) {
       setImportError(t("onb_import_failed", err instanceof Error ? err.message : String(err)));
@@ -588,6 +666,15 @@ export default function OnboardingApp() {
     setPermBusy(false);
     setPermSlowHere(false);
     setPermissionPhase(outcome === "granted" ? "done" : "failed");
+    // A restored backup gets its first sync on the screen where setup is finished, not a
+    // "Close" button that leaves the direction question to the popup. The re-grant flow
+    // (PERMISSION_MODE) never sets this flag: that install already syncs.
+    if (outcome === "granted" && importedSyncPending.current) {
+      importedSyncPending.current = false;
+      const s = await request({ type: "GET_SETTINGS" });
+      const enabled = s.ok && s.res.type === "SETTINGS" ? s.res.payload.enabled_types : undefined;
+      await startImportedSync(enabled);
+    }
   };
 
   const canProceedBackend = () => {
@@ -792,6 +879,20 @@ export default function OnboardingApp() {
     setDirectionBusy(true);
     setDirectionError(null);
     try {
+      // Only on the entry that skipped `finish()`: take the pre-answer counts now. Nothing
+      // is merged and no counter moves while the question is pending, so this is the same
+      // number `finish()` would have recorded — it just has to exist before the answer's
+      // own upload starts moving `sync_counts`.
+      if (needsBaselineBeforeAnswer.current) {
+        const st = await request({ type: "GET_STATE" });
+        if (st.ok && st.res.type === "STATE") {
+          // Only a read that succeeded is a baseline; keeping the flag on failure lets a
+          // retry after a failed answer try again instead of starting from `{}`.
+          needsBaselineBeforeAnswer.current = false;
+          baselineRef.current = { ...st.res.payload.sync_counts };
+          setSyncCounts(baselineRef.current);
+        }
+      }
       const sent = await request({ type: "FIRST_SYNC_CHOICE", payload: { choice: directionChoice } });
       if (!sent.ok) {
         // "Use the remote copy" can legitimately fail — an encrypted peer this device
@@ -1444,11 +1545,17 @@ export default function OnboardingApp() {
             </div>
           )}
 
-          <button style={S.btnPrimary} disabled={directionBusy} onClick={() => void applyDirection()}>
-            {directionBusy
-              ? <><Loader2 size={16} className="spin" /> {t("opt_first_sync_busy")}</>
-              : <><GitMerge size={16} /> {t("onb_direction_apply")}</>}
-          </button>
+          <div style={S.navRow}>
+            {/* The hint below says the window can be closed; a button that does it is
+                what people actually find. Nothing has been changed yet, so leaving is
+                always safe, and the popup keeps offering the question. */}
+            <button style={S.btnSecondary} onClick={() => window.close()}>{t("onb_later")}</button>
+            <button style={{ ...S.btnPrimary, flex: 1 }} disabled={directionBusy} onClick={() => void applyDirection()}>
+              {directionBusy
+                ? <><Loader2 size={16} className="spin" /> {t("opt_first_sync_busy")}</>
+                : <><GitMerge size={16} /> {t("onb_direction_apply")}</>}
+            </button>
+          </div>
           <div style={{ ...hintStyle, marginTop: 12, textAlign: "center" }}>{t("onb_direction_hint")}</div>
         </div>
       )}
@@ -1471,11 +1578,11 @@ export default function OnboardingApp() {
                   </div>
                   {/* The count is the only evidence the user gets that anything is
                       happening: a spinner for twenty seconds on a large history is
-                      indistinguishable from a hung page. Baseline-relative, so a type
-                      whose count did not move still reads as not-done. */}
+                      indistinguishable from a hung page. Items, not syncs — "3" next to
+                      Bookmarks said nothing about whether the bookmarks moved. */}
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    {(syncCounts[key] ?? 0) > 0 && (
-                      <span style={S.count}>{syncCounts[key].toLocaleString()}</span>
+                    {(syncTotals[key] ?? 0) > 0 && (
+                      <span style={S.count}>{syncTotals[key].toLocaleString()}</span>
                     )}
                     {done ? (
                       <CheckCircle2 size={16} color="var(--accent)" />
@@ -1524,7 +1631,7 @@ export default function OnboardingApp() {
           <h1 style={S.h1}>{t("onb_done_title")}</h1>
           <p style={S.subtitle}>
             {doneNote[0]}
-            <strong>{provider ? providerLabel(providerById(provider)) : backend === "gdrive" ? "Google Drive" : backend === "github" ? "GitHub" : "WebDAV"}</strong>
+            <strong>{provider ? providerLabel(providerById(provider)) : configured ? activeBackendLabel(configured) : backend === "gdrive" ? "Google Drive" : backend === "github" ? "GitHub" : "WebDAV"}</strong>
             {doneNote[1]}
           </p>
           {/* What actually happened, instead of three fixed ticks that were true before

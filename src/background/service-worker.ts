@@ -258,7 +258,12 @@ async function describeFailure(err: unknown): Promise<string> {
 browser.runtime.onMessage.addListener(((message: ExtensionMessage, sender): Promise<ExtensionResponse> => {
   // 仅接受来自本扩展自身的消息（options / popup / 本扩展页面）。即使将来开启
   // externally_connectable，也绝不向外部扩展或网页暴露同步、凭据等敏感操作。
-  if (!sender.id || sender.id !== browser.runtime.id) {
+  //
+  // `browser.runtime` is optional-chained because this worker can outlive an extension
+  // update by a few milliseconds, during which the runtime API object is gone. Reading
+  // `.id` off it threw out of the listener, and the page that sent the message reported
+  // it as "Uncaught TypeError: Cannot read properties of undefined (reading 'id')".
+  if (!sender?.id || sender.id !== browser.runtime?.id) {
     return Promise.resolve({ type: "ERROR", payload: "Message rejected: untrusted sender." });
   }
   return handleMessage(message).catch(async (err): Promise<ExtensionResponse> => ({
@@ -266,6 +271,13 @@ browser.runtime.onMessage.addListener(((message: ExtensionMessage, sender): Prom
     payload: await describeFailure(err),
   }));
 }) as Parameters<typeof browser.runtime.onMessage.addListener>[0]);
+
+/** The restore-point list, plus `partial` when it could only be built from this device's
+ *  own record of what exists (see SyncEngine.getSnapshotList). */
+async function snapshotsReply(engine: SyncEngine): Promise<ExtensionResponse> {
+  const { list, partial } = await engine.getSnapshotList();
+  return { type: "SNAPSHOTS", payload: list, ...(partial ? { partial: true } : {}) };
+}
 
 async function handleMessage(message: ExtensionMessage): Promise<ExtensionResponse> {
   await ensureInit();
@@ -295,7 +307,8 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
         return { type: "ERROR", payload: "No data types are turned on, so there is nothing to sync. Turn one on in Data Types." };
       }
       // "first-sync-pending" is deliberately not an error: nothing was meant to move
-      // this cycle, and the direction card reached the popup/options via STATE_UPDATE.
+      // this cycle, and the question reaches the popup (which links to the onboarding
+      // direction step) via STATE_UPDATE.
       return { type: "OK" };
     }
 
@@ -309,7 +322,15 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       // alarm that has not been recreated since the interval last changed. Older engines
       // (and a cleared alarm) simply answer undefined: no time to promise.
       const alarm = await browser.alarms.get(SYNC_ALARM);
-      return { type: "SYNC_SCHEDULE", payload: { next_at: alarm?.scheduledTime ?? null } };
+      const now = Date.now();
+      // The alarm's time does not move when a cooldown/backoff parks automatic syncs, so
+      // the periodic answer alone promised a cycle that this worker will skip. Report the
+      // later of the two: the next cycle that will actually run without a manual press.
+      const paused = Math.max(await syncCooldownRemaining(now), await syncBackoffRemaining(now));
+      return {
+        type: "SYNC_SCHEDULE",
+        payload: { next_at: alarm?.scheduledTime ?? null, paused_until: paused > 0 ? now + paused : null },
+      };
     }
 
     case "GET_SETTINGS": {
@@ -392,8 +413,13 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
     }
 
     case "TEST_BACKEND": {
-      const settings = await getSettings();
-      const config = settings.backends.find((b) => b.type === message.payload.backend);
+      // Test the config the options page is SHOWING, not the last one saved: the button
+      // sits under the inputs it checks, and reading the saved copy meant a corrected URL
+      // still reported the old one's error until Save was pressed.
+      const typed = message.payload.config;
+      const config = typed && typed.type === message.payload.backend
+        ? typed
+        : (await getSettings()).backends.find((b) => b.type === message.payload.backend);
       if (!config) return { type: "ERROR", payload: "Backend not configured" };
 
       const backend = createBackend(config);
@@ -413,6 +439,31 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       // the replace/delete and the sync that publishes the answer.
       await syncEngine.chooseFirstSync(message.payload.choice);
       return { type: "OK" };
+    }
+
+    case "GET_BASELINE": {
+      if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
+      return { type: "BASELINE", payload: await syncEngine.getBaselineInfo() };
+    }
+
+    case "SET_BASELINE": {
+      if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
+      const baseline = await syncEngine.setBaseline();
+      // A marker whose tree is not on the storage yet leaves every other device waiting a
+      // whole interval. Publishing is best-effort: the marker is already written, and the
+      // next ordinary cycle would upload the tree anyway.
+      try {
+        await syncEngine.sync(["bookmarks"], { force: true, mergeBookmarks: false });
+      } catch (err) {
+        logger.warn("Baseline", `The baseline is set, but publishing this tree failed: ${err instanceof Error ? err.message : err}`);
+      }
+      return { type: "BASELINE", payload: { ...baseline, cached: false } };
+    }
+
+    case "CLEAR_BASELINE": {
+      if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
+      await syncEngine.clearBaseline();
+      return { type: "BASELINE", payload: { marker: null, adopted_at: null, cached: false } };
     }
 
     case "GET_CONFLICT_DIFF": {
@@ -436,19 +487,19 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
     case "CREATE_SNAPSHOT": {
       if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
       await syncEngine.snapshotNow({ origin: "manual", pinned: message.payload?.pinned === true });
-      return { type: "SNAPSHOTS", payload: await syncEngine.getSnapshots() };
+      return snapshotsReply(syncEngine);
     }
 
     case "RENAME_SNAPSHOT": {
       if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
       await syncEngine.renameSnapshot(message.payload.name, message.payload.label);
-      return { type: "SNAPSHOTS", payload: await syncEngine.getSnapshots() };
+      return snapshotsReply(syncEngine);
     }
 
     case "PIN_SNAPSHOT": {
       if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
       await syncEngine.pinSnapshot(message.payload.name, message.payload.pinned);
-      return { type: "SNAPSHOTS", payload: await syncEngine.getSnapshots() };
+      return snapshotsReply(syncEngine);
     }
 
     case "LIST_DEVICES": {
@@ -488,7 +539,7 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
 
     case "LIST_SNAPSHOTS": {
       if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
-      return { type: "SNAPSHOTS", payload: await syncEngine.getSnapshots() };
+      return snapshotsReply(syncEngine);
     }
 
     case "RESTORE_SNAPSHOT": {
@@ -500,7 +551,7 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
     case "DELETE_SNAPSHOT": {
       if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
       await syncEngine.removeSnapshot(message.payload.name);
-      return { type: "SNAPSHOTS", payload: await syncEngine.getSnapshots() };
+      return snapshotsReply(syncEngine);
     }
 
     default:

@@ -102,3 +102,22 @@ export async function rememberPeerLabels(
     logger.warn("peerLabels", `Could not save the local device-name cache: ${err instanceof Error ? err.message : err}`);
   }
 }
+
+/**
+ * Drop a device's cached name when its files are removed on purpose ("Forget").
+ *
+ * Without this the row comes back during a rate-limited window: the backend listing is
+ * what normally decides which devices exist, and `knownDevices` falls back to this cache
+ * when the listing is refused — naming a device the user just removed.
+ */
+export async function forgetPeerLabel(deviceId: string): Promise<void> {
+  if (!deviceId) return;
+  const current = await readPeerLabels();
+  if (!(deviceId in current)) return;
+  delete current[deviceId];
+  try {
+    await browser.storage.local.set({ [KEY]: current });
+  } catch (err) {
+    logger.warn("peerLabels", `Could not update the local device-name cache: ${err instanceof Error ? err.message : err}`);
+  }
+}

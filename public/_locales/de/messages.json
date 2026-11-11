@@ -22,7 +22,7 @@
     "message": "de"
   },
   "extension_name": {
-    "message": "Kesonode | Privater Lesezeichen- und Tab-Sync v1.5.14"
+    "message": "Kesonode | Privater Lesezeichen- und Tab-Sync v1.5.17"
   },
   "extension_description": {
     "message": "Datenschutzfreundliche Browser-Synchronisierung in deinen eigenen Speicher: Google Drive, WebDAV, GitHub."
@@ -538,7 +538,7 @@
     "message": "Mit dieser Wahl synchronisieren"
   },
   "onb_direction_hint": {
-    "message": "Unsicher? Bis du wählst, wird nichts zusammengeführt – du kannst das hier schließen und später unter Einstellungen → Aktivität antworten."
+    "message": "Unsicher? Bis du wählst, wird nichts zusammengeführt – du kannst das hier schließen; das Kesonode-Popup erinnert dich daran, die Wahl abzuschließen."
   },
   "onb_sync_title": {
     "message": "Deine Daten werden synchronisiert…"
@@ -936,6 +936,73 @@
   "opt_bulk_delete_desc": {
     "message": "Ein Sicherheitsnetz: Würden die Löschungen eines anderen Geräts mehr als diesen Anteil deiner lokalen Lesezeichen entfernen, überspringt die Zusammenführung sie (das schützt deinen Baum vor einer fehlerhaften Synchronisierung). Erhöhe den Wert, wenn du regelmäßig in großen Mengen löschst."
   },
+  "opt_baseline_label": {
+    "message": "Lesezeichen-Basis"
+  },
+  "opt_baseline_desc": {
+    "message": "Der Browser, an dem die Gruppe ausgerichtet wurde. Andere Browser übernehmen ihn einmal und führen danach wieder in beide Richtungen zusammen."
+  },
+  "opt_baseline_none": {
+    "message": "Nicht festgelegt – Lesezeichen werden in beide Richtungen zusammengeführt."
+  },
+  "opt_baseline_mine": {
+    "message": "Dieser Browser · $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "11. Nov. 2026, 10:42"
+      }
+    }
+  },
+  "opt_baseline_other": {
+    "message": "$DEVICE$ · $TIME$",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      },
+      "time": {
+        "content": "$2",
+        "example": "11. Nov. 2026, 10:42"
+      }
+    }
+  },
+  "opt_baseline_loading": {
+    "message": "Wird gelesen…"
+  },
+  "opt_baseline_unavailable": {
+    "message": "Die Basis konnte nicht aus dem Speicher gelesen werden."
+  },
+  "opt_baseline_cached": {
+    "message": "· zuletzt bekannter Wert"
+  },
+  "opt_baseline_waiting": {
+    "message": "Dieser Browser wurde noch nicht an $DEVICE$ ausgerichtet; das geschieht bei der nächsten Synchronisierung.",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      }
+    }
+  },
+  "opt_baseline_set": {
+    "message": "Diesen Browser als Basis verwenden"
+  },
+  "opt_baseline_clear": {
+    "message": "Basis entfernen"
+  },
+  "opt_baseline_confirm_set": {
+    "message": "Andere Browser ersetzen ihre Lesezeichen einmalig durch die Kopie dieses Browsers. Jeder speichert vorher seinen eigenen Wiederherstellungspunkt; danach wird wieder in beide Richtungen synchronisiert."
+  },
+  "opt_baseline_confirm_clear": {
+    "message": "Die Lesezeichen bleiben auf jedem Browser erhalten und werden wieder in beide Richtungen zusammengeführt."
+  },
+  "opt_baseline_set_done": {
+    "message": "Dieser Browser ist jetzt die Basis. Andere Browser richten sich bei der nächsten Synchronisierung daran aus."
+  },
+  "opt_baseline_cleared": {
+    "message": "Basis entfernt. Lesezeichen werden wieder in beide Richtungen zusammengeführt."
+  },
   "bm_exclude_label": {
     "message": "Lesezeichen von der Synchronisierung ausschließen"
   },
@@ -1172,8 +1239,23 @@
   "opt_status_next_off": {
     "message": "Nur manuell"
   },
+  "opt_status_paused": {
+    "message": "Pausiert bis $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "18:42"
+      }
+    }
+  },
+  "opt_status_paused_hint": {
+    "message": "Die automatische Synchronisierung wartet das Drosselungsfenster des Speichers ab (oder einen wiederholten Fehler). „Jetzt synchronisieren“ im Popup versucht es sofort erneut."
+  },
   "opt_status_totals": {
-    "message": "Summen je Typ"
+    "message": "Einträge je Typ"
+  },
+  "opt_status_totals_hint": {
+    "message": "Wie viele Einträge dieses Gerät zuletzt je Typ synchronisiert hat: Lesezeichen als Links, Verlauf im eingestellten Zeitraum, hier installierte Erweiterungen und Sitzungen als wiederherstellbare Sitzungen anderer Geräte."
   },
   "opt_devices_section": {
     "message": "Geräte"
@@ -1431,6 +1513,9 @@
   },
   "opt_snap_empty": {
     "message": "Noch keine Wiederherstellungspunkte. Erstelle oben einen, oder es wird automatisch einer gespeichert, falls jemals eine ungewöhnliche Löschung blockiert wird."
+  },
+  "opt_snap_partial": {
+    "message": "Der Speicher lässt sich gerade nicht auflisten (meist ein Drosselungsfenster), daher werden nur die Wiederherstellungspunkte gezeigt, die dieses Gerät bereits kennt. Punkte anderer Geräte erscheinen, sobald er wieder antwortet — gelöscht wurde nichts."
   },
   "opt_snap_count_one": {
     "message": "$COUNT$ Lesezeichen",
@@ -1867,12 +1952,6 @@
   "opt_first_sync_head": {
     "message": "Erste Synchronisierung: Richtung wählen"
   },
-  "opt_first_sync_head_sub": {
-    "message": "Wenn dieser Browser und deine anderen Geräte bereits Lesezeichen haben, entscheide zuerst, welche Seite gilt. Du kannst hier jederzeit erneut wählen."
-  },
-  "opt_first_sync_pending": {
-    "message": "Die Synchronisierung ist angehalten, bis du gewählt hast. Andere Geräte haben bereits Lesezeichen im Speicher."
-  },
   "opt_first_sync_merge": {
     "message": "Zusammenführen (empfohlen)"
   },
@@ -1886,10 +1965,10 @@
     "message": "Die Lesezeichen dieses Browsers löschen und aus dem neuesten anderen Gerät wiederherstellen. Vorher wird ein Wiederherstellungspunkt gespeichert, aber nur hier vorhandene Lesezeichen gehen verloren."
   },
   "opt_first_sync_local": {
-    "message": "Die Kopie dieses Browsers verwenden"
+    "message": "Diesen Browser als Basis verwenden"
   },
   "opt_first_sync_local_desc": {
-    "message": "Die Lesezeichendateien der anderen Geräte aus dem Speicher löschen, sodass nur dieser Baum angeboten wird. Schließe Kesonode auf den anderen Geräten zuerst, sonst laden sie ihre Lesezeichen erneut hoch."
+    "message": "Andere Browser ersetzen ihre Lesezeichen einmalig durch die Kopie dieses Browsers und speichern vorher jeweils ihren eigenen Wiederherstellungspunkt. Danach wird wieder in beide Richtungen synchronisiert; spätere Änderungen auf jedem Browser kommen also weiterhin überall an."
   },
   "opt_first_sync_busy": {
     "message": "In Arbeit…"

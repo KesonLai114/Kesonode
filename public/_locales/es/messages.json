@@ -523,7 +523,7 @@
     "message": "Sincronizar con esta opción"
   },
   "onb_direction_hint": {
-    "message": "¿No lo tienes claro? No se combina nada hasta que elijas: puedes cerrar esto y responder más tarde en Ajustes → Actividad."
+    "message": "¿No lo tienes claro? No se combina nada hasta que elijas: puedes cerrar esto; la ventana emergente de Kesonode te recordará que termines de elegir."
   },
   "onb_sync_title": {
     "message": "Sincronizando tus datos…"
@@ -571,7 +571,7 @@
     "message": "Lista de extensiones, en la que se muestran las faltantes con enlaces de instalación."
   },
   "extension_name": {
-    "message": "Kesonode | Sincronización privada de marcadores y pestañas v1.5.14"
+    "message": "Kesonode | Sincronización privada de marcadores y pestañas v1.5.17"
   },
   "onb_err_perms_no_prompt": {
     "message": "Este navegador no puede mostrar mensajes de solicitud de permisos, por lo que Kesonode no pudo solicitar el acceso que necesita. Concédelo en la pantalla de permisos de Kesonode, en la configuración de extensiones de tu navegador, y luego vuelve a presionar Finalizar."
@@ -948,8 +948,23 @@
   "opt_status_next_off": {
     "message": "Solo manual"
   },
+  "opt_status_paused": {
+    "message": "En pausa hasta $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "18:42"
+      }
+    }
+  },
+  "opt_status_paused_hint": {
+    "message": "La sincronización automática está esperando a que pase la ventana de límite de peticiones del almacenamiento (o un fallo repetido). Pulsa Sincronizar ahora en la ventana emergente para reintentarlo de inmediato."
+  },
   "opt_status_totals": {
-    "message": "Totales por tipo"
+    "message": "Elementos por tipo"
+  },
+  "opt_status_totals_hint": {
+    "message": "Cuántos elementos de cada tipo sincronizó este dispositivo por última vez: marcadores como enlaces, historial en el intervalo configurado, extensiones instaladas aquí y sesiones como sesiones de otros dispositivos que puedes restaurar."
   },
   "opt_devices_section": {
     "message": "Dispositivos"
@@ -1145,6 +1160,9 @@
   },
   "opt_snap_empty": {
     "message": "Aún no hay puntos de restauración. Crea uno arriba, o se guardará uno automáticamente si se bloquea una eliminación inusual."
+  },
+  "opt_snap_partial": {
+    "message": "Ahora mismo no se puede listar el almacenamiento (lo más probable es una ventana de límite de peticiones), así que solo se muestran los puntos de restauración que este dispositivo ya conoce. Los de otros dispositivos aparecerán cuando vuelva a responder; no se ha borrado nada."
   },
   "opt_snap_count_one": {
     "message": "$COUNT$ marcador",
@@ -1475,6 +1493,73 @@
   },
   "opt_bulk_delete_desc": {
     "message": "Una red de seguridad: si las eliminaciones de otro dispositivo borran más de esta proporción de tus marcadores locales, la fusión las omitirá (protege contra una sincronización corrupta que borre tu árbol de marcadores). Aumenta este valor si sueles eliminar marcadores de forma masiva."
+  },
+  "opt_baseline_label": {
+    "message": "Base de marcadores"
+  },
+  "opt_baseline_desc": {
+    "message": "El navegador con el que se alineó el grupo. Los demás navegadores lo aplican una vez y después vuelven a combinar en ambos sentidos."
+  },
+  "opt_baseline_none": {
+    "message": "Sin definir: los marcadores se combinan en ambos sentidos."
+  },
+  "opt_baseline_mine": {
+    "message": "Este navegador · $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "11 nov 2026, 10:42"
+      }
+    }
+  },
+  "opt_baseline_other": {
+    "message": "$DEVICE$ · $TIME$",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      },
+      "time": {
+        "content": "$2",
+        "example": "11 nov 2026, 10:42"
+      }
+    }
+  },
+  "opt_baseline_loading": {
+    "message": "Leyendo…"
+  },
+  "opt_baseline_unavailable": {
+    "message": "No se pudo leer la base del almacenamiento."
+  },
+  "opt_baseline_cached": {
+    "message": "· último valor conocido"
+  },
+  "opt_baseline_waiting": {
+    "message": "Este navegador aún no se ha alineado con $DEVICE$; lo hará en la próxima sincronización.",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      }
+    }
+  },
+  "opt_baseline_set": {
+    "message": "Usar este navegador como base"
+  },
+  "opt_baseline_clear": {
+    "message": "Quitar la base"
+  },
+  "opt_baseline_confirm_set": {
+    "message": "Los demás navegadores sustituirán sus marcadores por la copia de este navegador una vez. Cada uno guarda antes su propio punto de restauración y, después, la sincronización vuelve a ser bidireccional."
+  },
+  "opt_baseline_confirm_clear": {
+    "message": "Los marcadores se mantienen en cada navegador y la sincronización vuelve a ser bidireccional."
+  },
+  "opt_baseline_set_done": {
+    "message": "Este navegador es ahora la base. Los demás se alinearán en su próxima sincronización."
+  },
+  "opt_baseline_cleared": {
+    "message": "Base eliminada. Los marcadores vuelven a combinarse en ambos sentidos."
   },
   "bm_exclude_label": {
     "message": "Excluir marcadores de la sincronización"
@@ -1867,12 +1952,6 @@
   "opt_first_sync_head": {
     "message": "Primera sincronización: elige una dirección"
   },
-  "opt_first_sync_head_sub": {
-    "message": "Cuando este navegador y tus otros dispositivos ya tienen marcadores, decide primero qué lado prevalece. También puedes volver a elegir aquí cuando quieras."
-  },
-  "opt_first_sync_pending": {
-    "message": "La sincronización está en pausa hasta que elijas. Otros dispositivos ya tienen marcadores en el almacenamiento."
-  },
   "opt_first_sync_merge": {
     "message": "Combinar (recomendado)"
   },
@@ -1886,10 +1965,10 @@
     "message": "Borra los marcadores de este navegador y los reconstruye a partir del dispositivo más reciente. Antes se guarda un punto de restauración, pero los marcadores exclusivos de este navegador se pierden."
   },
   "opt_first_sync_local": {
-    "message": "Usar la copia de este navegador"
+    "message": "Usar este navegador como base"
   },
   "opt_first_sync_local_desc": {
-    "message": "Elimina del almacenamiento los archivos de marcadores de los demás dispositivos, dejando solo este árbol. Cierra Kesonode en los otros dispositivos antes, o volverán a subir sus marcadores."
+    "message": "Los demás navegadores sustituyen sus marcadores por la copia de este navegador una vez y guardan antes su propio punto de restauración. Después la sincronización vuelve a ser bidireccional, así que los cambios posteriores de cualquier navegador siguen llegando a todos."
   },
   "opt_first_sync_busy": {
     "message": "Procesando…"

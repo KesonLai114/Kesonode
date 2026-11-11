@@ -5,7 +5,12 @@ import { createBackend } from "@/lib/backends/abstract-backend";
 import { normalizeRepoSlug } from "@/lib/backends/github-backend";
 import { createSnapshot as writeSnapshot, listSnapshots as readSnapshots, knownSnapshots, restoreSnapshot as applySnapshot, deleteSnapshot as dropSnapshot, renameSnapshot as renameSnapshotFile, setSnapshotPinned as pinSnapshotFile, flushPendingPins, type SnapshotMeta, type CreateSnapshotOptions } from "@/lib/sync/snapshots";
 import {
-  bookmarkContent, exportBookmarkPayload, importBookmarks, peerTreeAsMerged, type BulkDeleteBlock,
+  readBaselineMarker, writeBaselineMarker, deleteBaselineMarker,
+  getCachedBaseline, setCachedBaseline, getAdoptedBaseline, setAdoptedBaseline,
+  type BaselineMarker, type BaselineRead,
+} from "@/lib/sync/baseline";
+import {
+  bookmarkContent, exportBookmarkPayload, importBookmarks, normalizePayload, peerTreeAsMerged, type BulkDeleteBlock,
 } from "@/lib/handlers/bookmarks-handler";
 import { diffBookmarks, diffHistory } from "./conflict-diff";
 import { exportSession, importSession } from "@/lib/handlers/tabs-handler";
@@ -13,7 +18,7 @@ import { exportHistory, importHistory, buildLocalHistoryIndex } from "@/lib/hand
 import { exportExtensions } from "@/lib/handlers/extensions-handler";
 import { dataTypeAvailability, unsupportedReason, hasPermission } from "@/lib/utils/capabilities";
 import { detectBrowser, readDeviceBrowser } from "@/lib/utils/browser-identity";
-import { readPeerLabels, rememberPeerLabels } from "@/lib/utils/peer-labels";
+import { readPeerLabels, rememberPeerLabels, forgetPeerLabel } from "@/lib/utils/peer-labels";
 import { HttpError, rateLimitMessage } from "@/lib/utils/retry";
 import {
   getState,
@@ -24,6 +29,7 @@ import {
   getLastUploadChecksum,
   setLastUploadChecksum,
   clearUploadChecksums,
+  clearUploadChecksum,
   getResolvedConflicts,
   setResolvedConflict,
   getConflictPacket,
@@ -53,6 +59,7 @@ import {
   getFirstSync,
   setFirstSync,
   resetBookmarkMergeState,
+  cleanDeviceLabel,
 } from "@/lib/utils/storage";
 import { logger } from "@/lib/utils/logger";
 import { noteCleanSync } from "@/lib/rate-prompt";
@@ -218,6 +225,21 @@ export function backendOrigins(cfg: BackendConfig | undefined): string[] {
     default:
       return [];
   }
+}
+
+/**
+ * Identify WHERE a settings object syncs: the backend and the server/folder that holds
+ * the files. Credentials are left out on purpose — a re-authenticated account is the same
+ * metered storage, but a different server or folder is a different one, and the rate-limit
+ * window does not follow the user there.
+ */
+export function connectionTarget(s: SyncSettings): string {
+  const cfg = s.backends.find((b) => b.type === s.active_backend);
+  if (!cfg) return "";
+  const gdrive = cfg.gdrive?.folderId ?? "";
+  const webdav = cfg.webdav ? `${cfg.webdav.url}|${cfg.webdav.username}|${cfg.webdav.path ?? ""}` : "";
+  const github = cfg.github ? `${cfg.github.repo ?? ""}|${cfg.github.branch ?? ""}|${cfg.github.path ?? ""}` : "";
+  return `${cfg.type}|${gdrive}|${webdav}|${github}`;
 }
 
 /** The storage as a sentence can name it: the WebDAV host, or the service. */
@@ -397,6 +419,7 @@ export class SyncEngine {
     const encChanged =
       this.settings.encryption_enabled !== settings.encryption_enabled ||
       this.settings.encryption_passphrase !== settings.encryption_passphrase;
+    const targetChanged = connectionTarget(this.settings) !== connectionTarget(settings);
     this.settings = settings;
     this.resolver.updateStrategy(settings.conflict_strategy);
     setCompatMode(settings.compat_mode);
@@ -408,8 +431,11 @@ export class SyncEngine {
     }
     // Whatever was wrong may be what the user just changed (a password, a token, a repo,
     // the passphrase) — so the repeated-failure pause is dropped and the next cycle tries
-    // again. The rate-limit cooldown is deliberately left alone: that one is the storage's
-    // own window, and a settings save cannot shorten it.
+    // again. The rate-limit cooldown belongs to ONE storage, though: a user who pointed
+    // Kesonode at a different server or folder during Nutstore's window had automatic
+    // sync parked for half an hour against a storage that never refused anything. A
+    // credential change alone keeps it — re-signing in does not un-meter the same server.
+    if (targetChanged) await clearSyncCooldown();
     await clearSyncFailure();
   }
 
@@ -595,6 +621,12 @@ export class SyncEngine {
 
       await backend.connect();
 
+      // A designated group baseline outranks the local first-sync question: this browser
+      // replaces its tree with the reference device's copy once, instead of asking its
+      // user a second time which side wins. Runs before the question and before any
+      // merge, so a peer's old tree cannot be folded in on the way.
+      await this.applyPendingBaseline(backend, typesToSync);
+
       // Ask BEFORE anything is merged or published. A device that already has its own
       // bookmarks must not have a peer's tree folded in (or its own tree published) until
       // the user says which side wins. Inside the try, so the lock is always given back;
@@ -658,8 +690,11 @@ export class SyncEngine {
       // not stop the whole merge), but that used to look like a CLEAN sync: we published
       // our own packet and reported success with fewer devices than the folder holds —
       // the exact "both browsers mind their own business" report. Surface it as an error.
+      // Not in a metered window, though: those files were refused for the same reason the
+      // sentence above names, and "couldn't read" turned a quota problem into a file
+      // problem. The per-file "Couldn't download" lines stay in Settings → Activity.
       const unreadable = [...new Set(backend.failedPeers ?? [])];
-      if (unreadable.length) {
+      if (unreadable.length && !backend.rateLimited) {
         problems.push(
           `Couldn't read ${unreadable.length} device file(s) from the storage (${unreadable.slice(0, 2).join(", ")}${unreadable.length > 2 ? ", …" : ""}). Their data was NOT merged this sync — Settings → Activity names each file and why.`
         );
@@ -686,10 +721,15 @@ export class SyncEngine {
             : `Dropped ${stale} pending conflict(s): conflict resolution is no longer set to Manual, so this sync resolved them itself`
         );
       }
+      // Counted from the snapshot taken when this cycle started: `sync_counts` has already
+      // been bumped by every type by now. A state written before `sync_cycles` existed is
+      // seeded from its largest per-type count, which is the best record of past cycles.
+      const cycles = (state.sync_cycles ?? Math.max(0, ...Object.values(state.sync_counts))) + 1;
       const newState = await setState({
         // Read AFTER the fold, so it sees any conflict syncType just queued.
         status: statusAfterSync(problems.length, conflicts.length),
         last_sync: new Date().toISOString(),
+        sync_cycles: cycles,
         last_error: problems.length ? problems.join(" ") : null,
         failed_types: [...this.failedTypes],
         bytes_transferred: prevState.bytes_transferred + this.bytesThisSync,
@@ -864,21 +904,52 @@ export class SyncEngine {
     }
 
     await this.findOwnMissingFiles(backend, runnable);
-    for (const dataType of runnable) {
+    const where = storageName(this.settings.backends.find((b) => b.type === this.settings.active_backend));
+    // The one sentence a metered cycle says, however many types it would otherwise have
+    // walked: the refusal is a fact about the storage, not about a data type.
+    const metered = (detail: string) =>
+      `${detail} Nothing further was attempted this cycle, so other devices' data was not merged.`;
+    for (let i = 0; i < runnable.length; i++) {
+      const dataType = runnable[i];
+      // The window is already spent — the listing above may have been what discovered it.
+      // Every further request is refused locally by the backend's own guard, so walking
+      // the rest of the types can only repeat the same paragraph once per type and merge
+      // nothing. A field report arrived as the Nutstore explanation prefixed with
+      // "extensions:" and a per-file "couldn't read" line stapled underneath, for a cycle
+      // in which no request could have succeeded. Say it once; the types that got no
+      // attempt are marked failed, because that is the truth about them this cycle.
+      if (backend.rateLimited) {
+        errors.push(metered(rateLimitMessage(where)));
+        for (const t of runnable.slice(i)) this.failedTypes.add(t);
+        break;
+      }
       try {
         await this.syncType(dataType, backend, state);
+        // A refusal the backend handled instead of throwing (one peer file skipped, the
+        // listing left alone) still ended this type's merge early. Mark IT failed before
+        // stopping, or the type that lost its peer would be reported current.
+        if (backend.rateLimited) {
+          errors.push(metered(rateLimitMessage(where)));
+          for (const t of runnable.slice(i)) this.failedTypes.add(t);
+          break;
+        }
       } catch (err) {
         await this.noteRateLimit(err);
-        // syncType already logged it — just collect the message.
-        // A rate limit is said without the type: it is one fact about the storage, so every
-        // type hitting it folds into a single sentence instead of one per type.
-        if (err instanceof HttpError && err.status === 429) {
-          const cfg = this.settings.backends.find((b) => b.type === this.settings.active_backend);
-          errors.push(rateLimitMessage(storageName(cfg)));
+        if (err instanceof HttpError && (err.status === 429 || err.rateLimited)) {
+          // Nutstore's 403 is its 429 and carries the explanation the user needs (600
+          // requests per 30 minutes, counted across every app on the account), so that
+          // message is quoted rather than replaced. Either way it is said without the
+          // type prefix — one storage, one sentence.
+          errors.push(err.status === 429 ? metered(rateLimitMessage(where)) : metered(err.message));
+          this.failedTypes.add(dataType);
+          if (backend.rateLimited) {
+            for (const t of runnable.slice(i + 1)) this.failedTypes.add(t);
+            break;
+          }
         } else {
           errors.push(`${dataType}: ${err instanceof Error ? err.message : String(err)}`);
+          this.failedTypes.add(dataType);
         }
-        this.failedTypes.add(dataType);
       }
     }
     return errors;
@@ -1264,9 +1335,13 @@ export class SyncEngine {
             if (!lastSeen) lastSeen = p.timestamp ?? null;
             browserInfo ??= readDeviceBrowser(p.device_browser);
             if (p.device_label) {
-              label = p.device_label;
-              learned.push({ device_id, device_label: label });
-              break;
+              // Same cleaning the cache applies, so the row's wording does not change
+              // between the read that found the name and the next one that reads the cache.
+              label = cleanDeviceLabel(p.device_label, device_id);
+              if (label) {
+                learned.push({ device_id, device_label: label });
+                break;
+              }
             }
           }
         }
@@ -1337,8 +1412,27 @@ export class SyncEngine {
       return n;
     });
     // Its cached session and extension list are local to us, so they have to go too or the
-    // popup keeps listing a device the folder no longer has.
+    // popup keeps listing a device the folder no longer has. The same goes for its cached
+    // name: during a refused listing `knownDevices` builds the list from that cache.
     await dropRemoteDevice(deviceId);
+    await forgetPeerLabel(deviceId);
+    // A marker naming the forgotten device would leave every browser that has not aligned
+    // yet waiting for a copy that is not coming. Forget is the user saying this device is
+    // gone, so the baseline goes with it and the rest of the group merges both ways again.
+    try {
+      const read = await this.withBackend(async (b) => {
+        const r = await readBaselineMarker(b, this.settings);
+        if (r.marker?.device_id === deviceId) await deleteBaselineMarker(b);
+        return r;
+      });
+      if (read.marker?.device_id === deviceId) {
+        await setCachedBaseline(null);
+        await setAdoptedBaseline(null);
+        logger.event("Baseline", `Cleared the bookmark baseline because ${deviceId.slice(0, 8)} was forgotten`);
+      }
+    } catch (err) {
+      logger.warn("Baseline", `Couldn't check whether the forgotten device was the baseline: ${err instanceof Error ? err.message : err}`);
+    }
     logger.event("forgetDevice", `Removed ${removed} file(s) for a device that is no longer in use`);
     return removed;
   }
@@ -1369,7 +1463,16 @@ export class SyncEngine {
       return null;
     }
     const local = await this.buildPayload("bookmarks");
-    if (await this.isPayloadEmpty("bookmarks", local)) return null;
+    // A TREE question, not "is there anything to upload". `isPayloadEmpty` counts the
+    // deletion log as content on purpose (a device that deleted its last bookmark still
+    // has to publish the deletion), but that is the wrong question here: a fresh install
+    // whose user tidied away every bookmark before the first sync was asked "which side
+    // wins", and the "use the copy in this browser" answer would then have emptied the
+    // group's bookmark files while this browser had nothing to offer. With no local
+    // bookmarks there is nothing to protect, so the normal merge is the only sensible
+    // outcome and the question is not asked.
+    const tree = Array.isArray(local) ? local : ((local as { tree?: unknown[] }).tree ?? []);
+    if (!this.flattenBookmarks(tree as Array<{ children?: unknown[]; url?: string }>).some((n) => n.url)) return null;
 
     let names: string[];
     try {
@@ -1405,6 +1508,14 @@ export class SyncEngine {
   }
 
   private async applyFirstSyncChoice(choice: FirstSyncChoice): Promise<void> {
+    // The question is answered once. Two onboarding tabs (or a tab left open while the
+    // answer was given in another one) must not run the destructive half twice: "local"
+    // would delete files the peers have meanwhile re-uploaded, and "remote" would replace
+    // the tree with a possibly different newest peer. No pending question, no action.
+    if (!(await getState()).first_sync_pending) {
+      logger.info("FirstSync", "The sync direction was already answered; ignoring a repeated answer");
+      return;
+    }
     if (choice === "remote") {
       const read = await this.withBackend(async (b) => {
         const peers = orderPeersByTime(await b.downloadAll("bookmarks", this.settings.device_id));
@@ -1438,6 +1549,26 @@ export class SyncEngine {
         throw new Error(this.explainNoRemoteCopy(read));
       }
 
+      // openPacket() enforces the packet version, E2EE agreement and the SHA-256 checksum.
+      // It runs BEFORE the restore point, with the read: a packet this device cannot open
+      // must fail without leaving behind a point for a replacement that never happened,
+      // which is exactly the trail the ordering below was meant to avoid.
+      const payload = await this.openPacket(peers[0]);
+
+      // A peer whose file holds no bookmarks reads exactly like a corrupt one to the
+      // import, which refuses to wipe a tree for an empty payload. Honouring the refusal
+      // instead of reporting success: this device's bookmarks stay as they are and the
+      // question stays open, so "use the other device's copy" cannot end in a silent
+      // no-op that says "Replaced this device's bookmarks".
+      const peerTree = normalizePayload(payload).tree;
+      if (!this.flattenBookmarks(peerTree as Array<{ children?: unknown[]; url?: string }>).some((n) => n.url)) {
+        throw new Error(
+          "The newest other device's bookmark file holds no bookmarks, so there is nothing to copy. " +
+          "Nothing was changed: this device's bookmarks are untouched and the question stays open. " +
+          "Choose \"combine\" to keep both sets, or \"use this browser's copy\" if this one is the source to keep."
+        );
+      }
+
       // The restore point is taken AFTER the read and is still a PRECONDITION: "remote"
       // replaces this browser's whole bookmark tree, the one answer in Kesonode that can
       // destroy local data with a single click, so it must not run without the point it can
@@ -1452,8 +1583,6 @@ export class SyncEngine {
         );
       }
 
-      // openPacket() enforces the packet version, E2EE agreement and the SHA-256 checksum.
-      const payload = await this.openPacket(peers[0]);
       await importBookmarks(payload, "replace", this.settings.conflict_strategy, this.settings.bulk_delete_percent, 0);
       // importBookmarks folds the peer's deletion/move/rename logs in BEFORE replacing
       // the tree. Dropping them is what makes "use the remote copy" actually stick:
@@ -1462,29 +1591,18 @@ export class SyncEngine {
       await setState({ pending_conflicts: [] });
       logger.event("FirstSync", "Replaced this device's bookmarks with the newest peer's tree");
     } else if (choice === "local") {
-      // "local" only deletes PEER files, which their owners re-upload on their next sync,
-      // so a refused snapshot here is noise rather than a hazard — the opposite of the
-      // "remote" branch above, where it is the whole safety net.
+      // "local" only deletes PEER files, which their owners re-upload on their next sync.
+      // The marker written in the same pass is what makes that re-upload carry THIS tree
+      // instead of their own: without it the answer was undone within one cycle. A refused
+      // snapshot here is noise rather than a hazard — the opposite of the "remote" branch
+      // above, where it is the whole safety net.
       try { await this.snapshotNow({ origin: "manual" }); }
       catch (err) {
         logger.warn("FirstSync", `Couldn't save a restore point before the local choice: ${err instanceof Error ? err.message : err}`);
       }
-      const { removed, failed, rateLimited } = await this.withBackend(async (b) => {
-        const names = (await Promise.all(listPrefixes("bookmarks").map((p) => b.listFiles(p)))).flat();
-        let removed = 0, failed = 0;
-        for (const name of names) {
-          const id = peerDeviceIdFromName(name, "bookmarks");
-          if (!id || id === this.settings.device_id || !isPeerFileName(name, "bookmarks")) continue;
-          // Every further DELETE in a metered window is refused too, so stop asking.
-          if (b.rateLimited) { failed++; continue; }
-          try { await b.deleteFile(name); removed++; }
-          catch (err) {
-            failed++;
-            logger.warn("FirstSync", `Couldn't remove ${name}: ${err instanceof Error ? err.message : err}`);
-          }
-        }
-        return { removed, failed, rateLimited: b.rateLimited === true };
-      });
+      const { removed, failed, rateLimited } = await this.withBackend(
+        (b) => this.designateBaselineOn(b),
+      );
       // A 503 must not look like a successful "reset". Nothing is marked done yet, so the
       // choice stays available for a retry. Files already removed will come back on their
       // own when their device next syncs, so a partial attempt is safe to repeat.
@@ -1498,16 +1616,258 @@ export class SyncEngine {
           " Settings → Activity has the details."
         );
       }
-      // The local tree did not change, so the upload checksum would otherwise still
-      // match and our own file would never be (re)published.
-      await clearUploadChecksums();
-      logger.event("FirstSync", `Removed ${removed} peer bookmark file(s); this device's tree is now the only one offered`);
-      logger.event("FirstSync", "To adopt this tree on the other devices, choose 'Use the remote copy' in their Settings → Activity; if their Kesonode is still running they will re-upload their own bookmarks instead");
+      // designateBaselineOn() published this tree and recorded its checksum in the
+      // marker, so there is no upload to force here.
+      logger.event("FirstSync", `Removed ${removed} peer bookmark file(s); this device's tree is now the group's bookmark baseline`);
+      // The other devices get their files back by themselves: each one reads the marker,
+      // replaces its tree with the copy named by its checksum, and then merges again.
+      logger.event("FirstSync", "Other devices will align with this browser's bookmarks on their next sync");
     }
 
     await setFirstSync({ done: true, choice, at: new Date().toISOString() });
     const cleared = await setState({ first_sync_pending: null });
     this.onStateChange(cleared);
+  }
+
+  /**
+   * The group's bookmark baseline, read for the UI. Never throws: inside a rate-limit
+   * window (or with an unreadable marker) it answers with the last copy this device read
+   * and flags it, which is the difference between "not set" and "not visible right now".
+   */
+  async getBaselineInfo(): Promise<{
+    marker: BaselineMarker | null; adopted_at: string | null; cached: boolean;
+  }> {
+    const cached = await getCachedBaseline();
+    const adopted = await getAdoptedBaseline();
+    const adoptedAt = adopted?.at ?? null;
+    if ((await syncCooldownRemaining()) > 0) {
+      return { marker: cached, adopted_at: adoptedAt, cached: true };
+    }
+    try {
+      const read = await this.withBackend(async (b) => {
+        const r = await readBaselineMarker(b, this.settings);
+        if (b.rateLimited) await this.noteRateLimit();
+        return r;
+      });
+      if (!read.unreadable) await setCachedBaseline(read.marker);
+      return {
+        marker: read.unreadable ? cached : read.marker,
+        adopted_at: adoptedAt,
+        cached: read.unreadable,
+      };
+    } catch {
+      return { marker: cached, adopted_at: adoptedAt, cached: true };
+    }
+  }
+
+  /**
+   * Make THIS browser the group's bookmark baseline and publish it now.
+   *
+   * The peers' files are removed in the same pass (they re-upload on their next sync),
+   * and the marker is written before that re-upload happens, so what they publish is this
+   * tree. A restore point is a precondition: the operation replaces other devices' trees,
+   * and the cost of a failed snapshot is one retry, while the cost of no point is theirs.
+   */
+  async setBaseline(): Promise<{ marker: BaselineMarker; adopted_at: string }> {
+    let marker: BaselineMarker | null = null;
+    await this.withMutationLock(async () => {
+      try {
+        await this.snapshotNow({ origin: "manual" });
+      } catch (err) {
+        throw new Error(
+          `Couldn't save a restore point before setting the baseline, so nothing was changed. ${err instanceof Error ? err.message : err}`
+        );
+      }
+      const result = await this.withBackend((b) => this.designateBaselineOn(b));
+      if (result.failed > 0 || !result.marker) {
+        if (result.rateLimited) await this.noteRateLimit();
+        throw new Error(
+          `${result.failed} device file(s) could not be removed from the storage (${result.removed} were removed). ` +
+          (result.rateLimited
+            ? "The storage is refusing requests for now (quota or rate limit), so trying again will not help until that window passes."
+            : "Check the connection and try again.") +
+          " Settings → Activity has the details."
+        );
+      }
+      marker = result.marker;
+      if ((await getState()).first_sync_pending) {
+        await setFirstSync({ done: true, choice: "local", at: new Date().toISOString() });
+        this.onStateChange(await setState({ first_sync_pending: null }));
+      }
+      logger.event("Baseline", `This browser is now the group's bookmark baseline (${result.removed} peer file(s) removed)`);
+    });
+    const adopted = await getAdoptedBaseline();
+    if (!marker || !adopted) throw new Error("The baseline was written but could not be read back.");
+    return { marker, adopted_at: adopted.at };
+  }
+
+  /** Remove the shared marker. Devices keep their current trees and merge both ways. */
+  async clearBaseline(): Promise<{ marker: null; adopted_at: null }> {
+    await this.withBackend((b) => deleteBaselineMarker(b));
+    await setCachedBaseline(null);
+    await setAdoptedBaseline(null);
+    logger.event("Baseline", "Bookmark baseline cleared; devices merge in both directions again");
+    return { marker: null, adopted_at: null };
+  }
+
+  /**
+   * Delete every OTHER device's bookmark files and name this device as the baseline.
+   *
+   * Reads the file list once and never touches this device's own packet. A partial delete
+   * returns without writing the marker: a baseline that cannot replace the peers' trees
+   * would look enforced while the next merge undoes it.
+   */
+  private async designateBaselineOn(
+    backend: ReturnType<typeof createBackend>,
+  ): Promise<{ removed: number; failed: number; rateLimited: boolean; marker: BaselineMarker | null }> {
+    // Publish this tree BEFORE naming it, so the marker can carry the checksum of the
+    // copy followers are meant to adopt. Uploading afterwards left a window in which a
+    // follower read the marker, found this device's OLD file and adopted it — then never
+    // re-applied, because that generation was already marked as done.
+    const payload = await this.buildPayload("bookmarks");
+    const tree = Array.isArray(payload) ? payload : ((payload as { tree?: unknown[] }).tree ?? []);
+    if (!this.flattenBookmarks(tree as Array<{ children?: unknown[]; url?: string }>).some((n) => n.url)) {
+      throw new Error(
+        "This browser has no bookmarks to use as the baseline, so nothing was changed. " +
+        "Add or import bookmarks here first, or clear the baseline instead."
+      );
+    }
+    const packet = await this.buildPacket("bookmarks", payload);
+    await backend.upload(packet);
+    await setLastUploadChecksum("bookmarks", this.uploadTag(packet.checksum, this.e2eeActive));
+
+    const names = (await Promise.all(listPrefixes("bookmarks").map((p) => backend.listFiles(p)))).flat();
+    let removed = 0, failed = 0;
+    for (const name of names) {
+      const id = peerDeviceIdFromName(name, "bookmarks");
+      if (!id || id === this.settings.device_id || !isPeerFileName(name, "bookmarks")) continue;
+      // Every further DELETE in a metered window is refused too, so stop asking.
+      if (backend.rateLimited) { failed++; continue; }
+      try { await backend.deleteFile(name); removed++; }
+      catch (err) {
+        failed++;
+        logger.warn("Baseline", `Couldn't remove ${name}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    if (failed > 0) {
+      return { removed, failed, rateLimited: backend.rateLimited === true, marker: null };
+    }
+    const marker: BaselineMarker = {
+      version: 1,
+      device_id: this.settings.device_id,
+      ...(this.settings.device_label?.trim() ? { device_label: this.settings.device_label } : {}),
+      at: new Date().toISOString(),
+      checksum: packet.checksum,
+    };
+    await writeBaselineMarker(backend, this.settings, marker);
+    await setCachedBaseline(marker);
+    await setAdoptedBaseline({ device_id: marker.device_id, at: marker.at });
+    return { removed, failed: 0, rateLimited: backend.rateLimited === true, marker };
+  }
+
+  /**
+   * Apply another device's baseline once: replace this tree with the reference device's
+   * published copy, then let the ordinary merge take over again.
+   *
+   * Runs before the first-sync question and before any merge. A baseline named on another
+   * device IS the answer to that question, so asking again here would either undo it or
+   * keep the group waiting. Failures never fail the cycle: the marker stays, the next sync
+   * retries, and a missing peer packet is just "that device has not published yet".
+   */
+  private async applyPendingBaseline(
+    backend: ReturnType<typeof createBackend>, types: DataType[],
+  ): Promise<void> {
+    if (!types.includes("bookmarks")) return;
+    let read: BaselineRead;
+    try {
+      read = await readBaselineMarker(backend, this.settings);
+    } catch (err) {
+      // A metered storage refuses the marker too; the cycle parks itself through the
+      // backend flag once it gets here, so this is not an error worth failing over.
+      logger.info("Baseline", `Couldn't read the bookmark baseline: ${err instanceof Error ? err.message : err}`);
+      return;
+    }
+    if (read.unreadable) {
+      logger.info("Baseline", "The bookmark baseline exists but this device cannot read it; continuing the normal merge");
+      return;
+    }
+    const marker = read.marker;
+    await setCachedBaseline(marker);
+    if (!marker) return;
+
+    if (marker.device_id === this.settings.device_id) {
+      await setAdoptedBaseline({ device_id: marker.device_id, at: marker.at });
+      return;
+    }
+    const adopted = await getAdoptedBaseline();
+    if (adopted?.device_id === marker.device_id && adopted.at === marker.at) return;
+
+    const peers = await backend.downloadAll("bookmarks", this.settings.device_id);
+    const packet = peers.find((p) => p.device_id === marker.device_id);
+    if (!packet) {
+      logger.info(
+        "Baseline",
+        `Waiting for ${marker.device_label ?? marker.device_id} to publish its bookmarks; this device will align on a later sync`
+      );
+      return;
+    }
+
+    // The marker names the exact copy to adopt. This device may still be looking at the
+    // baseline device's PREVIOUS upload — it was published before the marker was written,
+    // and a follower that adopted it would mark this generation done while running the
+    // wrong tree. Waiting one cycle is what makes the alignment actually land on the
+    // bookmarks the user designated.
+    if (marker.checksum && packet.checksum !== marker.checksum) {
+      logger.info(
+        "Baseline",
+        `${marker.device_label ?? marker.device_id} has not published the designated bookmarks yet; this device will align on a later sync`
+      );
+      return;
+    }
+
+    // openPacket() refuses a version, E2EE disagreement or checksum that this device
+    // cannot honour, and a tree with no bookmarks must not wipe this device's bookmarks.
+    let payload: unknown;
+    try {
+      payload = await this.openPacket(packet);
+    } catch (err) {
+      logger.warn("Baseline", `Couldn't open ${marker.device_label ?? marker.device_id}'s bookmarks: ${err instanceof Error ? err.message : err}`);
+      return;
+    }
+    const tree = normalizePayload(payload).tree;
+    if (!this.flattenBookmarks(tree as Array<{ children?: unknown[]; url?: string }>).some((n) => n.url)) {
+      logger.warn("Baseline", "The baseline device's bookmark file holds no bookmarks; keeping this device's tree");
+      return;
+    }
+
+    // Replacing the whole tree is destructive, so the point comes first and a failure
+    // means no replacement — the opposite of the one-time "local" answer, which only
+    // removes files their owners will re-upload.
+    try { await this.snapshotNow({ origin: "manual" }); }
+    catch (err) {
+      logger.warn("Baseline", `Couldn't save a restore point before aligning, so nothing was changed: ${err instanceof Error ? err.message : err}`);
+      return;
+    }
+    try {
+      await importBookmarks(payload, "replace", this.settings.conflict_strategy, this.settings.bulk_delete_percent, 0);
+    } catch (err) {
+      logger.warn("Baseline", `Couldn't apply the baseline bookmarks: ${err instanceof Error ? err.message : err}`);
+      return;
+    }
+    await resetBookmarkMergeState();
+    await setState({ pending_conflicts: [] });
+    // The adopted tree is what this device now holds; without a fresh upload its own file
+    // would still describe the old one until something else changed.
+    await clearUploadChecksum("bookmarks");
+    await setAdoptedBaseline({ device_id: marker.device_id, at: marker.at });
+    const firstSync = await getFirstSync();
+    if (!firstSync?.done) {
+      await setFirstSync({ done: true, choice: "remote", at: new Date().toISOString() });
+    }
+    if ((await getState()).first_sync_pending) {
+      this.onStateChange(await setState({ first_sync_pending: null }));
+    }
+    logger.event("Baseline", `Aligned this browser's bookmarks with ${marker.device_label ?? marker.device_id}`);
   }
 
   /**
@@ -1567,20 +1927,37 @@ export class SyncEngine {
 
   /** List the backend's bookmark restore points, newest first. */
   async getSnapshots(): Promise<SnapshotMeta[]> {
+    return (await this.getSnapshotList()).list;
+  }
+
+  /**
+   * The restore points plus whether the list is PROVEN complete.
+   *
+   * `partial` is true exactly when the folder could not be read and the answer came from
+   * this device's own records (a cooldown, a refused listing). The rows are real, but a
+   * point another device made may be missing — and showing that shorter list without
+   * saying so made "different devices' restore points can't see each other" look like data
+   * loss when nothing had been deleted.
+   */
+  async getSnapshotList(): Promise<{ list: SnapshotMeta[]; partial: boolean }> {
     const cfg = this.activeBackendConfig();
-    if (!cfg) return [];
+    if (!cfg) return { list: [], partial: false };
     // Same rule as the device list: during a cooldown every request is refused, so show
     // what this device already knows instead of an error the storage will repeat.
-    if ((await syncCooldownRemaining()) > 0) return knownSnapshots();
-    return this.withBackend(async (b) => {
-      const list = await readSnapshots(b, this.settings);
+    if ((await syncCooldownRemaining()) > 0) {
+      return { list: await knownSnapshots(this.settings), partial: true };
+    }
+    let partial = false;
+    const list = await this.withBackend(async (b) => {
+      const items = await readSnapshots(b, this.settings, { onFallback: () => { partial = true; } });
       // A refusal here was handled INSIDE the snapshot reader — the restore points
       // themselves are fine, only their annotations are missing — so nothing would
       // ever reach the engine to say the account is over its quota. Say it here, or
       // the next minute asks the same questions and gets the same answer.
       if (b.rateLimited) await this.noteRateLimit();
-      return list;
+      return items;
     });
+    return { list, partial };
   }
 
   /**
@@ -1717,6 +2094,10 @@ export class SyncEngine {
       // 2. Build local payload
       const localPayload = await this.buildPayload(dataType);
       const isEmpty = await this.isPayloadEmpty(dataType, localPayload);
+      // What this device ends the cycle holding, for the per-type item count Activity
+      // shows. Starts as what we built; the auto-merge branch replaces it with the folded
+      // result, which is the tree the peers and this device now agree on.
+      let finalPayload: unknown = localPayload;
 
       // 2b. Local change guard. Measured on the PRE-MERGE payload: peer changes folded
       // in below are already arbitrated by LWW and must never count as local churn.
@@ -1927,18 +2308,27 @@ export class SyncEngine {
         // MERGE_MUTATES_LOCAL.
         const rebuild = MERGE_MUTATES_LOCAL.has(dataType);
         const merged = rebuild ? await this.buildPayload(dataType) : localPayload;
+        finalPayload = merged;
         const mergedEmpty = rebuild ? await this.isPayloadEmpty(dataType, merged) : isEmpty;
         if (!mergedEmpty) {
           await this.uploadIfChanged(backend, dataType, merged);
         }
       }
 
-      // 4. Update sync count
+      // 4. Record what this run carried. `sync_counts` is "a sync of this type completed"
+      //    (the popup's never-synced check and onboarding read it), `sync_totals` is the
+      //    item count Activity prints — the two were the same field, so Activity reported
+      //    cycles as if they were extensions.
+      const items = await this.countSyncedItems(dataType, finalPayload);
       const currentState = await getState();
       await setState({
         sync_counts: {
           ...currentState.sync_counts,
           [dataType]: (currentState.sync_counts[dataType] ?? 0) + 1,
+        },
+        sync_totals: {
+          ...(currentState.sync_totals ?? { bookmarks: 0, history: 0, sessions: 0, extensions: 0 }),
+          [dataType]: items,
         },
       });
     } catch (err) {
@@ -2008,6 +2398,28 @@ export class SyncEngine {
     };
     nodes.forEach(walk);
     return result;
+  }
+
+  /**
+   * How many ITEMS of `dataType` this device ends the cycle with, for Activity's
+   * per-type row. Distinct from `sync_counts`, which counts completed syncs.
+   *
+   * Sessions are one entry per device, so the useful number here is the peers' sessions —
+   * exactly what the popup offers to restore. This device's own entry is the browser you
+   * are sitting in and needs no restoring.
+   */
+  private async countSyncedItems(dataType: DataType, payload: unknown): Promise<number> {
+    switch (dataType) {
+      case "bookmarks":
+        return this.flattenBookmarks((payload as BookmarkPayload)?.tree ?? [])
+          .filter((n) => typeof n.url === "string" && n.url.length > 0).length;
+      case "history":
+        return Array.isArray(payload) ? payload.length : 0;
+      case "extensions":
+        return Array.isArray(payload) ? payload.length : 0;
+      case "sessions":
+        return (await getRemoteSessions()).length;
+    }
   }
 
   // ─── Payload Builders ─────────────────────────────────────────────────

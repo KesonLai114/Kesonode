@@ -264,11 +264,9 @@ describe.each(languages.filter((l) => l !== "en"))("the %s catalogue", (lang) =>
 });
 
 describe("the first-sync answer is worded once", () => {
-  // Two screens now ask the same question: the setup wizard (the first thing a new
-  // install shows) and Settings → Activity (where it can be answered again later). The
-  // three answers have consequences — one of them clears this browser's bookmarks — so a
-  // screen that describes them differently from the other is how someone agrees to
-  // something they did not read. Both must resolve the same keys, not their own copies.
+  // The direction step is the only place the question is asked — the setup wizard, kept
+  // as a "manage" summary afterwards. The three answers have consequences (one of them
+  // clears this browser's bookmarks), so they resolve the shared keys rather than copies.
   const ANSWER_KEYS = [
     "opt_first_sync_merge", "opt_first_sync_merge_desc",
     "opt_first_sync_remote", "opt_first_sync_remote_desc",
@@ -276,11 +274,8 @@ describe("the first-sync answer is worded once", () => {
   ];
   const at = (p: string) => readFileSync(resolve(__dirname, p), "utf8");
 
-  it.each([
-    ["the setup wizard", "../../onboarding/App.tsx"],
-    ["Settings → Activity", "../../options/first-sync-section.tsx"],
-  ])("%s offers all three", (_name, file) => {
-    const src = at(file);
+  it("the setup wizard offers all three", () => {
+    const src = at("../../onboarding/App.tsx");
     expect(ANSWER_KEYS.filter((k) => !src.includes(`"${k}"`))).toEqual([]);
   });
 });

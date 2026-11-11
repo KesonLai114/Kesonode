@@ -132,6 +132,47 @@ describe("a failure that keeps repeating stops being retried every minute", () =
     expect(await e.sync()).toBe("cooling-down");
   });
 
+  it("drops the metered window when the user points Kesonode at a different storage", async () => {
+    // The window belongs to the server that refused. Saving a different WebDAV URL during
+    // Nutstore's half hour left automatic sync parked against a storage that had never
+    // refused anything, with no way to tell from the UI why.
+    h.fail = new HttpError(429, "HTTP 429");
+    const e = engine();
+    await e.sync();
+    expect(await syncCooldownRemaining()).toBeGreaterThan(0);
+
+    await e.updateSettings({
+      ...settings(),
+      backends: [{
+        type: "webdav", label: "WebDAV", enabled: true,
+        webdav: { url: "https://other.example.com/kesonode", username: "u", password: "p" },
+      }],
+    });
+
+    expect(await syncCooldownRemaining()).toBe(0);
+    h.fail = null;
+    expect(await e.sync()).toBe("ran");
+  });
+
+  it("keeps the metered window when only the credential on the same storage changes", async () => {
+    // Re-signing in does not un-meter the server: the same host will refuse identically,
+    // and clearing the window would buy a pointless retry inside it.
+    h.fail = new HttpError(429, "HTTP 429");
+    const e = engine();
+    await e.sync();
+    expect(await syncCooldownRemaining()).toBeGreaterThan(0);
+
+    await e.updateSettings({
+      ...settings(),
+      backends: [{
+        type: "webdav", label: "WebDAV", enabled: true,
+        webdav: { url: "https://dav.example.com/kesonode", username: "u", password: "new-password" },
+      }],
+    });
+
+    expect(await syncCooldownRemaining()).toBeGreaterThan(0);
+  });
+
   it("stops rewriting the state once it is paused, and says the error only once", async () => {
     const seen: string[] = [];
     const e = engine((s) => seen.push(s.status));

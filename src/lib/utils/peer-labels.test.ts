@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { readPeerLabels, rememberPeerLabels } from "@/lib/utils/peer-labels";
+import { readPeerLabels, rememberPeerLabels, forgetPeerLabel } from "@/lib/utils/peer-labels";
 
 const KEY = "kesonode_peer_labels";
 
@@ -44,5 +44,17 @@ describe("peer device-name cache", () => {
     expect(await readPeerLabels()).toEqual({});
     await rememberPeerLabels([{ device_id: "c", device_label: "Recovered" }]);
     expect((await readPeerLabels())["c"].label).toBe("Recovered");
+  });
+
+  it("forgets one device without touching the others", async () => {
+    await rememberPeerLabels([
+      { device_id: "a", device_label: "Gone" },
+      { device_id: "b", device_label: "Stays" },
+    ]);
+
+    await forgetPeerLabel("a");
+    await forgetPeerLabel("never-seen");
+
+    expect(Object.keys(await readPeerLabels())).toEqual(["b"]);
   });
 });

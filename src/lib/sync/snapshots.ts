@@ -37,7 +37,7 @@ export type { SnapshotMeta };
 import { exportBookmarkPayload, restoreBookmarks, normalizePayload } from "@/lib/handlers/bookmarks-handler";
 import { encrypt, decrypt } from "@/lib/crypto/encryption";
 import { browser } from "@/lib/utils/ext";
-import { KEYS, shortDeviceId } from "@/lib/utils/storage";
+import { KEYS, shortDeviceId, type AuditEntry } from "@/lib/utils/storage";
 import { logger } from "@/lib/utils/logger";
 import { t } from "@/lib/utils/i18n";
 import { UPSTREAM_PROTOCOL, snapshotFileName, snapshotTimestamp } from "@/lib/compat/protocol";
@@ -575,6 +575,109 @@ async function migrateLegacyIndex(
 }
 
 /**
+ * The restore points this device can PROVE it wrote, with the bookmark count it recorded.
+ *
+ * `createSnapshot` appends `Created <file> (<n> bookmarks)` to this device's Activity log,
+ * so that line — which exists only on the machine that wrote the point — is the one
+ * truthful link from a bare point (saved by a build that did not annotate the shared index,
+ * or while an annotation write was being refused) to the device that made it. This is
+ * evidence, not the guess that the comments in `listSnapshots` rule out: a point whose name
+ * is missing from the log stays without a device.
+ *
+ * The log is a 200-entry ring, so this reaches the points created recently enough to still
+ * be in it; anything older keeps waiting for a real annotation.
+ */
+async function locallyCreated(): Promise<Map<number, number>> {
+  const created = new Map<number, number>();
+  try {
+    const r = await browser.storage.local.get(KEYS.AUDIT_LOG);
+    const log = r[KEYS.AUDIT_LOG];
+    if (!Array.isArray(log)) return created;
+    for (const entry of log as AuditEntry[]) {
+      const m = typeof entry?.detail === "string"
+        ? /^Created (\S+) \((\d+) bookmarks\)$/.exec(entry.detail)
+        : null;
+      // Keeping a point or putting it back renames the file but keeps the timestamp, so
+      // the timestamp — not the name the log recorded — is what still identifies it.
+      const ts = m ? tsFromName(m[1]) : null;
+      if (m && ts != null) created.set(ts, Number(m[2]));
+    }
+  } catch {
+    // Display-only. Without the log the rows fall back to the index's annotations.
+  }
+  return created;
+}
+
+/**
+ * Fill in what neither the shared index nor the local caches know, from this device's own
+ * record of the points it created: the count, and — for a point with no device fields at
+ * all — this installation's identity, which is the one that wrote the log line (the log and
+ * the id live in the same device-local storage).
+ *
+ * The result is kept in the local index as well, and that copy is what the row will be drawn
+ * from once the log line falls out of the 200-entry ring. Without it, a point would be named
+ * today and silently lose its device again weeks later — the same "the name changed by
+ * itself" the frozen labels exist to prevent. Nothing is published: the shared index is only
+ * ever written with evidence from a device that could actually read it.
+ *
+ * A point the user named keeps its name; only its supporting line gains the device.
+ */
+async function annotateLocalCreations(
+  list: SnapshotMeta[], settings?: SyncSettings,
+): Promise<SnapshotMeta[]> {
+  const created = await locallyCreated();
+  if (created.size === 0) return list;
+  const attributed = new Set<string>();
+  const enriched = list.map((m) => {
+    const ts = tsFromName(m.name);
+    const count = ts == null ? undefined : created.get(ts);
+    if (count === undefined) return m;
+    const next: SnapshotMeta = { ...m };
+    if (next.count == null) next.count = count;
+    if (settings && !next.auto_name?.trim() && !next.device_label?.trim() && !next.device_id?.trim()) {
+      next.device_label = settings.device_label || undefined;
+      next.device_id = settings.device_id || undefined;
+    }
+    attributed.add(next.name);
+    return next;
+  });
+  if (!settings) return enriched;
+  const local = await readLocalIndex();
+  let wrote = false;
+  for (const m of enriched) {
+    if (!attributed.has(m.name)) continue;
+    const prev = local[m.name];
+    if (!prev) {
+      local[m.name] = m;
+      wrote = true;
+      continue;
+    }
+    // An older local copy can be partial (a name and a timestamp), and skipping it would
+    // leave that row nameless while the proof to name it is right here.
+    const next = { ...prev };
+    let changed = false;
+    if (next.count == null && m.count != null) {
+      next.count = m.count;
+      changed = true;
+    }
+    if (!next.device_label?.trim() && m.device_label?.trim()) {
+      next.device_label = m.device_label;
+      changed = true;
+    }
+    if (!next.device_id?.trim() && m.device_id?.trim()) {
+      next.device_id = m.device_id;
+      changed = true;
+    }
+    if (changed) {
+      local[m.name] = next;
+      wrote = true;
+    }
+  }
+  if (wrote) await writeLocalIndex(local);
+  return enriched;
+}
+
+/**
  * The restore points this device can describe WITHOUT the backend.
  *
  * Used when the storage cannot be asked — a rate-limit window refuses every request for
@@ -582,16 +685,36 @@ async function migrateLegacyIndex(
  * the points are still there and this device already knows about some of them. The
  * shared ones come from the last index it managed to read, the rest from its own index.
  */
-export async function knownSnapshots(): Promise<SnapshotMeta[]> {
+export async function knownSnapshots(settings?: SyncSettings): Promise<SnapshotMeta[]> {
   const local = await readLocalIndex();
   const shared = await readSharedCache();
   const byName = new Map<string, SnapshotMeta>();
-  for (const m of [...(shared ?? []), ...Object.values(local)]) byName.set(m.name, m);
-  return [...byName.values()].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
+  for (const m of shared ?? []) byName.set(m.name, m);
+  // Field-merge rather than replace: a local entry can be PARTIAL (the annotation path
+  // only knows the count, or only the device), and letting it shadow the last readable
+  // shared index would make a row lose its device the moment the storage goes quiet —
+  // while the online list, which merges the other way round, still shows it.
+  for (const m of Object.values(local)) {
+    const prev = byName.get(m.name);
+    byName.set(m.name, prev ? { ...prev, ...m } : m);
+  }
+  return annotateLocalCreations(
+    [...byName.values()].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0)),
+    settings,
+  );
 }
 
-/** List restore points on the backend, newest first, annotated with known counts and names. */
-export async function listSnapshots(backend: IBackend, settings: SyncSettings): Promise<SnapshotMeta[]> {
+/**
+ * List restore points on the backend, newest first, annotated with known counts and names.
+ *
+ * `onFallback` fires when the folder could not be listed and the answer comes from this
+ * device's own records instead. The caller can then say the list is incomplete — a device
+ * in a quota window used to show only the points IT knew about, which reads as "the ones
+ * the other devices made are gone".
+ */
+export async function listSnapshots(
+  backend: IBackend, settings: SyncSettings, opts: { onFallback?: () => void } = {},
+): Promise<SnapshotMeta[]> {
   // A "keep forever" the storage refused earlier gets its rename here, on the first
   // visit that can reach the backend again. Refusals are swallowed inside the flush.
   await flushPendingPins(backend, settings);
@@ -605,7 +728,8 @@ export async function listSnapshots(backend: IBackend, settings: SyncSettings): 
     // backups". The names and counts of the ones this device made are in the local
     // index; the shared ones come from the last index this device managed to read.
     logger.warn("Snapshots", `Couldn't list the restore points (${err instanceof Error ? err.message : err}); showing the ones this device knows about`);
-    return knownSnapshots();
+    opts.onFallback?.();
+    return knownSnapshots(settings);
   }
   // An unreadable index costs the annotations, nothing more — the file list below is what
   // says which restore points exist, so the list still works. And when the index itself
@@ -647,13 +771,15 @@ export async function listSnapshots(backend: IBackend, settings: SyncSettings): 
     // No annotation anywhere and the shared index is unreadable: leave the origin
     // UNKNOWN. Guessing "the device that happens to be viewing the list" used to relabel
     // every older point with the CURRENT device name — after a rename or a settings import
-    // the user's restore points looked silently renamed. A readable index, and this
-    // device's own local copy merged above, are the real answers; a guess is not one.
+    // the user's restore points looked silently renamed. A readable index, this device's
+    // own local copy merged above, and the Activity log's record of the points this
+    // installation itself created (annotateLocalCreations below) are the real answers; a
+    // guess is not one.
     if (isPinnedName(name) || pendingPinned.has(name)) meta.pinned = true;
     else delete meta.pinned;
     metas.push(meta);
   }
-  return metas.sort((a, b) => b.timestamp - a.timestamp);
+  return annotateLocalCreations(metas.sort((a, b) => b.timestamp - a.timestamp), settings);
 }
 
 /** Restore a snapshot: re-add every bookmark it holds that's missing locally. */

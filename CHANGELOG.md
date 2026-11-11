@@ -10,6 +10,105 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+## [1.5.17] - 2026-11-12
+
+### Fixed
+
+- **Importing a configuration no longer logs a gesture failure it could not avoid.** The
+  import asked for the WebDAV server's host permission after the file read and the
+  overwrite/risk questions, by which point the click's user gesture was spent — so Chrome
+  answered `permissions.request` with "This function must be called during a user
+  gesture", and the warning was also written to Activity for a permission nobody had
+  refused. Settings now reads what is held and shows the one-click **Grant access** row
+  instead, whose button still carries the gesture.
+
+## [1.5.16] - 2026-11-11
+
+### Added
+
+- **A bookmark baseline that survives the one-time direction question.** "Use this
+  browser's copy" was asked once and could not be corrected afterwards, and an install
+  that imported another browser's configuration usually counted as already set up, so
+  the question could go unanswered while sync stayed parked and nothing was merged.
+  Designating a baseline now publishes this browser's tree and writes a shared,
+  E2EE-aware `konode_baseline.json` marker naming that exact packet. Every other browser
+  saves its own restore point, aligns with that tree once, and merges both ways from then
+  on. Activity shows which browser is the baseline and whether this one has aligned;
+  Settings → Device can designate or clear it. A follower waits for the checksummed packet
+  the marker names instead of adopting whatever copy is in the folder, an empty tree is
+  refused, and forgetting the baseline device clears the marker.
+
+### Fixed
+
+- **"Test Connection" now tests the address in the form, not the last saved one.** The
+  button sits under the fields it checks, but it asked the service worker to test the
+  saved configuration, so correcting a WebDAV URL and pressing Test still reported the
+  previous URL's error every time — a 404 that survived switching back to an address
+  that had just worked. The test uses the on-screen configuration now, and a 404 says
+  what it means on WebDAV: no collection at that exact path (paths are case-sensitive).
+
+- **A metered cycle stops at the first refusal instead of walking every data type.**
+  When Nutstore's window was already spent, each remaining type still ran, was refused
+  by the backend's own guard, and added its own copy of the quota explanation — the popup
+  ended up with the same paragraph once per type plus a "Couldn't read N device file(s)"
+  line, which framed a storage-wide quota as a broken file. The cycle now stops as soon
+  as the backend reports the window spent, says one sentence without a type prefix, and
+  marks every type that got no attempt as not-synced, which is the truth about them.
+
+## [1.5.15] - 2026-11-11
+
+### Changed
+
+- **The first-sync direction is asked only in setup, and only once.** "Which side wins"
+  was a card in Settings → Activity as well as a step in the wizard; it is now the
+  wizard's step alone (the Activity tab keeps conflicts). The popup's primary button and
+  the pending notice both lead there, and the step has a "Set up later" button next to
+  the answer, so the way out is not just a sentence of small print.
+
+### Fixed
+
+- **"Use the other device's copy" no longer reports a replacement it did not perform.**
+  A peer packet can open cleanly and still hold an empty tree; the import refuses to wipe
+  this browser for it, but the first-sync step still logged "Replaced this device's
+  bookmarks" and marked the question answered. It now refuses up front, with the reason,
+  leaves the tree untouched, saves no restore point, and keeps the question open.
+
+- **An unreadable peer packet no longer leaves a restore point behind.** For the
+  "use the remote copy" answer the point is a precondition, and it was written before
+  the packet was opened — so a version mismatch, an E2EE disagreement or a bad checksum
+  left a point for a replacement that never happened. The packet is opened first now.
+
+- **The rate-limit window belongs to the storage that refused.** Pointing Kesonode at a
+  different backend, folder or repo during Nutstore's half hour left automatic sync
+  parked against a storage that had never refused anything, and the UI blamed that one.
+  Saving a different connection target now drops the window; changing only the
+  credential keeps it, since re-signing in does not un-meter the same server.
+
+- **The first-sync question is asked only when this browser has bookmarks to protect.**
+  It used to be asked whenever anything was publishable, including a device with an empty
+  tree and a deletion log; the "use this browser's copy" answer would then have emptied
+  the group's bookmark files with nothing to offer in return.
+
+- **"Use this browser's copy" re-publishes only bookmarks.** Clearing the whole upload
+  checksum made history, sessions and extensions upload again in the same cycle, spending
+  a metered window on files nothing had changed.
+
+- **An answered direction cannot be applied twice.** A second setup tab, or one left open
+  while the answer was given elsewhere, ran the destructive half again — deleting files
+  the peers had already re-uploaded, or replacing the tree from a different "newest" peer.
+
+- **Device names are no longer re-decorated on a fresh read.** Peers whose labels were
+  written by older builds ("Macbook · Edge · 451dbeb9") were stripped only when served
+  from the local cache, so the same device changed name between refreshes. Following a
+  "Forget" the device also no longer reappears from that cache during a refused listing.
+
+- **Restore points keep the name the device had when they were created**, and an offline
+  snapshot list merges a partial local entry with the shared index instead of letting it
+  erase the device name and count.
+
+- **The popup no longer throws on open**, and its stream dots distinguish "never synced"
+  and "last run failed" from "synced": a green dot next to an error banner said both.
+
 ## [1.5.14] - 2026-11-10
 
 ### Added

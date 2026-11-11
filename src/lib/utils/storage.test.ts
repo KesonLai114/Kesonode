@@ -9,6 +9,7 @@ import {
   SYNC_BACKOFF_BASE_MS, SYNC_BACKOFF_MAX_MS,
   getSettings, saveSettings, DEFAULT_SETTINGS, ensureActiveBackendConfig,
   setRemoteSession, setRemoteExtensions, getRemoteSessions, getState, setState,
+  getLastUploadChecksum, setLastUploadChecksum, clearUploadChecksum,
 } from "@/lib/utils/storage";
 import { browser } from "@/lib/utils/ext";
 import type { RemoteSessionEntry, RemoteExtensionEntry, SyncExtension, SyncSettings } from "@/lib/types";
@@ -218,6 +219,17 @@ describe("normalizeRemoteSessions", () => {
     };
     const out = normalizeRemoteSessions(map);
     expect(out.map((e) => e.device_id)).toEqual(["dev-b", "dev-a"]);
+  });
+
+  it("drops a session whose tabs are not an array of objects", () => {
+    // A string has a `length` too, and a null tab reaches `t.url` in the popup and in the
+    // restore path. Either one used to be able to take the whole popup down.
+    const stringTabs = entry("dev-a", "2026-06-20T10:00:00.000Z");
+    (stringTabs.session as unknown as { tabs: string }).tabs = "https://example.com";
+    const nullTab = entry("dev-b", "2026-06-21T10:00:00.000Z");
+    (nullTab.session.tabs as unknown as unknown[]).push(null);
+
+    expect(normalizeRemoteSessions({ "dev-a": stringTabs, "dev-b": nullTab })).toEqual([]);
   });
 });
 
@@ -583,5 +595,22 @@ describe("normalizeRemoteSessions: a peer entry with no timestamp", () => {
     const out = normalizeRemoteSessions({ "dev-a": good, "dev-b": bad });
 
     expect(out.map((e) => e.device_id)).toEqual(["dev-a", "dev-b"]);
+  });
+});
+
+describe("clearUploadChecksum: one data type at a time", () => {
+  it("drops only the named type", async () => {
+    await setLastUploadChecksum("bookmarks", "b");
+    await setLastUploadChecksum("history", "h");
+
+    await clearUploadChecksum("bookmarks");
+
+    expect(await getLastUploadChecksum("bookmarks")).toBeNull();
+    expect(await getLastUploadChecksum("history")).toBe("h");
+  });
+
+  it("is a no-op when nothing was recorded", async () => {
+    await clearUploadChecksum("bookmarks");
+    expect(await getLastUploadChecksum("bookmarks")).toBeNull();
   });
 });

@@ -23,7 +23,7 @@
     "description": "NOT a sentence: the BCP 47 tag for THIS catalogue, written into <html lang> so the browser and screen readers know what language the page is in. Replace it with your own tag and nothing else, lowercase language and uppercase region: de, es, pt-BR, zh-CN. Do not translate the word."
   },
   "extension_name": {
-    "message": "Kesonode | Private Bookmark & Tab Sync v1.5.14",
+    "message": "Kesonode | Private Bookmark & Tab Sync v1.5.17",
     "description": "The extension's name. This IS the Chrome Web Store listing title, so it carries the search terms people actually type: bookmark, tab, sync. Keep 'Kesonode' first and keep the whole thing under 45 characters. Translate the part after the bar into what someone would search for in your language; leave 'Kesonode' alone, it is the product name."
   },
   "extension_description": {
@@ -655,7 +655,7 @@
     "message": "Sync with this choice"
   },
   "onb_direction_hint": {
-    "message": "Not sure? Nothing is merged until you choose — you can close this and answer later in Settings → Activity."
+    "message": "Not sure? Nothing is merged until you choose — you can close this; the Kesonode popup will remind you to finish choosing."
   },
   "onb_sync_title": {
     "message": "Syncing your data…"
@@ -1102,6 +1102,77 @@
   "opt_bulk_delete_desc": {
     "message": "A safety net: if a peer's deletions would remove more than this share of your local bookmarks, the merge skips them (guards against a corrupt sync wiping your tree). Raise it if you routinely delete in bulk."
   },
+  "opt_baseline_label": {
+    "message": "Bookmark baseline",
+    "description": "Section heading in Settings → Device and the status label in Activity. Names the browser whose bookmarks the group was aligned to."
+  },
+  "opt_baseline_desc": {
+    "message": "The browser whose bookmarks the group was aligned to. Other browsers apply it once, then merge both ways again.",
+    "description": "Explains the bookmark baseline. The setting applies immediately, not through the Save button."
+  },
+  "opt_baseline_none": {
+    "message": "Not set — bookmarks merge in both directions."
+  },
+  "opt_baseline_mine": {
+    "message": "This browser · $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "Nov 11, 2026, 10:42"
+      }
+    }
+  },
+  "opt_baseline_other": {
+    "message": "$DEVICE$ · $TIME$",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      },
+      "time": {
+        "content": "$2",
+        "example": "Nov 11, 2026, 10:42"
+      }
+    }
+  },
+  "opt_baseline_loading": {
+    "message": "Reading…"
+  },
+  "opt_baseline_unavailable": {
+    "message": "Couldn't read the baseline from the storage."
+  },
+  "opt_baseline_cached": {
+    "message": "· last known value"
+  },
+  "opt_baseline_waiting": {
+    "message": "This browser hasn't aligned with $DEVICE$ yet; it will on the next sync.",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      }
+    }
+  },
+  "opt_baseline_set": {
+    "message": "Use this browser as baseline"
+  },
+  "opt_baseline_clear": {
+    "message": "Clear baseline"
+  },
+  "opt_baseline_confirm_set": {
+    "message": "Other browsers will replace their bookmarks with this browser's copy once. Each one saves its own restore point first, and sync is two-way again afterwards.",
+    "description": "Confirmation shown before this browser becomes the baseline. It replaces other browsers' bookmark trees once; each of them saves its own restore point first."
+  },
+  "opt_baseline_confirm_clear": {
+    "message": "Bookmarks stay as they are on every browser, and sync becomes two-way again.",
+    "description": "Confirmation before removing the baseline. No bookmarks are deleted."
+  },
+  "opt_baseline_set_done": {
+    "message": "This browser is now the baseline. Other browsers will align on their next sync."
+  },
+  "opt_baseline_cleared": {
+    "message": "Baseline cleared. Bookmarks merge both ways again."
+  },
   "bm_exclude_label": {
     "message": "Exclude bookmarks from sync",
     "description": "The switch, under Bookmarks in Settings and in the setup wizard, that opens a tree of this browser's bookmarks for picking what stays out of sync."
@@ -1370,8 +1441,23 @@
   "opt_status_next_off": {
     "message": "Manual only"
   },
+  "opt_status_paused": {
+    "message": "Paused until $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "18:42"
+      }
+    }
+  },
+  "opt_status_paused_hint": {
+    "message": "Automatic sync is waiting out the storage's rate-limit window (or a repeated failure). Press Sync now in the popup to retry immediately."
+  },
   "opt_status_totals": {
-    "message": "Totals per type"
+    "message": "Items per type"
+  },
+  "opt_status_totals_hint": {
+    "message": "How many items of each type this device synced last: bookmarks as links, history within the configured window, extensions installed here, and sessions as other devices' sessions you can restore."
   },
   "opt_devices_section": {
     "message": "Devices"
@@ -1660,6 +1746,9 @@
   },
   "opt_snap_empty": {
     "message": "No restore points yet. Create one above, or one is saved automatically if an unusual deletion is ever blocked."
+  },
+  "opt_snap_partial": {
+    "message": "The storage can't be listed right now (most likely a rate-limit window), so this shows only the restore points this device already knows about. Points made on other devices will appear once it answers again — nothing has been deleted."
   },
   "opt_snap_count_one": {
     "message": "$COUNT$ bookmark",
@@ -2076,12 +2165,6 @@
   "opt_first_sync_head": {
     "message": "First sync: choose a direction"
   },
-  "opt_first_sync_head_sub": {
-    "message": "When this browser and your other devices both have bookmarks, decide which side wins first. You can also choose again here at any time."
-  },
-  "opt_first_sync_pending": {
-    "message": "Sync is paused while you choose. Your other devices already have bookmarks in the shared folder."
-  },
   "opt_first_sync_merge": {
     "message": "Merge (recommended)"
   },
@@ -2095,10 +2178,10 @@
     "message": "Clear the bookmarks in this browser and rebuild them from the newest other device. A restore point is saved first, but bookmarks that exist only here are lost."
   },
   "opt_first_sync_local": {
-    "message": "Use the copy in this browser"
+    "message": "Use this browser as the baseline"
   },
   "opt_first_sync_local_desc": {
-    "message": "Delete the bookmark files of the other devices from the storage and make the tree in this browser the only one on offer. Close Kesonode on the other devices first, or they will upload their own bookmarks again."
+    "message": "Other browsers replace their bookmarks with this browser's copy once, each saving its own restore point first. Sync is two-way again afterwards, so changes made later on any browser still arrive everywhere."
   },
   "opt_first_sync_busy": {
     "message": "Working…"

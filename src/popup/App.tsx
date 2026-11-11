@@ -24,7 +24,16 @@ import {
 
 // Shown in the popup footer so a user running several Kesonode copies side by side can
 // tell them apart at a glance (the extension list in the browser only shows the name).
-const APP_VERSION = browser.runtime.getManifest().version;
+// Read defensively for the same reason as REVIEW_PAGE below: a popup page kept alive
+// across an extension reload can find `browser.runtime` gone, and a version string is
+// not worth a crashed popup.
+const APP_VERSION = (() => {
+  try {
+    return browser.runtime.getManifest().version;
+  } catch {
+    return "";
+  }
+})();
 
 // Icons are static; the labels are looked up per render so they follow the browser's
 // language. Same for STATUS_CONFIG below: the colour classes stay in the table, the
@@ -120,6 +129,8 @@ export default function PopupApp() {
     }
     // Still wake the background so it (re)inits alarms / clears a stuck "syncing",
     // but don't block the UI on it (fire-and-forget — cold event page is fine).
+    // `sendMessage` is async, so a page kept alive across an extension reload rejects
+    // here rather than throwing; without this handler that rejection was uncaught.
     void sendMessage({ type: "GET_STATE" }).catch(() => {});
   }, []);
 
@@ -390,6 +401,10 @@ export default function PopupApp() {
   })();
   const pulsing = status === "syncing" || status === "success";
   const conflictGroups = groupConflictsByDevice(state?.pending_conflicts ?? []);
+  // While the direction question is open a sync returns without doing anything, so the
+  // primary button cannot be "Sync now": it looked like a press that missed, and pressing
+  // it again was the only thing the popup offered. It becomes the way to answer instead.
+  const firstSyncPending = !!state?.first_sync_pending;
   // Settings loaded and every data type switched off. `settingsLoaded` matters: before the
   // read lands, enabled_types is undefined and an empty list would be indistinguishable
   // from "we don't know yet".
@@ -482,11 +497,11 @@ export default function PopupApp() {
             </div>
           ))}
           {/* The three answers and their consequences need more room than 360px, so the
-              popup points at Settings → Activity, where the same choice is offered even
-              when nothing is pending (so it can be made again later). */}
+              popup points at the onboarding direction step, which is the only place the
+              choice lives: it is answered once, on first sync, and never again. */}
           {state?.first_sync_pending && (
             <button
-              onClick={openActivityLog}
+              onClick={openOnboarding}
               className="flex w-full items-center gap-2 rounded-box border border-sk-warn bg-sk-raised px-3 py-2 text-left transition-colors hover:bg-sk-tint"
             >
               <GitMerge size={12} className="shrink-0 text-sk-warn" />
@@ -636,7 +651,7 @@ export default function PopupApp() {
 
       {/* ── Sync now ── */}
       <button
-        onClick={handleSyncNow}
+        onClick={firstSyncPending ? openOnboarding : handleSyncNow}
         disabled={isSyncing || !hasBackend}
         className={`mt-4 flex h-11 w-full select-none items-center justify-center gap-2 rounded-box text-sm font-medium transition-colors ${
           hasBackend
@@ -644,8 +659,10 @@ export default function PopupApp() {
             : "cursor-not-allowed bg-sk-raised text-sk-subtle"
         } disabled:opacity-60`}
       >
-        {isSyncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} strokeWidth={2} />}
-        {isSyncing ? t("status_syncing") : t("popup_sync_now")}
+        {isSyncing ? <Loader2 size={16} className="animate-spin" />
+          : firstSyncPending ? <GitMerge size={16} strokeWidth={2} />
+          : <RefreshCw size={16} strokeWidth={2} />}
+        {isSyncing ? t("status_syncing") : firstSyncPending ? t("popup_first_sync_cta") : t("popup_sync_now")}
       </button>
       </div>
 
@@ -716,13 +733,18 @@ export default function PopupApp() {
           </h2>
           <div className="space-y-1.5">
             {remoteSessions.map((entry) => {
-              const total = entry.session.tabs.length;
-              const missing = tabsToRestore(entry.session.tabs, openUrls).length;
+              // The normaliser drops entries without a session, but this cache is a peer
+              // packet's content: a hand-edited or half-written one must cost its own row,
+              // not the whole popup (the first property read here is `session.id`).
+              const session = entry?.session;
+              if (!session || !Array.isArray(session.tabs)) return null;
+              const total = session.tabs.length;
+              const missing = tabsToRestore(session.tabs, openUrls).length;
               const openHere = total - missing;
               return (
-              <div key={entry.session.id} className="flex items-center gap-2 px-0.5 py-0.5">
+              <div key={session.id} className="flex items-center gap-2 px-0.5 py-0.5">
                 <div className="min-w-0 flex-1">
-                  <span className="block truncate text-[14px]">{entry.session.label ? <bdi>{entry.session.label}</bdi> : t("popup_unknown_device")}</span>
+                  <span className="block truncate text-[14px]">{session.label ? <bdi>{session.label}</bdi> : t("popup_unknown_device")}</span>
                   <span className="block truncate font-mono text-[12px] text-sk-subtle">
                     {plural("popup_tabs", total)}
                     {openHere > 0 && ` · ${plural("popup_tabs_open_here", openHere)}`}
@@ -735,7 +757,7 @@ export default function PopupApp() {
                       })}`}
                   </span>
                 </div>
-                {confirmRestore === entry.session.id && (
+                {confirmRestore === session.id && (
                   <button
                     onClick={() => setConfirmRestore(null)}
                     className="shrink-0 px-1.5 py-1.5 text-[12px] text-sk-muted transition-colors hover:text-sk-text"
@@ -744,14 +766,14 @@ export default function PopupApp() {
                   </button>
                 )}
                 <button
-                  onClick={() => restoreSession(entry.session.id, missing)}
+                  onClick={() => restoreSession(session.id, missing)}
                   disabled={missing === 0}
                   className="flex shrink-0 items-center gap-1.5 rounded-box border border-sk-hairline bg-sk-raised px-2.5 py-1.5 text-[12px] text-sk-muted transition-colors hover:text-sk-text disabled:cursor-default disabled:opacity-60 disabled:hover:text-sk-muted"
                 >
                   <RotateCcw size={12} />{" "}
                   {missing === 0
                     ? t("popup_restore_all_open")
-                    : confirmRestore === entry.session.id
+                    : confirmRestore === session.id
                       ? plural("popup_restore_confirm", missing)
                       : t("popup_restore")}
                 </button>

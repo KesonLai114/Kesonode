@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { createSnapshot, listSnapshots, restoreSnapshot, pruneSnapshots, deleteSnapshot, renameSnapshot, setSnapshotPinned, flushPendingPins, snapshotDisplayName, snapshotIsUnnamed } from "@/lib/sync/snapshots";
+import { createSnapshot, listSnapshots, knownSnapshots, restoreSnapshot, pruneSnapshots, deleteSnapshot, renameSnapshot, setSnapshotPinned, flushPendingPins, snapshotDisplayName, snapshotIsUnnamed } from "@/lib/sync/snapshots";
 import { HttpError } from "@/lib/utils/retry";
 import { DEFAULT_SETTINGS, KEYS, shortDeviceId } from "@/lib/utils/storage";
 import { t } from "@/lib/utils/i18n";
@@ -27,7 +27,16 @@ async function otherDevice(): Promise<void> {
   // Called with no keys the fake returns the whole store; chrome's own types don't
   // model that overload, hence the cast.
   const getAll = chrome.storage.local.get as unknown as () => Promise<Record<string, unknown>>;
-  for (const k of Object.keys(await getAll())) await chrome.storage.local.remove(k);
+  const wipe = async () => {
+    for (const k of Object.keys(await getAll())) await chrome.storage.local.remove(k);
+  };
+  await wipe();
+  // `logger.event` does not await its audit write, so the line written by a snapshot
+  // taken just before this call can still land afterwards — and "the second device"
+  // would then inherit the first one's Activity log. Let the pending chain settle
+  // (the timer runs after every queued microtask), then wipe again.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await wipe();
 }
 
 async function localUrls(): Promise<string[]> {
@@ -808,6 +817,122 @@ describe("snapshots — a point keeps naming the device that took it", () => {
   });
 });
 
+describe("snapshots — this device's own Activity log names the points it created", () => {
+  // A point saved before the shared index carried device fields (or while an annotation
+  // write was being refused) is bare on the backend. The one honest link back to its
+  // origin is local: createSnapshot writes `Created <file> (<n> bookmarks)` into THIS
+  // device's log, so the line proves the point was written here.
+  const device = settings({
+    device_label: "Mac",
+    device_id: "5a1d59ee-0000-4000-8000-000000000002",
+  });
+  const bare = (ts: number) => `konode_snap_bookmarks_${ts}.json`;
+
+  it("fills the count and the device for a point the log says it wrote", async () => {
+    await otherDevice();
+    const backend = new FileFake();
+    const name = bare(1_700_000_000_123);
+    backend.blobs.set(name, "{}");
+    await chrome.storage.local.set({
+      [KEYS.AUDIT_LOG]: [{
+        timestamp: "2023-11-14T22:13:20.200Z",
+        action: "Snapshots",
+        detail: `Created ${name} (42 bookmarks)`,
+        ok: true,
+        level: "ok",
+      }],
+    });
+
+    const [meta] = await listSnapshots(asBackend(backend), device);
+    expect(meta.count).toBe(42);
+    expect(meta.device_label).toBe("Mac");
+    expect(snapshotDisplayName(meta)).toBe(`${t("opt_snap_unknown")} · Mac · 5a1d59ee`);
+  });
+
+  it("leaves a point without a line unattributed — the log is evidence, not a guess", async () => {
+    await otherDevice();
+    const backend = new FileFake();
+    const name = bare(1_700_000_000_456);
+    backend.blobs.set(name, "{}");
+    await chrome.storage.local.set({ [KEYS.AUDIT_LOG]: [] });
+
+    const [meta] = await listSnapshots(asBackend(backend), device);
+    expect(meta.count).toBeUndefined();
+    expect(meta.device_label).toBeUndefined();
+    expect(snapshotDisplayName(meta)).toBe(t("opt_snap_unknown"));
+  });
+
+  it("keeps what it learned, so the name survives the log's ring", async () => {
+    await otherDevice();
+    const backend = new FileFake();
+    const name = bare(1_700_000_000_789);
+    backend.blobs.set(name, "{}");
+    await chrome.storage.local.set({
+      [KEYS.AUDIT_LOG]: [{
+        timestamp: "2023-11-14T22:13:20.200Z",
+        action: "Snapshots",
+        detail: `Created ${name} (42 bookmarks)`,
+        ok: true,
+        level: "ok",
+      }],
+    });
+
+    await listSnapshots(asBackend(backend), device);
+    // Weeks later: the creation line has long been pushed out of the 200-entry ring.
+    await chrome.storage.local.set({ [KEYS.AUDIT_LOG]: [] });
+
+    const [meta] = await listSnapshots(asBackend(backend), device);
+    expect(meta.count).toBe(42);
+    expect(snapshotDisplayName(meta)).toBe(`${t("opt_snap_unknown")} · Mac · 5a1d59ee`);
+  });
+
+  it("still recognises the point after it was kept or put back", async () => {
+    // Keeping a point renames it and leaves the timestamp alone, so the creation line
+    // keeps pointing at a name that no longer exists. Matching the timestamp instead
+    // keeps the row named across the move.
+    await otherDevice();
+    const backend = new FileFake();
+    const ts = 1_700_000_000_999;
+    backend.blobs.set(`konode_snap_kept_${ts}.json`, "{}");
+    await chrome.storage.local.set({
+      [KEYS.AUDIT_LOG]: [{
+        timestamp: "2023-11-14T22:13:20.200Z",
+        action: "Snapshots",
+        detail: `Created ${bare(ts)} (42 bookmarks)`,
+        ok: true,
+        level: "ok",
+      }],
+    });
+
+    const [meta] = await listSnapshots(asBackend(backend), device);
+    expect(meta.count).toBe(42);
+    expect(meta.device_label).toBe("Mac");
+  });
+
+  it("fills a partial local copy instead of leaving that row nameless", async () => {
+    await otherDevice();
+    const backend = new FileFake();
+    const ts = 1_700_000_001_111;
+    const name = bare(ts);
+    backend.blobs.set(name, "{}");
+    await chrome.storage.local.set({
+      [KEYS.SNAPSHOT_LOCAL]: { [name]: { name, timestamp: ts } },
+      [KEYS.AUDIT_LOG]: [{
+        timestamp: "2023-11-14T22:13:20.200Z",
+        action: "Snapshots",
+        detail: `Created ${name} (42 bookmarks)`,
+        ok: true,
+        level: "ok",
+      }],
+    });
+
+    const [meta] = await listSnapshots(asBackend(backend), device);
+    expect(meta.count).toBe(42);
+    const local = (await chrome.storage.local.get(KEYS.SNAPSHOT_LOCAL))[KEYS.SNAPSHOT_LOCAL];
+    expect(local[name]).toMatchObject({ count: 42, device_label: "Mac" });
+  });
+});
+
 describe("snapshots — the shared index is written under a condition", () => {
   // The index is the ONE file several devices write. Without a condition, two devices
   // taking a restore point at the same moment each merged into the list they had read,
@@ -1255,8 +1380,31 @@ describe("snapshots — annotations survive a window in which the index is unrea
     await listSnapshots(asBackend(backend), me());
 
     backend.refuseList = true;
-    const offline = await listSnapshots(asBackend(backend), me());
+    let partial = false;
+    const offline = await listSnapshots(asBackend(backend), me(), { onFallback: () => { partial = true; } });
     // An empty list would read as "you have no backups", which is the opposite of true.
     expect(offline.map((m) => m.name)).toContain(created.name);
+    // ...but this list omits every point only the folder listing could name, so the caller
+    // must be able to say it is incomplete instead of presenting it as the whole set.
+    expect(partial).toBe(true);
+  });
+});
+
+describe("knownSnapshots — the list shown while the storage is quiet", () => {
+  it("keeps what the last shared index knew when the local copy is partial", async () => {
+    const name = "konode_snap_bookmarks_1700000000000.json";
+    await chrome.storage.local.set({
+      [KEYS.SNAPSHOT_SHARED_CACHE]: [{
+        name, timestamp: 1_700_000_000_000, count: 12,
+        device_label: "Studio Mac", device_id: "5a1d59ee-0000-4000-8000-000000000000",
+      }],
+      [KEYS.SNAPSHOT_LOCAL]: { [name]: { name, timestamp: 1_700_000_000_000 } },
+    });
+
+    const [row] = await knownSnapshots();
+
+    expect(row.count).toBe(12);
+    expect(row.device_label).toBe("Studio Mac");
+    expect(row.device_id).toBe("5a1d59ee-0000-4000-8000-000000000000");
   });
 });

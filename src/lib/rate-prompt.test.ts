@@ -47,6 +47,7 @@ describe("stateNeedsUser", () => {
     expect(stateNeedsUser({ ...quiet, status: "conflict" })).toBe(true);
     expect(stateNeedsUser({ ...quiet, recovery_notice: { at: "2026-10-19T12:00:00Z", blocked: 40 } })).toBe(true);
     expect(stateNeedsUser({ ...quiet, pending_conflicts: [{} as never] })).toBe(true);
+    expect(stateNeedsUser({ ...quiet, first_sync_pending: { at: "2026-10-19T12:00:00Z", peer_count: 2 } })).toBe(true);
   });
 
   // Why the popup cannot decide from "syncing": the retry of a failing sync starts by

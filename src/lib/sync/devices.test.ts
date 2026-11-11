@@ -113,6 +113,16 @@ describe("listDevices", () => {
     expect(d.lastSeen).toBe("2026-08-01T09:30:00.000Z");
   });
 
+  it("shows a peer's own words, not the browser/id suffix older builds wrote into its label", async () => {
+    // The cache has always stripped that suffix. A fresh read did not, so the same device
+    // was called "Macbook · Edge · 451dbeb9" on one refresh and "Macbook" on the next.
+    h.files.set("konode_extensions_p-451dbeb9.json", packet("p-451dbeb9", "extensions", "Macbook · Edge · 451dbeb9", "2026-08-01T09:30:00.000Z"));
+
+    const [d] = await new SyncEngine(settings(), () => {}).listDevices();
+
+    expect(d.label).toBe("Macbook");
+  });
+
   it("costs one device its name, not the whole list, when its file can't be read", async () => {
     h.files.set("konode_extensions_peer1.json", packet("peer1", "extensions", "Readable", "2026-08-01T10:00:00.000Z"));
     h.files.set("konode_extensions_peer2.json", packet("peer2", "extensions", "Refused", "2026-08-02T10:00:00.000Z"));
@@ -300,15 +310,22 @@ describe("forgetDevice", () => {
     await chrome.storage.local.set({
       [KEYS.REMOTE_SESSIONS]: { peer1: { device_id: "peer1" }, peer2: { device_id: "peer2" } },
       [KEYS.REMOTE_EXTENSIONS]: { peer1: { device_id: "peer1" } },
+      // The name cache is what a refused listing falls back to, so a forgotten device
+      // must not reappear there either.
+      kesonode_peer_labels: {
+        peer1: { label: "Gone", at: 1 },
+        peer2: { label: "Stays", at: 2 },
+      },
     });
     h.files.set("konode_bookmarks_peer1.json", packet("peer1", "bookmarks", "Gone", "2026-08-01T10:00:00.000Z"));
     vi.spyOn(console, "info").mockImplementation(() => {});
 
     await new SyncEngine(settings(), () => {}).forgetDevice("peer1");
 
-    const r = await chrome.storage.local.get([KEYS.REMOTE_SESSIONS, KEYS.REMOTE_EXTENSIONS]);
+    const r = await chrome.storage.local.get([KEYS.REMOTE_SESSIONS, KEYS.REMOTE_EXTENSIONS, "kesonode_peer_labels"]);
     expect(Object.keys(r[KEYS.REMOTE_SESSIONS] as object)).toEqual(["peer2"]);
     expect(Object.keys(r[KEYS.REMOTE_EXTENSIONS] as object)).toEqual([]);
+    expect(Object.keys(r.kesonode_peer_labels as object)).toEqual(["peer2"]);
   });
 
   it("refuses to forget THIS device", async () => {

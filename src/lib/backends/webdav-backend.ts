@@ -690,6 +690,15 @@ export class WebDAVBackend implements IBackend {
         return { ok: true, message: `Connected to ${new URL(this.w.url).hostname}` };
       }
       if (res.status === 401) return { ok: false, message: this.authFailureMessage(res) };
+      if (res.status === 404) {
+        // A 404 on PROPFIND is "no collection at this exact address", not a broken server:
+        // WebDAV paths are case-sensitive, and a gateway that hands out one endpoint often
+        // does not serve subfolders of it. Say that instead of a bare status code.
+        return {
+          ok: false,
+          message: `Not found (404): ${new URL(this.w.url).hostname} has no WebDAV folder at that path. Paths are case-sensitive, and some gateways only serve the exact address they gave you.`,
+        };
+      }
       if (res.status === 429) return { ok: false, message: rateLimitMessage(new URL(this.w.url).host) };
       if (res.status === 403) return { ok: false, message: forbiddenMessage(new URL(this.w.url).host) };
       return { ok: false, message: `Server returned HTTP ${res.status}` };

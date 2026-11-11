@@ -48,6 +48,8 @@ async function seedOldInstall(): Promise<void> {
     // claims it already merged these tombstones would silently drop peer deletions.
     [KEYS.BOOKMARK_TOMBSTONES]: [{ id: "bm-1", timestamp: 1 }],
     [KEYS.SYNC_LOCK]: { acquiredAt: Date.now() },
+    // Keyed by data type only, so it describes what THIS identity last published.
+    [KEYS.UPLOAD_CHECKSUMS]: { bookmarks: "a".repeat(64), extensions: "b".repeat(64) },
   });
 }
 
@@ -73,6 +75,10 @@ describe("settings backup", () => {
     // A real upgrade round-trips through a file on disk, not a live object.
     const file = JSON.parse(JSON.stringify(await exportSettingsBackup("1.5.2")));
     await browser.storage.local.clear();
+    // The browser kept syncing under the SAME identity after the export was written.
+    await browser.storage.local.set({
+      [KEYS.UPLOAD_CHECKSUMS]: { bookmarks: "a".repeat(64), extensions: "b".repeat(64) },
+    });
 
     const restored = await importSettingsBackup(file);
 
@@ -94,12 +100,20 @@ describe("settings backup", () => {
     const lock = (await browser.storage.local.get(KEYS.SYNC_LOCK))[KEYS.SYNC_LOCK];
     expect(tombstones).toBeUndefined();
     expect(lock).toBeUndefined();
+    // Same machine, same device_id: the checksums still describe the files this
+    // installation published, so a quiet type can keep skipping its re-upload.
+    expect((await browser.storage.local.get(KEYS.UPLOAD_CHECKSUMS))[KEYS.UPLOAD_CHECKSUMS])
+      .toMatchObject({ bookmarks: "a".repeat(64) });
   });
 
   it("importing onto a DIFFERENT device mints a new identity but keeps every account", async () => {
     await seedOldInstall();
     const file = JSON.parse(JSON.stringify(await exportSettingsBackup("1.5.2")));
     await browser.storage.local.clear();
+    // This browser had already synced under its own earlier identity before the import.
+    await browser.storage.local.set({
+      [KEYS.UPLOAD_CHECKSUMS]: { bookmarks: "c".repeat(64), extensions: "d".repeat(64) },
+    });
 
     const restored = await importSettingsBackup(file, { asNewDevice: true });
 
@@ -121,6 +135,11 @@ describe("settings backup", () => {
     expect(restored.onboarding_completed).toBe(true);
     const session = (await browser.storage.local.get(KEYS.GDRIVE_SESSION))[KEYS.GDRIVE_SESSION];
     expect(session.refresh_token).toBe("refresh");
+    // The old checksums describe konode_<type>_<old id>.json. Carried over, an unchanged
+    // payload would be skipped as "already uploaded" and the new id would never publish
+    // a file — the browser would stay invisible to the group.
+    expect((await browser.storage.local.get(KEYS.UPLOAD_CHECKSUMS))[KEYS.UPLOAD_CHECKSUMS])
+      .toBeUndefined();
   });
 
   it("refuses a foreign file, a future version, and one with no device ID", async () => {

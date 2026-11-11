@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   DEFAULT_SETTINGS, getState, getFirstSync, setFirstSync,
-  setLastUploadChecksum, exportSettingsBackup,
+  setLastUploadChecksum, getLastUploadChecksum, setTombstones, exportSettingsBackup,
   syncCooldownRemaining, clearSyncCooldown,
 } from "@/lib/utils/storage";
 import { sha256 } from "@/lib/crypto/encryption";
@@ -222,6 +222,35 @@ describe("first sync chooses a direction before anything is merged", () => {
     expect(await localUrls()).toEqual(["https://local.example/"]);
   });
 
+  it("local does not make the other data types upload again", async () => {
+    await seedLocal();
+    await putPeer("peer", ["https://peer.example/"]);
+    const e = engine();
+    await e.sync();
+    await setLastUploadChecksum("history", "history-tag");
+    await setLastUploadChecksum("extensions", "extensions-tag");
+
+    await e.chooseFirstSync("local");
+
+    expect(await getLastUploadChecksum("history")).toBe("history-tag");
+    expect(await getLastUploadChecksum("extensions")).toBe("extensions-tag");
+  });
+
+  it("ignores a second answer once the question is settled", async () => {
+    await seedLocal();
+    await putPeer("peer", ["https://peer.example/"]);
+    const e = engine();
+    await e.sync();
+    await e.chooseFirstSync("local");
+    // The answer already settled the question; a tab left open must not run it again,
+    // even though the peer has re-uploaded in the meantime.
+    await putPeer("peer", ["https://peer.example/"]);
+
+    await e.chooseFirstSync("local");
+
+    expect(h.blobs.has("konode_bookmarks_peer.json")).toBe(true);
+  });
+
   it("remote replaces this tree with the newest peer's", async () => {
     await seedLocal();
     await putPeer("peer", ["https://peer.example/"]);
@@ -237,6 +266,15 @@ describe("first sync chooses a direction before anything is merged", () => {
   it("never parks an ordinary sync when the storage refuses a listing (503)", async () => {
     h.listFails = true;
     await seedLocal();
+    await putPeer("peer", ["https://peer.example/"]);
+
+    expect(await engine().sync()).toBe("ran");
+    expect((await getState()).first_sync_pending ?? null).toBeNull();
+  });
+
+  it("does not ask when this browser has no bookmarks, even with a deletion log to publish", async () => {
+    // The deletion log makes the payload non-empty, but there is no tree to protect.
+    await setTombstones([{ url: "https://gone.example/", deletedAt: Date.now(), own: true }]);
     await putPeer("peer", ["https://peer.example/"]);
 
     expect(await engine().sync()).toBe("ran");
@@ -326,6 +364,24 @@ describe("first sync chooses a direction before anything is merged", () => {
     // A restore point for a replacement that never happened is clutter the user has to
     // tidy up, and it costs a PUT inside the very window that refused the read. A field
     // report had two identical ones from two clicks, neither of which changed anything.
+    expect([...h.blobs.keys()].filter((n) => n.includes("konode_snap_manual_"))).toEqual([]);
+  });
+
+  it("remote does not claim a replacement when the chosen peer holds no bookmarks", async () => {
+    await seedLocal();
+    // A peer file that opens cleanly but carries an empty tree: the import refuses to
+    // wipe this device for it, which is right. Reporting "Replaced this device's
+    // bookmarks" anyway was not — nothing had changed, and the question was marked
+    // answered.
+    await putPeer("peer", []);
+    const e = engine();
+    await e.sync();
+
+    await expect(e.chooseFirstSync("remote")).rejects.toThrow(/holds no bookmarks/);
+    expect(await localUrls()).toEqual(["https://local.example/"]);
+    expect((await getFirstSync())?.done ?? false).toBe(false);
+    expect((await getState()).first_sync_pending?.peer_count).toBe(1);
+    // Nothing was replaced, so no restore point was needed for it either.
     expect([...h.blobs.keys()].filter((n) => n.includes("konode_snap_manual_"))).toEqual([]);
   });
 

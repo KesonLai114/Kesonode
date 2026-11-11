@@ -494,7 +494,27 @@ export interface SyncState {
    */
   failed_types?: DataType[];
   pending_conflicts: ConflictItem[];
+  /**
+   * How many syncs of each type have COMPLETED on this device. Internal bookkeeping: the
+   * popup reads 0 as "never synced" and onboarding watches it climb. It is not a count of
+   * items, and it used to be printed as one — Settings → Activity showed "书签 683 /
+   * 扩展 682" after 683 cycles and read as an inventory.
+   */
   sync_counts: Record<DataType, number>;
+  /**
+   * How many ITEMS of each type this device last synced, which is what Activity shows:
+   * bookmarks = links in the merged tree, history = entries in the exported window,
+   * extensions = extensions published, sessions = peer sessions available to restore
+   * (sessions are keyed per device — this device's own is the browser you are in).
+   * Optional because a state written before this field existed does not carry it.
+   */
+  sync_totals?: Record<DataType, number>;
+  /**
+   * Completed sync CYCLES. `sync_counts` counts per type, so summing it (683 + 682 = 1365)
+   * doubled every ordinary cycle; this is the number the "同步运行" tile means. Optional
+   * for the same reason as `sync_totals`; callers fall back to max(sync_counts).
+   */
+  sync_cycles?: number;
   bytes_transferred: number;
   // Set when the mass-delete guard blocked an unusual peer deletion on the last sync
   // (and an auto-snapshot was saved). Cleared at the start of each sync. `blocked` is
@@ -761,7 +781,7 @@ export type ExtensionMessage =
   | { type: "GET_CONFLICT_DIFF"; payload: { id: string } }
   | { type: "CLEAR_AUDIT_LOG" }
   | { type: "RESTORE_SESSION"; payload?: { id?: string } }
-  | { type: "TEST_BACKEND"; payload: { backend: BackendType } }
+  | { type: "TEST_BACKEND"; payload: { backend: BackendType; config?: BackendConfig } }
   | { type: "CREATE_SNAPSHOT"; payload?: { pinned?: boolean } }
   | { type: "LIST_SNAPSHOTS" }
   | { type: "RESTORE_SNAPSHOT"; payload: { name: string } }
@@ -776,8 +796,13 @@ export type ExtensionMessage =
   // found nothing pending and refused. It also pins the approval to what the user saw.
   | { type: "APPROVE_BULK_DELETE"; payload: { blocked: number } }
   // Which side wins when a device with bookmarks first joins peers that also have some.
-  // Also the manual "choose the sync direction again" entry point in Settings → Activity.
-  | { type: "FIRST_SYNC_CHOICE"; payload: { choice: FirstSyncChoice } };
+  // Asked once, in first-run setup (and there only); the popup links to that screen.
+  | { type: "FIRST_SYNC_CHOICE"; payload: { choice: FirstSyncChoice } }
+  // The group's bookmark baseline: a shared marker naming the device whose tree every
+  // other device adopts once. Read for Activity/Settings, set by this browser, or cleared.
+  | { type: "GET_BASELINE" }
+  | { type: "SET_BASELINE" }
+  | { type: "CLEAR_BASELINE" };
 
 /**
  * One device with files in the sync folder.
@@ -813,16 +838,37 @@ export interface DeviceInfo {
   isSelf: boolean;
 }
 
+/**
+ * The shared bookmark-baseline marker as Activity and Settings display it.
+ *
+ * `marker: null` means no baseline is set — as far as this device can tell. `cached` says
+ * the answer came from the last copy this device read because the storage could not be
+ * asked (a rate-limit window), so "not set" here may be "not visible right now".
+ * `adopted_at` is the marker generation (its `at`) this device has already applied.
+ */
+export interface BaselineInfo {
+  marker: { device_id: string; device_label?: string; at: string } | null;
+  adopted_at: string | null;
+  cached: boolean;
+}
+
 export type ExtensionResponse =
   | { type: "STATE"; payload: SyncState }
-  | { type: "SYNC_SCHEDULE"; payload: { next_at: number | null } }
+  // `paused_until`: automatic syncs are parked until this time (rate-limit cooldown or
+  // repeated-failure backoff). The periodic alarm keeps its normal scheduledTime through
+  // both, so `next_at` alone claimed the next cycle would run when it will be skipped.
+  | { type: "SYNC_SCHEDULE"; payload: { next_at: number | null; paused_until: number | null } }
   | { type: "SETTINGS"; payload: SyncSettings }
   | { type: "SETTINGS_BACKUP"; payload: SettingsBackup }
   | { type: "OK" }
   | { type: "ERROR"; payload: string }
   | { type: "TEST_RESULT"; payload: { ok: boolean; message: string } }
-  | { type: "SNAPSHOTS"; payload: SnapshotMeta[] }
+  // `partial`: the folder could not be listed and these are only the points this device
+  // knows about, so another device's point may be missing. Absent means the list is the
+  // backend's own answer.
+  | { type: "SNAPSHOTS"; payload: SnapshotMeta[]; partial?: boolean }
   | { type: "SNAPSHOT_RESTORED"; payload: { restored: number } }
   | { type: "DEVICES"; payload: DeviceInfo[] }
   | { type: "DEVICE_FORGOTTEN"; payload: { removed: number } }
+  | { type: "BASELINE"; payload: BaselineInfo }
   | { type: "CONFLICT_DIFF"; payload: ConflictDiff };

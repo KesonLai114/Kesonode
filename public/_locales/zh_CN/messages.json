@@ -523,7 +523,7 @@
     "message": "按这个方向同步"
   },
   "onb_direction_hint": {
-    "message": "拿不准也没关系：在你选择之前不会合并任何东西，也可以先关掉，稍后在 设置 → 活动 里作答。"
+    "message": "拿不准也没关系：在你选择之前不会合并任何东西，可以先关掉，稍后打开 Kesonode 的弹窗会提醒你继续作答。"
   },
   "onb_sync_title": {
     "message": "正在同步您的数据…"
@@ -571,7 +571,7 @@
     "message": "扩展列表，显示缺失的扩展及其安装链接。"
   },
   "extension_name": {
-    "message": "Kesonode | 私人书签与标签页同步 v1.5.14"
+    "message": "Kesonode | 私人书签与标签页同步 v1.5.17"
   },
   "onb_err_perms_no_prompt": {
     "message": "此浏览器无法显示权限提示，因此 Kesonode 无法请求所需的访问权限。请在浏览器扩展设置的 Kesonode 权限页面上授予权限，然后再次点击完成。"
@@ -927,6 +927,73 @@
   "opt_bulk_delete_desc": {
     "message": "安全机制：如果来自节点的删除操作影响到超过此比例的本地书签，合并过程将跳过这些删除（防止因同步异常而清空您的书签树）。如果您经常批量删除，可调高此数值。"
   },
+  "opt_baseline_label": {
+    "message": "书签基准"
+  },
+  "opt_baseline_desc": {
+    "message": "已对齐到的浏览器；其他浏览器应用一次后，恢复双向合并。"
+  },
+  "opt_baseline_none": {
+    "message": "未设置 — 书签双向合并。"
+  },
+  "opt_baseline_mine": {
+    "message": "本机 · $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "2026年11月11日 10:42"
+      }
+    }
+  },
+  "opt_baseline_other": {
+    "message": "$DEVICE$ · $TIME$",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      },
+      "time": {
+        "content": "$2",
+        "example": "2026年11月11日 10:42"
+      }
+    }
+  },
+  "opt_baseline_loading": {
+    "message": "正在读取…"
+  },
+  "opt_baseline_unavailable": {
+    "message": "无法从存储读取基准设置。"
+  },
+  "opt_baseline_cached": {
+    "message": "· 上次读取的值"
+  },
+  "opt_baseline_waiting": {
+    "message": "本机尚未与 $DEVICE$ 对齐，将在下次同步时进行。",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "Mac · Brave · 451dbeb9"
+      }
+    }
+  },
+  "opt_baseline_set": {
+    "message": "设本机为基准"
+  },
+  "opt_baseline_clear": {
+    "message": "清除基准"
+  },
+  "opt_baseline_confirm_set": {
+    "message": "其他浏览器将用本机的书签替换一次。每个浏览器在替换前都会先保存自己的还原点，之后恢复双向同步。"
+  },
+  "opt_baseline_confirm_clear": {
+    "message": "各浏览器的书签保持不变，同步恢复为双向。"
+  },
+  "opt_baseline_set_done": {
+    "message": "已将本机设为基准。其他浏览器将在下次同步时对齐。"
+  },
+  "opt_baseline_cleared": {
+    "message": "基准已清除，书签恢复双向合并。"
+  },
   "bm_exclude_label": {
     "message": "将书签排除在同步之外"
   },
@@ -1163,8 +1230,23 @@
   "opt_status_next_off": {
     "message": "仅手动"
   },
+  "opt_status_paused": {
+    "message": "已暂停至 $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "18:42"
+      }
+    }
+  },
+  "opt_status_paused_hint": {
+    "message": "自动同步正在等待存储的限流窗口结束（或等待重复错误退避）。可在弹窗中点“立即同步”马上重试。"
+  },
   "opt_status_totals": {
-    "message": "各类型累计"
+    "message": "各类型条目"
+  },
+  "opt_status_totals_hint": {
+    "message": "本设备最近一次同步的条目数：书签按链接数、历史记录按设置的时间范围、扩展为本机安装数，会话为其他设备可恢复的会话数。"
   },
   "opt_devices_section": {
     "message": "设备"
@@ -1422,6 +1504,9 @@
   },
   "opt_snap_empty": {
     "message": "尚未创建任何还原点。请在上方创建，或在出现异常删除被阻止时自动保存一个。"
+  },
+  "opt_snap_partial": {
+    "message": "暂时无法列出存储中的还原点（多为限流窗口），这里只显示本机已知的还原点。其他设备创建的会在存储恢复响应后出现——没有删除任何内容。"
   },
   "opt_snap_count_one": {
     "message": "$COUNT$ 书签",
@@ -1867,12 +1952,6 @@
   "opt_first_sync_head": {
     "message": "首次同步：选择同步方向"
   },
-  "opt_first_sync_head_sub": {
-    "message": "当本浏览器与其它设备都已有书签时，先决定以哪边为准。之后也可以随时回到这里重新选择。"
-  },
-  "opt_first_sync_pending": {
-    "message": "同步已暂停，等待你选择：云端已有其它设备的书签。"
-  },
   "opt_first_sync_merge": {
     "message": "合并（推荐）"
   },
@@ -1886,10 +1965,10 @@
     "message": "清空本机书签，按云端最新那台设备的书签重建。会先自动保存还原点，但本机独有的书签将不再保留。"
   },
   "opt_first_sync_local": {
-    "message": "以本机为准"
+    "message": "以本机为基准"
   },
   "opt_first_sync_local_desc": {
-    "message": "删除云端其它设备的书签文件，只保留本机这份。其它设备若在线会重新上传自己的书签，请先关闭它们。"
+    "message": "其它浏览器会用本机的书签替换一次，替换前各自保存还原点。之后恢复双向同步，各浏览器之后的新改动仍会互相同步。"
   },
   "opt_first_sync_busy": {
     "message": "处理中…"
