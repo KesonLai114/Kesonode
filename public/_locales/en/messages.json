@@ -139,15 +139,35 @@
     "description": "Button on the first-run card. Opens the setup wizard in a new tab."
   },
   "popup_keep_local": {
-    "message": "Keep local",
+    "message": "Keep this device",
     "description": "Conflict resolution: keep what this device has."
   },
+  "popup_keep_local_title": {
+    "message": "Keep this device: $DEVICE$'s changes are not applied here",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    },
+    "description": "Tooltip on the keep button. $DEVICE$ is the other device's name."
+  },
   "popup_use_remote": {
-    "message": "Use remote",
+    "message": "Use the other",
     "description": "Conflict resolution: take the other device's version."
   },
+  "popup_use_remote_title": {
+    "message": "Use the other device: merge $DEVICE$'s changes into this one",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    },
+    "description": "Tooltip on the use-the-other button. $DEVICE$ is the other device's name."
+  },
   "popup_conflict_resolve": {
-    "message": "Resolve",
+    "message": "See differences",
     "description": "Button on a conflict card in the popup, next to the other device's name. Opens Settings → Activity, which lists what differs between the two devices and offers the same two answers."
   },
   "popup_active_streams": {
@@ -1296,16 +1316,16 @@
     "description": "Sub-heading under 'Conflicts'. 'Manual' is the conflict resolution option of that name (opt_conflict_manual)."
   },
   "opt_conflicts_explain": {
-    "message": "$KEEP$ leaves this device as it is. $REMOTE$ merges the other device's changes into this one.",
+    "message": "“$KEEP$” leaves this device as it is. “$REMOTE$” merges the other device's changes into this one.",
     "description": "What the two buttons do. $KEEP$ and $REMOTE$ are the buttons' own labels (popup_keep_local, popup_use_remote), filled in by the code.",
     "placeholders": {
       "keep": {
         "content": "$1",
-        "example": "Keep local"
+        "example": "Keep this device"
       },
       "remote": {
         "content": "$2",
-        "example": "Use remote"
+        "example": "Use the other"
       }
     }
   },

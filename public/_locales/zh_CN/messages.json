@@ -100,13 +100,31 @@
     "message": "未配置后端"
   },
   "popup_keep_local": {
-    "message": "本地保留"
+    "message": "保留本机"
+  },
+  "popup_keep_local_title": {
+    "message": "保留本机：不把 $DEVICE$ 的改动应用到这里",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
   },
   "popup_use_remote": {
-    "message": "使用远程"
+    "message": "采用对方"
+  },
+  "popup_use_remote_title": {
+    "message": "采用对方：把 $DEVICE$ 的改动合并到这里",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
   },
   "popup_conflict_resolve": {
-    "message": "处理"
+    "message": "查看差异"
   },
   "popup_active_streams": {
     "message": "活跃数据流"
@@ -1104,11 +1122,11 @@
     "placeholders": {
       "keep": {
         "content": "$1",
-        "example": "Keep local"
+        "example": "保留本机"
       },
       "remote": {
         "content": "$2",
-        "example": "Use remote"
+        "example": "采用对方"
       }
     }
   },

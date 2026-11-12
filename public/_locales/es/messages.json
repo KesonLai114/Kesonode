@@ -100,13 +100,31 @@
     "message": "No hay ningún backend configurado"
   },
   "popup_keep_local": {
-    "message": "Mantener el local"
+    "message": "Mantener este equipo"
+  },
+  "popup_keep_local_title": {
+    "message": "Mantener este equipo: los cambios de $DEVICE$ no se aplican aquí",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
   },
   "popup_use_remote": {
-    "message": "Usar el remoto"
+    "message": "Usar el otro equipo"
+  },
+  "popup_use_remote_title": {
+    "message": "Usar el otro equipo: incorporar aquí los cambios de $DEVICE$",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
   },
   "popup_conflict_resolve": {
-    "message": "Resolver"
+    "message": "Ver diferencias"
   },
   "popup_active_streams": {
     "message": "Transmisiones activas"
@@ -1667,15 +1685,15 @@
     "message": "Este dispositivo y otro tienen versiones distintas. La resolución de conflictos está en Manual, así que Kesonode espera a que elijas."
   },
   "opt_conflicts_explain": {
-    "message": "$KEEP$ deja este dispositivo como está. $REMOTE$ incorpora aquí los cambios del otro dispositivo.",
+    "message": "«$KEEP$» deja este dispositivo como está. «$REMOTE$» incorpora aquí los cambios del otro dispositivo.",
     "placeholders": {
       "keep": {
         "content": "$1",
-        "example": "Keep local"
+        "example": "Mantener este equipo"
       },
       "remote": {
         "content": "$2",
-        "example": "Use remote"
+        "example": "Usar el otro equipo"
       }
     }
   },

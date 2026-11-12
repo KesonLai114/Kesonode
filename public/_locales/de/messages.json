@@ -112,13 +112,31 @@
     "message": "Einrichtung starten"
   },
   "popup_keep_local": {
-    "message": "Lokale behalten"
+    "message": "Dieses behalten"
+  },
+  "popup_keep_local_title": {
+    "message": "Dieses Gerät behalten: Änderungen von $DEVICE$ werden hier nicht übernommen",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
   },
   "popup_use_remote": {
-    "message": "Entfernte übernehmen"
+    "message": "Anderes übernehmen"
+  },
+  "popup_use_remote_title": {
+    "message": "Das andere Gerät übernehmen: Änderungen von $DEVICE$ hier zusammenführen",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
   },
   "popup_conflict_resolve": {
-    "message": "Auflösen"
+    "message": "Unterschiede"
   },
   "popup_active_streams": {
     "message": "Aktive Datenströme"
@@ -1109,15 +1127,15 @@
     "message": "Dieses Gerät und ein anderes haben unterschiedliche Versionen. Die Konfliktlösung steht auf Manuell, deshalb wartet Kesonode auf deine Wahl."
   },
   "opt_conflicts_explain": {
-    "message": "$KEEP$ lässt dieses Gerät, wie es ist. $REMOTE$ führt die Änderungen des anderen Geräts mit diesem zusammen.",
+    "message": "„$KEEP$“ lässt dieses Gerät, wie es ist. „$REMOTE$“ führt die Änderungen des anderen Geräts mit diesem zusammen.",
     "placeholders": {
       "keep": {
         "content": "$1",
-        "example": "Keep local"
+        "example": "Dieses behalten"
       },
       "remote": {
         "content": "$2",
-        "example": "Use remote"
+        "example": "Anderes übernehmen"
       }
     }
   },

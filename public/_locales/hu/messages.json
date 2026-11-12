@@ -112,13 +112,31 @@
     "message": "Beállítás indítása"
   },
   "popup_keep_local": {
-    "message": "Helyi megtartása"
+    "message": "Ezt megtartom"
+  },
+  "popup_keep_local_title": {
+    "message": "Ennek az eszköznek a megtartása: $DEVICE$ változásai nem kerülnek ide",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
   },
   "popup_use_remote": {
-    "message": "Távoli használata"
+    "message": "A másikat veszem"
+  },
+  "popup_use_remote_title": {
+    "message": "A másik eszköz átvétele: $DEVICE$ változásainak beolvasztása ide",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
   },
   "popup_conflict_resolve": {
-    "message": "Feloldás"
+    "message": "Eltérések"
   },
   "popup_active_streams": {
     "message": "Aktív adatfolyamok"
@@ -1109,15 +1127,15 @@
     "message": "Ez az eszköz és egy másik eltérő változatot tárol. Az ütközések feloldása Kézire van állítva, ezért a Kesonode a döntésedre vár."
   },
   "opt_conflicts_explain": {
-    "message": "$KEEP$: ez az eszköz úgy marad, ahogy van. $REMOTE$: a másik eszköz változásait beolvasztja ebbe.",
+    "message": "„$KEEP$” változatlanul hagyja ezt az eszközt. „$REMOTE$” ide olvasztja a másik eszköz változásait.",
     "placeholders": {
       "keep": {
         "content": "$1",
-        "example": "Keep local"
+        "example": "Ezt megtartom"
       },
       "remote": {
         "content": "$2",
-        "example": "Use remote"
+        "example": "A másikat veszem"
       }
     }
   },

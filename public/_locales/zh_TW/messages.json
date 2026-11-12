@@ -114,11 +114,29 @@
   "popup_keep_local": {
     "message": "保留本機"
   },
+  "popup_keep_local_title": {
+    "message": "保留本機：不把 $DEVICE$ 的變更套用到這裡",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
+  },
   "popup_use_remote": {
-    "message": "使用遠端"
+    "message": "採用對方"
+  },
+  "popup_use_remote_title": {
+    "message": "採用對方：把 $DEVICE$ 的變更合併到這裡",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
   },
   "popup_conflict_resolve": {
-    "message": "處理"
+    "message": "查看差異"
   },
   "popup_active_streams": {
     "message": "使用中的資料流"
@@ -1113,11 +1131,11 @@
     "placeholders": {
       "keep": {
         "content": "$1",
-        "example": "Keep local"
+        "example": "保留本機"
       },
       "remote": {
         "content": "$2",
-        "example": "Use remote"
+        "example": "採用對方"
       }
     }
   },

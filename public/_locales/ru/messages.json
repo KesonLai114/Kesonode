@@ -112,13 +112,31 @@
     "message": "Начать настройку"
   },
   "popup_keep_local": {
-    "message": "Оставить локальную"
+    "message": "Оставить свою"
+  },
+  "popup_keep_local_title": {
+    "message": "Оставить это устройство: изменения $DEVICE$ сюда не применяются",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
   },
   "popup_use_remote": {
-    "message": "Взять удалённую"
+    "message": "Взять чужую"
+  },
+  "popup_use_remote_title": {
+    "message": "Взять другое устройство: перенести сюда изменения $DEVICE$",
+    "placeholders": {
+      "device": {
+        "content": "$1",
+        "example": "boxbox"
+      }
+    }
   },
   "popup_conflict_resolve": {
-    "message": "Решить"
+    "message": "Различия"
   },
   "popup_active_streams": {
     "message": "Активные потоки"
@@ -1113,11 +1131,11 @@
     "placeholders": {
       "keep": {
         "content": "$1",
-        "example": "Keep local"
+        "example": "Оставить свою"
       },
       "remote": {
         "content": "$2",
-        "example": "Use remote"
+        "example": "Взять чужую"
       }
     }
   },

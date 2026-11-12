@@ -576,7 +576,9 @@ export default function PopupApp() {
               much of the popup is left for everything else. */}
           {conflictGroups.length > 0 && (
             <div className="max-h-[200px] space-y-2 overflow-y-auto">
-              {conflictGroups.map((group) => (
+              {conflictGroups.map((group) => {
+                const peerName = group[0].device_label ?? t("popup_unknown_device");
+                return (
                 <div key={group[0].device_id} className="rounded-box border border-sk-hairline bg-sk-raised px-3 py-2">
                   <div className="flex items-center gap-2">
                     <GitMerge size={12} className="shrink-0 text-sk-warn" />
@@ -599,16 +601,19 @@ export default function PopupApp() {
                       {/* The type as its icon, the same one Active Streams uses for it a
                           section below. Spelled out, this column has to hold "Könyvjelzők"
                           and "Lesezeichen", which leaves the two buttons too narrow for
-                          "Entfernte übernehmen" and wraps them onto two lines: the row grows
+                          "Anderes übernehmen" and wraps them onto two lines: the row grows
                           back exactly as much as grouping saved. The name is on the tooltip
                           and read out to a screen reader. */}
                       <span className="flex shrink-0 items-center" title={typeLabel} aria-label={typeLabel}>
                         <TypeIcon size={12} className="text-sk-muted" />
                       </span>
                       {/* The spinner REPLACES the label rather than joining it: these two
-                          buttons share about 270px, and "Entfernte übernehmen" already
-                          fills one of them. */}
+                          buttons share about 270px, and "Anderes übernehmen" already
+                          fills one of them. The labels name the choice, not the transport
+                          ("local"/"remote" read as the storage), and each title says which
+                          device it applies to because the heading can be truncated. */}
                       <button
+                        title={t("popup_keep_local_title", [peerName])}
                         onClick={() => resolveConflict(c.id, "local")}
                         disabled={resolving !== null}
                         className="flex flex-1 items-center justify-center rounded-box border border-sk-hairline bg-sk-surface py-1.5 text-[12px] text-sk-muted transition-colors hover:text-sk-text disabled:cursor-not-allowed disabled:opacity-60"
@@ -618,6 +623,7 @@ export default function PopupApp() {
                           : t("popup_keep_local")}
                       </button>
                       <button
+                        title={t("popup_use_remote_title", [peerName])}
                         onClick={() => resolveConflict(c.id, "remote")}
                         disabled={resolving !== null}
                         className="flex flex-1 items-center justify-center rounded-box border border-sk-hairline bg-sk-surface py-1.5 text-[12px] text-sk-muted transition-colors hover:text-sk-text disabled:cursor-not-allowed disabled:opacity-60"
@@ -630,7 +636,8 @@ export default function PopupApp() {
                     );
                   })}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
