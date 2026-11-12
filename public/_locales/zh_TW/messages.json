@@ -34,7 +34,7 @@
     "message": "立即同步"
   },
   "extension_name": {
-    "message": "Kesonode | 私人書籤與分頁同步 v1.5.17"
+    "message": "Kesonode | 私人書籤與分頁同步 v1.5.18"
   },
   "extension_description": {
     "message": "隱私優先的瀏覽器同步，資料存放在你自己的空間：Google Drive、WebDAV、GitHub。"
@@ -1724,10 +1724,6 @@
   "opt_export": {
     "message": "匯出"
   },
-  "opt_export_credentials_warning": {
-    "message": "這個設定檔會包含明文憑證：WebDAV 密碼、GitHub 權杖、Google 重新整理權杖、加密口令。拿到檔案的人可以直接使用它們。請妥善保管——不要放進共享雲端硬碟、傳到聊天視窗，或附在問題回報裡。\n\n仍要匯出嗎？",
-    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
-  },
   "opt_exported": {
     "message": "已匯出"
   },
@@ -1781,14 +1777,80 @@
   "opt_cfg_export_label": {
     "message": "匯出設定"
   },
-  "opt_cfg_export_desc": {
-    "message": "將後端帳號、加密密碼、裝置 ID 等設定存成 JSON 檔案。檔案內含明文憑證，請妥善保管，不要分享。"
-  },
   "opt_cfg_import_label": {
     "message": "匯入設定"
   },
+  "opt_cfg_export_desc": {
+    "message": "把你的設定——儲存服務、資料夾、同步排程、偏好設定和裝置 ID——儲存為 JSON 檔案。除非你選擇包含登入憑證，否則檔案不含任何憑證；包含時會用你設定的密碼加密。"
+  },
+  "opt_cfg_export_include_label": {
+    "message": "包含登入憑證"
+  },
+  "opt_cfg_export_include_desc": {
+    "message": "加入 WebDAV 密碼、GitHub 權杖、Google Drive 登入工作階段和端對端加密口令，並用下方的密碼加密。不含這些內容時，檔案仍可還原設定，但之後需要重新登入。"
+  },
+  "opt_cfg_export_password_ph": {
+    "message": "加密密碼（至少 12 個字元）"
+  },
+  "opt_cfg_export_confirm_ph": {
+    "message": "再次輸入密碼"
+  },
+  "opt_cfg_export_password_note": {
+    "message": "沒有密碼就無法開啟這個檔案。請把兩者都妥善保管。"
+  },
+  "opt_cfg_export_pw_short": {
+    "message": "請至少輸入 $LEN$ 個字元。",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_export_pw_mismatch": {
+    "message": "兩次輸入的密碼不一致。"
+  },
   "opt_cfg_import_desc": {
-    "message": "升級或更換瀏覽器後還原設定，不必重新設定。匯入會取代目前的設定。"
+    "message": "升級後還原你的設定，不必重新設定。會取代目前的設定。如果檔案已加密，會要求輸入密碼。"
+  },
+  "opt_cfg_import_pw_label": {
+    "message": "此備份已加密"
+  },
+  "opt_cfg_import_pw_desc": {
+    "message": "輸入匯出時設定的密碼以開啟檔案。"
+  },
+  "opt_cfg_import_pw_ph": {
+    "message": "備份密碼"
+  },
+  "opt_cfg_import_pass_label": {
+    "message": "此備份需要你的加密口令"
+  },
+  "opt_cfg_import_pass_desc": {
+    "message": "此備份啟用了端對端加密，但不包含口令。請輸入這台裝置應使用的口令——沒有它就無法完成匯入（也不能改為明文上傳）。"
+  },
+  "opt_cfg_import_pass_ph": {
+    "message": "加密口令"
+  },
+  "opt_cfg_import_need_passphrase": {
+    "message": "請輸入口令以繼續。"
+  },
+  "opt_cfg_import_pass_short": {
+    "message": "口令至少需要 $LEN$ 個字元。",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_open_btn": {
+    "message": "繼續"
+  },
+  "opt_cfg_import_missing": {
+    "message": "此備份不含登入憑證，因此在你登入以下帳戶前無法開始同步：$ACCOUNTS$。請開啟「設定 → 儲存」，填寫後儲存。",
+    "placeholders": {
+      "accounts": {
+        "content": "$1"
+      }
+    }
   },
   "opt_feedback_section": {
     "message": "意見回饋"
@@ -2057,5 +2119,384 @@
   },
   "onb_done_multi_body": {
     "message": "在另一台裝置上安裝 Kesonode，選擇同一個儲存，書籤、分頁等會自動匯合。"
+  },
+  "popup_receipt_line": {
+    "message": "上次同步：+$ADDED$ / −$REMOVED$",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "popup_receipt_danger": {
+    "message": "上次同步刪除了 $REMOVED$ 個書籤，已儲存還原點。",
+    "placeholders": {
+      "removed": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_receipt_undo": {
+    "message": "復原"
+  },
+  "popup_receipt_undo_confirm": {
+    "message": "還原？"
+  },
+  "popup_receipt_undone": {
+    "message": "已還原"
+  },
+  "popup_search_placeholder": {
+    "message": "搜尋書籤、歷史記錄和閱讀清單"
+  },
+  "popup_search_clear": {
+    "message": "清除搜尋"
+  },
+  "popup_search_empty": {
+    "message": "找不到結果。"
+  },
+  "popup_source_bookmark": {
+    "message": "書籤"
+  },
+  "popup_source_history": {
+    "message": "歷史"
+  },
+  "popup_source_reading": {
+    "message": "閱讀"
+  },
+  "popup_reading_head": {
+    "message": "閱讀清單"
+  },
+  "popup_reading_save": {
+    "message": "儲存分頁"
+  },
+  "popup_reading_saved": {
+    "message": "已儲存"
+  },
+  "popup_reading_empty": {
+    "message": "尚未儲存任何內容。"
+  },
+  "popup_reading_error": {
+    "message": "無法載入閱讀清單：$ERROR$。這不代表清單為空。",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "404 Not Found"
+      }
+    }
+  },
+  "popup_reading_remove": {
+    "message": "從閱讀清單移除"
+  },
+  "popup_reading_no_tab": {
+    "message": "目前分頁沒有可儲存的網址。"
+  },
+  "opt_receipt_section": {
+    "message": "上次同步回執"
+  },
+  "opt_receipt_section_sub": {
+    "message": "上一次完成的同步在本裝置上修改了什麼。"
+  },
+  "opt_receipt_headline": {
+    "message": "新增 +$ADDED$ · 刪除 −$REMOVED$",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_receipt_danger": {
+    "message": "本次同步刪除了本裝置上很大一部分書籤。合併前已儲存還原點。"
+  },
+  "opt_receipt_sample": {
+    "message": "部分被刪除的內容："
+  },
+  "opt_receipt_moved": {
+    "message": "移動 $COUNT$ 項",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_retitled": {
+    "message": "重新命名 $COUNT$ 項",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_uploaded": {
+    "message": "已上傳"
+  },
+  "opt_receipt_held": {
+    "message": "已暫緩上傳"
+  },
+  "opt_receipt_undo_label": {
+    "message": "復原本次同步"
+  },
+  "opt_receipt_undo_desc": {
+    "message": "還原套用這些變更之前儲存的書籤樹。"
+  },
+  "opt_receipt_undo": {
+    "message": "復原"
+  },
+  "opt_receipt_empty": {
+    "message": "尚無完成的同步。"
+  },
+  "opt_receipt_history": {
+    "message": "較早的同步"
+  },
+  "opt_receipt_show_all": {
+    "message": "顯示全部 $COUNT$ 筆",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_show_less": {
+    "message": "收起"
+  },
+  "opt_receipt_clear": {
+    "message": "清除回執"
+  },
+  "opt_receipt_clear_confirm": {
+    "message": "確認清除全部回執？"
+  },
+  "opt_receipt_has_snapshot": {
+    "message": "已儲存還原點"
+  },
+  "opt_conflict_types_section": {
+    "message": "依資料類型"
+  },
+  "opt_conflict_types_section_sub": {
+    "message": "除非某種類型需要個別處理，否則維持「跟隨上方設定」。"
+  },
+  "opt_conflict_type_desc": {
+    "message": "此類型的衝突處理方式"
+  },
+  "opt_conflict_type_global": {
+    "message": "跟隨上方設定"
+  },
+  "opt_cleanup_section": {
+    "message": "書籤清理"
+  },
+  "opt_cleanup_section_sub": {
+    "message": "尋找重複的網址，也可檢查已無法連線的連結。"
+  },
+  "opt_cleanup_scan_label": {
+    "message": "掃描書籤"
+  },
+  "opt_cleanup_scan_desc": {
+    "message": "重複項目來自本瀏覽器的書籤樹。在你勾選並確認之前，不會刪除任何內容。"
+  },
+  "opt_cleanup_dead_label": {
+    "message": "線上檢查連結"
+  },
+  "opt_cleanup_dead_desc": {
+    "message": "會為每個書籤主機發出一次網路請求，每次最多檢查 300 個連結。只有 404/410 才算失效；逾時和登入牆會被忽略。預設關閉，因為這會從本裝置連線這些網站。"
+  },
+  "opt_cleanup_dead_cap": {
+    "message": "本次檢查了 $PROBED$ 個連結，其餘留到下次。",
+    "placeholders": {
+      "probed": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_scan": {
+    "message": "掃描"
+  },
+  "opt_cleanup_summary": {
+    "message": "已掃描 $SCANNED$ 項 · $GROUPS$ 組重複 · $DEAD$ 個失效連結",
+    "placeholders": {
+      "scanned": {
+        "content": "$1"
+      },
+      "groups": {
+        "content": "$2"
+      },
+      "dead": {
+        "content": "$3"
+      }
+    }
+  },
+  "opt_cleanup_select_all": {
+    "message": "全選"
+  },
+  "opt_cleanup_selected_one": {
+    "message": "已選 $COUNT$ 項",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_selected_other": {
+    "message": "已選 $COUNT$ 項",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_apply": {
+    "message": "刪除所選"
+  },
+  "opt_cleanup_confirm": {
+    "message": "確認刪除"
+  },
+  "opt_cleanup_removed_one": {
+    "message": "已刪除 $COUNT$ 個書籤",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_removed_other": {
+    "message": "已刪除 $COUNT$ 個書籤",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_none": {
+    "message": "沒有發現重複項目或失效連結。"
+  },
+  "opt_auto_snapshot_label": {
+    "message": "風險合併前儲存還原點"
+  },
+  "opt_auto_snapshot_desc": {
+    "message": "當一次合併會刪除本裝置很大一部分書籤時，先儲存還原點，並在活動頁提供復原。"
+  },
+  "opt_order_label": {
+    "message": "書籤順序"
+  },
+  "opt_order_desc": {
+    "message": "對端的位置是否移動你的副本（最新變更優先），或本瀏覽器保留自己的順序。"
+  },
+  "opt_order_lww": {
+    "message": "跟隨最新變更"
+  },
+  "opt_order_keep_local": {
+    "message": "保留本瀏覽器順序"
+  },
+  "opt_autosave_section": {
+    "message": "工作階段快照"
+  },
+  "opt_autosave_section_sub": {
+    "message": "在兩次同步之間保留在本裝置上的分頁，當機或關閉視窗後仍能找回。"
+  },
+  "opt_autosave_enable_label": {
+    "message": "保留工作階段快照"
+  },
+  "opt_autosave_enable_desc": {
+    "message": "在工作階段同步後儲存，且不會從此裝置上傳。"
+  },
+  "opt_autosave_empty": {
+    "message": "尚無快照。本瀏覽器工作階段同步時會產生一個。"
+  },
+  "opt_autosave_unnamed": {
+    "message": "開啟的分頁"
+  },
+  "opt_autosave_choose": {
+    "message": "選擇分頁"
+  },
+  "opt_autosave_collapse": {
+    "message": "收合分頁"
+  },
+  "opt_autosave_restore_selected": {
+    "message": "開啟所選"
+  },
+  "opt_autosave_search": {
+    "message": "依標題或網址搜尋快照"
+  },
+  "opt_autosave_search_empty": {
+    "message": "沒有符合此搜尋的快照。"
+  },
+  "opt_autosave_opened_one": {
+    "message": "已開啟 $COUNT$ 個分頁",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_autosave_opened_other": {
+    "message": "已開啟 $COUNT$ 個分頁",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_bm_export_label": {
+    "message": "匯出給其他程式的書籤"
+  },
+  "opt_bm_export_desc": {
+    "message": "Netscape HTML 可用於任何瀏覽器的書籤匯入，Raindrop CSV 可匯入 Raindrop，唯讀頁面是一個無需安裝擴充功能即可在手機開啟的檔案。"
+  },
+  "opt_bm_export_netscape": {
+    "message": "Netscape HTML"
+  },
+  "opt_bm_export_raindrop": {
+    "message": "Raindrop CSV"
+  },
+  "opt_bm_export_view": {
+    "message": "唯讀頁面"
+  },
+  "opt_bm_export_view_upload": {
+    "message": "發佈唯讀頁面"
+  },
+  "opt_bm_export_view_upload_confirm": {
+    "message": "發布的頁面是書籤的純文字副本，無法加密。仍要發布嗎？"
+  },
+  "opt_bm_export_view_remove": {
+    "message": "移除已發布頁面"
+  },
+  "opt_bm_export_view_remove_confirm": {
+    "message": "要從儲存裝置中移除已發布的唯讀頁面嗎？你的書籤不受影響。"
+  },
+  "opt_export_uploaded": {
+    "message": "已儲存並上傳"
+  },
+  "opt_export_view_removed": {
+    "message": "已移除發布頁面。"
+  },
+  "opt_doctor_section": {
+    "message": "同步診斷"
+  },
+  "opt_doctor_section_sub": {
+    "message": "檢查本瀏覽器的設定，並產生可安全分享的診斷包。"
+  },
+  "opt_doctor_run_label": {
+    "message": "檢查本瀏覽器"
+  },
+  "opt_doctor_run_desc": {
+    "message": "只在本機執行檢查，不會離開裝置。"
+  },
+  "opt_doctor_run": {
+    "message": "開始檢查"
+  },
+  "opt_doctor_copy_desc": {
+    "message": "複製的診斷包包含版本、設定和最後一次錯誤。通關密語、權杖、密碼和完整儲存位址都會被移除。"
+  },
+  "opt_doctor_copy": {
+    "message": "複製診斷資訊"
+  },
+  "omnibox_default": {
+    "message": "搜尋 Kesonode 書籤、歷史記錄與閱讀清單"
+  },
+  "opt_cleanup_host_needed": {
+    "message": "檢查失效連結需要存取書籤中網站的權限。重複書籤仍已完成掃描。"
   }
 }

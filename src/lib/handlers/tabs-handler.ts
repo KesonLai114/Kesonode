@@ -123,7 +123,7 @@ export async function exportSession(label?: string): Promise<SyncSession> {
  */
 const MAX_RESTORE_TABS = 200;
 
-export async function importSession(session: SyncSession): Promise<void> {
+export async function importSession(session: SyncSession): Promise<number> {
   assertDataTypeApi("sessions");
   // Never open a non-web URL from a remote packet (javascript:/data:/file: are
   // an injection/exfiltration vector); only http(s) tabs are restored.
@@ -137,7 +137,7 @@ export async function importSession(session: SyncSession): Promise<void> {
   const missing = tabsToRestore(safe, await openTabUrls(await browser.tabs.query({})));
   if (safe.length && !missing.length) {
     logger.event("importSession", `All ${safe.length} tabs from "${session.label}" are already open`);
-    return;
+    return 0;
   }
   const openable = missing.slice(0, MAX_RESTORE_TABS);
   if (missing.length > openable.length) {
@@ -152,7 +152,7 @@ export async function importSession(session: SyncSession): Promise<void> {
     "importSession",
     `Opening ${openable.length} tabs from "${session.label}"${already ? ` (${already} already open)` : ""}`
   );
-  if (openable.length === 0) return;
+  if (openable.length === 0) return 0;
 
   /**
    * Restore into the CURRENT window, one tab at a time, on engines that allow it.
@@ -214,7 +214,7 @@ export async function importSession(session: SyncSession): Promise<void> {
     if (remembered === null) await setSingleTabOpenLimit(true);
     await noteOpened();
     await restoreGroups(session.groups, openable, opened, safe);
-    return;
+    return opened.length;
   }
 
   // Did the tab we asked for actually appear? Asked for BY ID, because counting every open
@@ -263,7 +263,7 @@ export async function importSession(session: SyncSession): Promise<void> {
       // The first tab stayed in this window and the rest went to a new one, so a group
       // that spans both is restored once per window, never pulled across into one.
       await restoreGroups(session.groups, openable, opened, safe);
-      return;
+      return opened.length;
     }
   }
 
@@ -272,6 +272,7 @@ export async function importSession(session: SyncSession): Promise<void> {
   // session would otherwise record "unlimited" on an engine we never measured.
   if (remembered === null && measuredUnlimited) await setSingleTabOpenLimit(false);
   await restoreGroups(session.groups, openable, opened, safe);
+  return opened.length;
 }
 
 /**

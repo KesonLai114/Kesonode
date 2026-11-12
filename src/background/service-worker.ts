@@ -1,16 +1,21 @@
 // ─── Kesonode Service Worker (MV3) ─────────────────────────────────────────
 // Handles: alarm-based polling, bookmark listeners, message routing
 
-import type { ExtensionMessage, ExtensionResponse, SyncState } from "@/lib/types";
-import { getSettings, getState, setState, saveSettings, clearStaleSyncLock, setBulkDeleteApproval, KEYS, exportSettingsBackup, importSettingsBackup, importSettingsRisks, syncCooldownRemaining, syncBackoffRemaining } from "@/lib/utils/storage";
+import type { ExtensionMessage, ExtensionResponse, SyncState, SyncBookmark } from "@/lib/types";
+import { getSettings, getState, setState, saveSettings, clearStaleSyncLock, setBulkDeleteApproval, KEYS, exportSettingsBackup, importSettingsBackup, importSettingsRisks, syncCooldownRemaining, syncBackoffRemaining, getSyncReports, clearSyncReports, getAutosavedSessions } from "@/lib/utils/storage";
 import { SyncEngine, explainSyncFailure } from "@/lib/sync/sync-engine";
-import { registerBookmarkListeners, recordExclusionRelease } from "@/lib/handlers/bookmarks-handler";
+import { registerBookmarkListeners, recordExclusionRelease, exportBookmarkPayload } from "@/lib/handlers/bookmarks-handler";
+import { listAllBookmarks, listReadingList, addToReadingList, removeFromReadingList, READING_LIST_FOLDER } from "@/lib/handlers/reading-list-handler";
+import { searchDocs, omniboxSuggestions, escapeOmniboxText, type SearchDoc } from "@/lib/search";
+import { checkDeadLinks, buildCleanupReport } from "@/lib/cleanup";
+import { exportResult } from "@/lib/exporters";
+import { buildDoctorReport } from "@/lib/diagnostics/doctor";
 import { createBackend } from "@/lib/backends/abstract-backend";
 import { logger, setLoggerDebug } from "@/lib/utils/logger";
 import { BADGE_COLORS, BADGE_TEXT, STATE_UPDATE } from "@/lib/constants";
 import { browser } from "@/lib/utils/ext";
 import { ensureSyncAlarm, SYNC_ALARM, BOOKMARK_ALARM } from "@/lib/utils/alarms";
-import { eventPresent, missingPermissionsFor } from "@/lib/utils/capabilities";
+import { eventPresent, missingPermissionsFor, dataTypeAvailability } from "@/lib/utils/capabilities";
 import { clearExpiredDraft } from "@/lib/onboarding-draft";
 import { openConflictFromNotification } from "@/lib/sync/conflict-resolver";
 
@@ -279,6 +284,84 @@ async function snapshotsReply(engine: SyncEngine): Promise<ExtensionResponse> {
   return { type: "SNAPSHOTS", payload: list, ...(partial ? { partial: true } : {}) };
 }
 
+/** 90 days of history is what the search window offers; older entries are not worth a burst. */
+const SEARCH_HISTORY_DAYS = 90;
+
+/**
+ * Everything the popup and the address bar can search, read fresh from the browser.
+ *
+ * Bookmarks are one getTree() call and the reading list is a folder inside them, so a URL
+ * in `Kesonode Reading List` is tagged `reading` rather than fetched twice. History is
+ * optional: without its permission the exception is a type not searched, not a failure.
+ */
+async function gatherSearchDocs(): Promise<SearchDoc[]> {
+  const docs: SearchDoc[] = [];
+  try {
+    for (const b of await listAllBookmarks()) {
+      docs.push({
+        source: b.folder.split(" / ").includes(READING_LIST_FOLDER) ? "reading" : "bookmark",
+        title: b.title,
+        url: b.url,
+        folder: b.folder,
+        id: b.id,
+        at: b.dateAdded,
+      });
+    }
+  } catch (err) {
+    logger.warn("Search", `Could not read bookmarks: ${err instanceof Error ? err.message : err}`);
+  }
+  try {
+    const items = await browser.history.search({
+      text: "",
+      startTime: Date.now() - SEARCH_HISTORY_DAYS * 24 * 60 * 60 * 1000,
+      maxResults: 500,
+    });
+    for (const item of items) {
+      if (!item.url) continue;
+      docs.push({
+        source: "history",
+        title: item.title ?? "",
+        url: item.url,
+        at: item.lastVisitTime,
+      });
+    }
+  } catch {
+    // No history permission on this device, or no history API at all.
+  }
+  return docs;
+}
+
+async function doctorReply(): Promise<ExtensionResponse> {
+  const settings = await getSettings();
+  const state = await getState();
+  const availability: Record<string, { state: string; permission?: string }> = {};
+  for (const type of ["bookmarks", "history", "sessions", "extensions"] as const) {
+    const a = await dataTypeAvailability(type);
+    availability[type] = a;
+  }
+  let snapshotCount: number | undefined;
+  try {
+    snapshotCount = (await syncEngine?.getSnapshotList())?.list.length;
+  } catch {
+    // The snapshot list needs a backend; the doctor is still useful without it.
+  }
+  return {
+    type: "DOCTOR",
+    payload: buildDoctorReport({
+      version: browser.runtime.getManifest().version,
+      settings,
+      state,
+      availability,
+      ...(snapshotCount !== undefined ? { snapshotCount } : {}),
+    }),
+  };
+}
+
+/** The bookmark tree in the shape the exporters read (same source as a restore point). */
+async function bookmarkExportTree(): Promise<SyncBookmark[]> {
+  return (await exportBookmarkPayload()).tree;
+}
+
 async function handleMessage(message: ExtensionMessage): Promise<ExtensionResponse> {
   await ensureInit();
   switch (message.type) {
@@ -341,9 +424,11 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
     case "SAVE_SETTINGS": {
       // Unticking a box puts a folder back into the sync, and nothing inside it was
       // recorded while it was out (#54). Telling what came back needs the rules as they
-      // stand BEFORE the write, so they are read here rather than after it.
+      // stand BEFORE the write, so they are read here rather than after it. The same read
+      // tells whether encryption is being turned ON below.
+      const previous = await getSettings();
       const wasExcluding = "excluded_bookmarks" in message.payload
-        ? (await getSettings()).excluded_bookmarks ?? []
+        ? previous.excluded_bookmarks ?? []
         : null;
       const updated = await saveSettings(message.payload);
       if (wasExcluding) {
@@ -356,6 +441,18 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
         }
       }
       setLoggerDebug(updated.debug_mode);
+
+      // The read-only page is uploaded in plaintext by design (a phone cannot decrypt it),
+      // so it must not survive the moment this device starts encrypting everything else.
+      // Best effort: the backend may be unreachable, and that must not fail the save.
+      if (!previous.encryption_enabled && updated.encryption_enabled) {
+        try {
+          await syncEngine?.removeViewHtml();
+          logger.event("Encryption", "Removed the published read-only page from storage");
+        } catch (err) {
+          logger.debug("Encryption", `No published read-only page to remove: ${err instanceof Error ? err.message : err}`);
+        }
+      }
 
       // Reinit engine with new settings (awaited: an encryption/passphrase change
       // clears the upload checksums so the next sync re-uploads in the new form).
@@ -378,9 +475,11 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
     }
 
     case "EXPORT_SETTINGS": {
+      const includeCredentials =
+        (message as { payload?: { includeCredentials?: boolean } }).payload?.includeCredentials === true;
       return {
         type: "SETTINGS_BACKUP",
-        payload: await exportSettingsBackup(browser.runtime.getManifest().version),
+        payload: await exportSettingsBackup(browser.runtime.getManifest().version, { includeCredentials }),
       };
     }
 
@@ -398,6 +497,10 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       }
       const updated = await importSettingsBackup(message.payload, {
         asNewDevice: (message as { asNewDevice?: boolean }).asNewDevice === true,
+        e2eePassphrase:
+          typeof (message as { e2eePassphrase?: unknown }).e2eePassphrase === "string"
+            ? (message as { e2eePassphrase: string }).e2eePassphrase
+            : undefined,
       });
       setLoggerDebug(updated.debug_mode);
       await syncEngine?.updateSettings(updated);
@@ -484,6 +587,11 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       return { type: "OK" };
     }
 
+    case "CLEAR_SYNC_REPORTS": {
+      await clearSyncReports();
+      return { type: "OK" };
+    }
+
     case "CREATE_SNAPSHOT": {
       if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
       await syncEngine.snapshotNow({ origin: "manual", pinned: message.payload?.pinned === true });
@@ -552,6 +660,88 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
       await syncEngine.removeSnapshot(message.payload.name);
       return snapshotsReply(syncEngine);
+    }
+
+    case "SEARCH": {
+      const hits = searchDocs(
+        await gatherSearchDocs(),
+        message.payload?.query ?? "",
+        message.payload?.limit
+      );
+      return { type: "SEARCH_RESULTS", payload: hits };
+    }
+
+    case "READING_LIST_ADD": {
+      const result = await addToReadingList(message.payload.url, message.payload.title);
+      return { type: "READING_LIST_ADDED", payload: result };
+    }
+
+    case "READING_LIST_LIST": {
+      return { type: "READING_LIST", payload: await listReadingList() };
+    }
+
+    case "READING_LIST_REMOVE": {
+      await removeFromReadingList(message.payload.id);
+      return { type: "READING_LIST", payload: await listReadingList() };
+    }
+
+    case "CLEANUP_SCAN": {
+      const items = await listAllBookmarks();
+      const scan = message.payload?.dead_links ? await checkDeadLinks(items) : null;
+      return { type: "CLEANUP_REPORT", payload: buildCleanupReport(items, scan) };
+    }
+
+    case "CLEANUP_APPLY": {
+      // Only ids the user confirmed. A removal here is an ordinary bookmark deletion, so
+      // the listener records a tombstone and the change syncs normally.
+      let removed = 0;
+      for (const id of message.payload.ids ?? []) {
+        try {
+          await browser.bookmarks.remove(id);
+          removed++;
+        } catch (err) {
+          logger.warn("Cleanup", `Could not remove bookmark ${id}: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+      return { type: "CLEANUP_APPLIED", payload: { removed } };
+    }
+
+    case "EXPORT_BOOKMARKS": {
+      const settings = await getSettings();
+      const result = exportResult(message.payload.format, await bookmarkExportTree(), {
+        deviceLabel: settings.device_label,
+      });
+      let uploaded = false;
+      // Uploading only makes sense for the read-only page: that is the file a phone can
+      // open from the same storage without importing anything.
+      if (message.payload.upload && message.payload.format === "view") {
+        if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
+        await syncEngine.uploadViewHtml(result.content);
+        uploaded = true;
+      }
+      return { type: "EXPORT_FILE", payload: { ...result, ...(uploaded ? { uploaded } : {}) } };
+    }
+
+    case "REMOVE_VIEW_FILE": {
+      if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
+      await syncEngine.removeViewHtml();
+      return { type: "OK" };
+    }
+
+    case "RUN_DOCTOR":
+      return doctorReply();
+
+    case "GET_SYNC_REPORTS":
+      return { type: "SYNC_REPORTS", payload: await getSyncReports() };
+
+    case "LIST_AUTOSAVED_SESSIONS":
+      return { type: "AUTOSAVED_SESSIONS", payload: await getAutosavedSessions() };
+
+    case "RESTORE_SESSION_TABS": {
+      if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
+      const opened = await syncEngine.restoreSessionTabs(message.payload.urls ?? []);
+      if (!opened) return { type: "ERROR", payload: "Nothing selected could be opened." };
+      return { type: "OK" };
     }
 
     default:
@@ -694,6 +884,84 @@ on("notifications", "onClicked", () => browser.notifications.onClicked.addListen
 // MV3 requires event listeners to be attached on every worker load, and doing
 // it here (not in init()) avoids stacking duplicate listeners across wakes.
 registerBookmarkListeners(onBookmarkChange);
+
+// ─── Address-bar search ───────────────────────────────────────────────────
+
+/**
+ * "kesonode <words>" in the address bar.
+ *
+ * Optional API (absent on some engines), so it is looked up rather than assumed; the
+ * third-party typing path stays in the popup either way. Suggestions carry the URL as
+ * their content, which is what the browser navigates to when the row is accepted.
+ */
+interface OmniboxApi {
+  setDefaultSuggestion(suggestion: { description: string }): void;
+  onInputChanged: {
+    addListener(cb: (text: string, suggest: (items: Array<{ content: string; description: string }>) => void) => void): void;
+  };
+  onInputEntered: { addListener(cb: (text: string) => void): void };
+}
+const omniboxApi = (browser as unknown as { omnibox?: OmniboxApi }).omnibox;
+try {
+  // The browser shows this as the "tab to search" hint, so it follows the UI language.
+  omniboxApi?.setDefaultSuggestion({ description: browser.i18n.getMessage("omnibox_default") });
+} catch {
+  // Cosmetic only; the suggestions below still work without it.
+}
+
+// The address bar fires on every keystroke, and each call re-reads the whole bookmark
+// tree plus a slice of history. A short debounce keeps that off the typing path, and the
+// sequence number stops an older scan from overwriting a newer one's suggestions.
+const OMNIBOX_DEBOUNCE_MS = 180;
+let omniboxSeq = 0;
+let omniboxTimer: ReturnType<typeof setTimeout> | undefined;
+
+on("omnibox", "onInputChanged", () => {
+  omniboxApi?.onInputChanged.addListener((text, suggest) => {
+    const query = (text ?? "").trim();
+    const seq = ++omniboxSeq;
+    if (omniboxTimer) clearTimeout(omniboxTimer);
+    if (query.length < 2) {
+      suggest([]);
+      return;
+    }
+    omniboxTimer = setTimeout(() => {
+      void (async () => {
+        try {
+          const hits = omniboxSuggestions(await gatherSearchDocs(), query);
+          if (seq !== omniboxSeq) return;
+          suggest(hits.map((hit) => ({
+            content: hit.url,
+            description: `${escapeOmniboxText(hit.title)} — ${escapeOmniboxText(hit.url)}`,
+          })));
+        } catch {
+          if (seq === omniboxSeq) suggest([]);
+        }
+      })();
+    }, OMNIBOX_DEBOUNCE_MS);
+  });
+});
+
+on("omnibox", "onInputEntered", () => {
+  omniboxApi?.onInputEntered.addListener((text) => {
+    const value = (text ?? "").trim();
+    if (!value) return;
+    // A selected suggestion passes its URL straight through. Enter on the raw query (no
+    // suggestion picked) used to do nothing; open the best match instead. Only http(s)
+    // URLs are ever launched, so a javascript:/chrome: bookmark can't run from here.
+    if (/^https?:\/\//i.test(value)) {
+      void browser.tabs.create({ url: value }).catch(() => {});
+      return;
+    }
+    void (async () => {
+      try {
+        const hits = omniboxSuggestions(await gatherSearchDocs(), value);
+        const url = hits.find((h) => /^https?:\/\//i.test(h.url))?.url;
+        if (url) await browser.tabs.create({ url });
+      } catch { /* nothing to open */ }
+    })();
+  });
+});
 
 // Init on load (handles MV3 service worker wake-ups)
 void ensureInit();

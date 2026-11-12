@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ConflictResolver, orderPeersByTime } from "@/lib/sync/conflict-resolver";
+import { ConflictResolver, orderPeersByTime, strategyFor } from "@/lib/sync/conflict-resolver";
 import type { SyncPacket } from "@/lib/types";
 
 function packet(over: Partial<SyncPacket>): SyncPacket {
@@ -164,5 +164,33 @@ describe("a packet nobody can date must not win, and must not scramble the order
 
     expect(orderPeersByTime([a, b]).map((p) => p.device_id)).toEqual(["dev-a", "dev-b"]);
     expect(orderPeersByTime([b, a]).map((p) => p.device_id)).toEqual(["dev-a", "dev-b"]);
+  });
+});
+
+describe("strategyFor — a type's own answer, else the global one", () => {
+  const settings = (over: Partial<Pick<Parameters<typeof strategyFor>[0], "conflict_strategy" | "conflict_strategies">> = {}) => ({
+    conflict_strategy: "lww" as const,
+    conflict_strategies: {},
+    ...over,
+  });
+
+  it("uses the global strategy for a type with no override", () => {
+    expect(strategyFor(settings({ conflict_strategy: "prefer-local" }), "bookmarks")).toBe("prefer-local");
+    expect(strategyFor(settings(), "history")).toBe("lww");
+  });
+
+  it("lets one type take a different strategy", () => {
+    const s = settings({ conflict_strategy: "lww", conflict_strategies: { bookmarks: "manual", history: "prefer-remote" } });
+    expect(strategyFor(s, "bookmarks")).toBe("manual");
+    expect(strategyFor(s, "history")).toBe("prefer-remote");
+    expect(strategyFor(s, "sessions")).toBe("lww");
+  });
+
+  it("ignores an override that is not a known strategy, as an imported file cannot be trusted", () => {
+    const s = settings({
+      conflict_strategy: "prefer-local",
+      conflict_strategies: { bookmarks: "whatever" as never },
+    });
+    expect(strategyFor(s, "bookmarks")).toBe("prefer-local");
   });
 });

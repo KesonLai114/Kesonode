@@ -23,7 +23,7 @@
     "description": "NOT a sentence: the BCP 47 tag for THIS catalogue, written into <html lang> so the browser and screen readers know what language the page is in. Replace it with your own tag and nothing else, lowercase language and uppercase region: de, es, pt-BR, zh-CN. Do not translate the word."
   },
   "extension_name": {
-    "message": "Kesonode | Private Bookmark & Tab Sync v1.5.17",
+    "message": "Kesonode | Private Bookmark & Tab Sync v1.5.18",
     "description": "The extension's name. This IS the Chrome Web Store listing title, so it carries the search terms people actually type: bookmark, tab, sync. Keep 'Kesonode' first and keep the whole thing under 45 characters. Translate the part after the bar into what someone would search for in your language; leave 'Kesonode' alone, it is the product name."
   },
   "extension_description": {
@@ -1971,10 +1971,6 @@
   "opt_export": {
     "message": "Export"
   },
-  "opt_export_credentials_warning": {
-    "message": "This file will contain your credentials in PLAIN TEXT: the WebDAV password, the GitHub token, the Google refresh token and the encryption passphrase. Anyone who gets the file can use them. Keep it private — not in shared cloud storage, not in a chat, not attached to a bug report.\n\nExport it anyway?",
-    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
-  },
   "opt_exported": {
     "message": "Exported"
   },
@@ -2030,14 +2026,80 @@
   "opt_cfg_export_label": {
     "message": "Export settings"
   },
-  "opt_cfg_export_desc": {
-    "message": "Save your backend accounts, encryption passphrase and device ID as a JSON file. It contains credentials in plain text — keep it somewhere private."
-  },
   "opt_cfg_import_label": {
     "message": "Import settings"
   },
+  "opt_cfg_export_desc": {
+    "message": "Save your configuration — storage providers, folders, schedules, preferences and device ID — as a JSON file. Sign-in credentials are left out unless you choose to include them, and then the file is encrypted with a password you set."
+  },
+  "opt_cfg_export_include_label": {
+    "message": "Include sign-in credentials"
+  },
+  "opt_cfg_export_include_desc": {
+    "message": "Adds the WebDAV password, GitHub token, Google Drive session and E2EE passphrase, encrypted with the password below. Without them the file restores your settings but you sign in again afterwards."
+  },
+  "opt_cfg_export_password_ph": {
+    "message": "Encryption password (at least 12 characters)"
+  },
+  "opt_cfg_export_confirm_ph": {
+    "message": "Repeat the password"
+  },
+  "opt_cfg_export_password_note": {
+    "message": "There is no way to recover this file without the password. Keep both somewhere private."
+  },
+  "opt_cfg_export_pw_short": {
+    "message": "Use at least $LEN$ characters.",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_export_pw_mismatch": {
+    "message": "The two passwords do not match."
+  },
   "opt_cfg_import_desc": {
-    "message": "Restore your configuration after an upgrade instead of setting everything up again. Replaces the current settings."
+    "message": "Restore your configuration after an upgrade instead of setting everything up again. Replaces the current settings. If the file is encrypted, you will be asked for its password."
+  },
+  "opt_cfg_import_pw_label": {
+    "message": "This backup is encrypted"
+  },
+  "opt_cfg_import_pw_desc": {
+    "message": "Enter the password you set when exporting it to open the file."
+  },
+  "opt_cfg_import_pw_ph": {
+    "message": "Backup password"
+  },
+  "opt_cfg_import_pass_label": {
+    "message": "This backup needs your encryption passphrase"
+  },
+  "opt_cfg_import_pass_desc": {
+    "message": "The backup enables end-to-end encryption but carries no passphrase. Enter the one this device should use — without it the import cannot be completed (and uploading in plaintext is not an option)."
+  },
+  "opt_cfg_import_pass_ph": {
+    "message": "Encryption passphrase"
+  },
+  "opt_cfg_import_need_passphrase": {
+    "message": "Enter your passphrase to continue."
+  },
+  "opt_cfg_import_pass_short": {
+    "message": "The passphrase must be at least $LEN$ characters.",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_open_btn": {
+    "message": "Continue"
+  },
+  "opt_cfg_import_missing": {
+    "message": "The backup carried no sign-in credentials, so syncing cannot start until you sign in to: $ACCOUNTS$. Open Settings → Storage, enter them and save.",
+    "placeholders": {
+      "accounts": {
+        "content": "$1"
+      }
+    }
   },
   "opt_cfg_import_auth": {
     "message": "The imported config points at the WebDAV server $HOST$, but Kesonode has no permission to reach it yet. Grant access now, or syncing will fail with \"Failed to fetch\".",
@@ -2291,5 +2353,385 @@
   "onb_done_multi_body": {
     "message": "Install Kesonode there and pick the same storage. Bookmarks, tabs and the rest will meet in the middle.",
     "description": "Tells the user what to do on the next browser: install, then pick the same storage."
+  },
+  "popup_receipt_line": {
+    "message": "Last sync: +$ADDED$ / −$REMOVED$",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "popup_receipt_danger": {
+    "message": "The last sync removed $REMOVED$ bookmarks. A restore point was saved.",
+    "placeholders": {
+      "removed": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_receipt_undo": {
+    "message": "Undo"
+  },
+  "popup_receipt_undo_confirm": {
+    "message": "Restore?"
+  },
+  "popup_receipt_undone": {
+    "message": "Restored"
+  },
+  "popup_search_placeholder": {
+    "message": "Search bookmarks, history and reading list"
+  },
+  "popup_search_clear": {
+    "message": "Clear search"
+  },
+  "popup_search_empty": {
+    "message": "Nothing found."
+  },
+  "popup_source_bookmark": {
+    "message": "Bookmark"
+  },
+  "popup_source_history": {
+    "message": "History"
+  },
+  "popup_source_reading": {
+    "message": "Reading"
+  },
+  "popup_reading_head": {
+    "message": "Reading list"
+  },
+  "popup_reading_save": {
+    "message": "Save tab"
+  },
+  "popup_reading_saved": {
+    "message": "Saved"
+  },
+  "popup_reading_empty": {
+    "message": "Nothing saved yet."
+  },
+  "popup_reading_error": {
+    "message": "Couldn't load your reading list: $ERROR$. This does not mean it is empty.",
+    "description": "An empty list must never stand in for a list that failed to load. $ERROR$ is the technical message and is not translated.",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "404 Not Found"
+      }
+    }
+  },
+  "popup_reading_remove": {
+    "message": "Remove from reading list"
+  },
+  "popup_reading_no_tab": {
+    "message": "This tab has no address to save."
+  },
+  "opt_receipt_section": {
+    "message": "Last sync receipt"
+  },
+  "opt_receipt_section_sub": {
+    "message": "What the last completed cycle changed on this device."
+  },
+  "opt_receipt_headline": {
+    "message": "+$ADDED$ added · −$REMOVED$ removed",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_receipt_danger": {
+    "message": "This cycle removed a large share of this device's bookmarks. A restore point was saved before the merge."
+  },
+  "opt_receipt_sample": {
+    "message": "Some of what was removed:"
+  },
+  "opt_receipt_moved": {
+    "message": "$COUNT$ moved",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_retitled": {
+    "message": "$COUNT$ retitled",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_uploaded": {
+    "message": "published"
+  },
+  "opt_receipt_held": {
+    "message": "publishing held"
+  },
+  "opt_receipt_undo_label": {
+    "message": "Undo this sync"
+  },
+  "opt_receipt_undo_desc": {
+    "message": "Restore the bookmark tree saved just before these changes were applied."
+  },
+  "opt_receipt_undo": {
+    "message": "Undo"
+  },
+  "opt_receipt_empty": {
+    "message": "No completed sync yet."
+  },
+  "opt_receipt_history": {
+    "message": "Earlier cycles"
+  },
+  "opt_receipt_show_all": {
+    "message": "Show all $COUNT$",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_show_less": {
+    "message": "Show less"
+  },
+  "opt_receipt_clear": {
+    "message": "Clear receipts"
+  },
+  "opt_receipt_clear_confirm": {
+    "message": "Clear all receipts?"
+  },
+  "opt_receipt_has_snapshot": {
+    "message": "restore point saved"
+  },
+  "opt_conflict_types_section": {
+    "message": "Per data type"
+  },
+  "opt_conflict_types_section_sub": {
+    "message": "Leave a type on Follow the setting above unless it needs its own answer."
+  },
+  "opt_conflict_type_desc": {
+    "message": "Conflict strategy for this type"
+  },
+  "opt_conflict_type_global": {
+    "message": "Follow the setting above"
+  },
+  "opt_cleanup_section": {
+    "message": "Bookmark cleanup"
+  },
+  "opt_cleanup_section_sub": {
+    "message": "Find duplicate URLs, and optionally links that no longer answer."
+  },
+  "opt_cleanup_scan_label": {
+    "message": "Scan bookmarks"
+  },
+  "opt_cleanup_scan_desc": {
+    "message": "Duplicates are found from this browser's tree. Nothing is removed until you choose the rows and confirm."
+  },
+  "opt_cleanup_dead_label": {
+    "message": "Check links online"
+  },
+  "opt_cleanup_dead_desc": {
+    "message": "Runs one network request per bookmarked host, up to 300 links per run. Only 404/410 count as dead; timeouts and login walls are left alone. Off by default because it contacts sites from this device."
+  },
+  "opt_cleanup_dead_cap": {
+    "message": "Checked $PROBED$ links this run; the rest wait for the next run.",
+    "placeholders": {
+      "probed": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_scan": {
+    "message": "Scan"
+  },
+  "opt_cleanup_summary": {
+    "message": "$SCANNED$ scanned · $GROUPS$ duplicate groups · $DEAD$ dead links",
+    "placeholders": {
+      "scanned": {
+        "content": "$1"
+      },
+      "groups": {
+        "content": "$2"
+      },
+      "dead": {
+        "content": "$3"
+      }
+    }
+  },
+  "opt_cleanup_select_all": {
+    "message": "Select all"
+  },
+  "opt_cleanup_selected_one": {
+    "message": "$COUNT$ selected",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_selected_other": {
+    "message": "$COUNT$ selected",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_apply": {
+    "message": "Remove selected"
+  },
+  "opt_cleanup_confirm": {
+    "message": "Remove them"
+  },
+  "opt_cleanup_removed_one": {
+    "message": "Removed $COUNT$ bookmark",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_removed_other": {
+    "message": "Removed $COUNT$ bookmarks",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_none": {
+    "message": "No duplicates or dead links found."
+  },
+  "opt_auto_snapshot_label": {
+    "message": "Restore point before risky merges"
+  },
+  "opt_auto_snapshot_desc": {
+    "message": "When a merge would remove a large share of this device's bookmarks, a restore point is saved first and offered as Undo on Activity."
+  },
+  "opt_order_label": {
+    "message": "Bookmark order"
+  },
+  "opt_order_desc": {
+    "message": "Whether a peer's folder position moves your copy (newest wins), or this browser keeps its own order."
+  },
+  "opt_order_lww": {
+    "message": "Follow the newest change"
+  },
+  "opt_order_keep_local": {
+    "message": "Keep this browser's order"
+  },
+  "opt_autosave_section": {
+    "message": "Session snapshots"
+  },
+  "opt_autosave_section_sub": {
+    "message": "Open tabs kept on this device between syncs, so a crash or a closed window leaves a way back."
+  },
+  "opt_autosave_enable_label": {
+    "message": "Keep session snapshots"
+  },
+  "opt_autosave_enable_desc": {
+    "message": "Saved after a session sync and never uploaded from here."
+  },
+  "opt_autosave_empty": {
+    "message": "No snapshots yet. One is taken when this browser's session syncs."
+  },
+  "opt_autosave_unnamed": {
+    "message": "Open tabs"
+  },
+  "opt_autosave_choose": {
+    "message": "Choose tabs"
+  },
+  "opt_autosave_collapse": {
+    "message": "Hide tabs"
+  },
+  "opt_autosave_restore_selected": {
+    "message": "Open selected"
+  },
+  "opt_autosave_search": {
+    "message": "Search snapshots by title or URL"
+  },
+  "opt_autosave_search_empty": {
+    "message": "No snapshot matches that search."
+  },
+  "opt_autosave_opened_one": {
+    "message": "Opened $COUNT$ tab",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_autosave_opened_other": {
+    "message": "Opened $COUNT$ tabs",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_bm_export_label": {
+    "message": "Bookmarks for another program"
+  },
+  "opt_bm_export_desc": {
+    "message": "Netscape HTML opens in any browser's bookmark importer, Raindrop CSV imports into Raindrop, and the read-only page is one file a phone can open without the extension."
+  },
+  "opt_bm_export_netscape": {
+    "message": "Netscape HTML"
+  },
+  "opt_bm_export_raindrop": {
+    "message": "Raindrop CSV"
+  },
+  "opt_bm_export_view": {
+    "message": "Read-only page"
+  },
+  "opt_bm_export_view_upload": {
+    "message": "Publish read-only page"
+  },
+  "opt_bm_export_view_upload_confirm": {
+    "message": "The published page is a plain-text copy of your bookmarks and cannot be encrypted. Publish it anyway?"
+  },
+  "opt_bm_export_view_remove": {
+    "message": "Remove published page"
+  },
+  "opt_bm_export_view_remove_confirm": {
+    "message": "Remove the published read-only page from your storage device? Your bookmarks are not affected."
+  },
+  "opt_export_uploaded": {
+    "message": "Saved and uploaded"
+  },
+  "opt_export_view_removed": {
+    "message": "Published page removed."
+  },
+  "opt_doctor_section": {
+    "message": "Sync doctor"
+  },
+  "opt_doctor_section_sub": {
+    "message": "Checks this browser's configuration and gives you a bundle that is safe to share."
+  },
+  "opt_doctor_run_label": {
+    "message": "Check this browser"
+  },
+  "opt_doctor_run_desc": {
+    "message": "Runs local checks only; no data leaves the device."
+  },
+  "opt_doctor_run": {
+    "message": "Run checks"
+  },
+  "opt_doctor_copy_desc": {
+    "message": "The copied bundle holds versions, settings and the last error. Passphrases, tokens, passwords and full storage addresses are removed."
+  },
+  "opt_doctor_copy": {
+    "message": "Copy diagnostics"
+  },
+  "omnibox_default": {
+    "message": "Search Kesonode bookmarks, history and reading list"
+  },
+  "opt_cleanup_host_needed": {
+    "message": "Checking links needs permission to contact the sites in your bookmarks. Duplicates were still scanned."
   }
 }

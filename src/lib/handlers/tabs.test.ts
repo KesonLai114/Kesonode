@@ -42,6 +42,12 @@ describe("importSession", () => {
     await importSession(session([]));
     expect((await chrome.tabs.query({})).length).toBe(0);
   });
+
+  it("returns the number of tabs it opened, and 0 when all are already open", async () => {
+    expect(await importSession(session(["https://a.com/", "https://b.com/", "https://c.com/"]))).toBe(3);
+    expect(await importSession(session(["https://a.com/", "https://b.com/", "https://c.com/"]))).toBe(0);
+    expect(await importSession(session([]))).toBe(0);
+  });
 });
 
 describe("exportCurrentTabs — only plain, non-secret web pages leave the device", () => {
@@ -300,7 +306,7 @@ describe("a session restore opens only what is not open here yet", () => {
   });
 
   /** Show every open tab the way Firefox shows one still waiting for its page. */
-  async function whileLoadingOnFirefox(run: () => Promise<void>): Promise<void> {
+  async function whileLoadingOnFirefox(run: () => Promise<unknown>): Promise<void> {
     const realQuery = chrome.tabs.query;
     (chrome.tabs as unknown as { query: () => Promise<unknown[]> }).query = async () =>
       (await realQuery.call(chrome.tabs, {})).map((tab) => ({ ...tab, url: "about:blank", status: "loading" }));

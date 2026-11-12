@@ -571,7 +571,9 @@ describe("W. an ordinary deletion still travels", () => {
 
     const notices = await cycle(A, B, C);
     expect(notices.every((n) => n === null)).toBe(true);
-    expect(restorePoints()).toEqual([]);
+    // No guard incident, but each receiving device saves one pre-apply restore point: the
+    // merge removes half of its tree, which is exactly what "undo a bulk change" is for.
+    expect(restorePoints()).toHaveLength(2);
     for (const d of [B, C]) {
       await at(d, async () => { expect(await urlsHere()).toEqual(sites(25, 50)); });
     }
@@ -731,9 +733,10 @@ describe("AG. a deletion made in several sittings is one deletion (#41)", () => 
     for (const d of [B, C]) {
       await at(d, async () => { expect(await urlsHere()).toEqual(sites(30, 50)); });
     }
-    expect(restorePoints()).toHaveLength(2);
-    // "10 of your 20, cap 30" alone reads as the guard misfiring. The retained line, which
-    // is what a bug report pastes, has to say what the ten were added to.
+    // Two pre-apply points, one per receiver, for the 15-bookmark sitting that WAS
+    // applied — then one guard point each for the sitting it refused. The latch keeps
+    // the refusal from adding another point on every cycle after it.
+    expect(restorePoints()).toHaveLength(4);
     await at(B, async () => {
       const log = JSON.stringify((await chrome.storage.local.get(KEYS.AUDIT_LOG))[KEYS.AUDIT_LOG]);
       expect(log).toContain("Blocked a deletion of 10 of your 20 bookmarks asked for by Device A");

@@ -92,16 +92,26 @@ against an attacker who already controls your device.
 ### Settings backup
 
 Settings → Advanced can export your configuration as a single JSON file, so that
-another browser can be set up from it without retyping anything. **That file contains
-the credentials above in plain text** — the WebDAV password, the GitHub token, the
-Google refresh token and the encryption passphrase — because restoring it has to work
-without them. It carries a checksum, not a lock: no passphrase protects it, and one
-could not, since the file is what holds the passphrase in the first place.
+another browser can be set up from it without retyping anything. **The default export
+contains no credentials at all**: it carries the storage providers, folders, schedules,
+preferences and device ID, but not the WebDAV password, the GitHub token, the Google
+refresh token or the encryption passphrase. A restore recreates the setup and then asks
+you to sign in again (or, when the server and account are unchanged, keeps the
+credentials this browser already holds).
 
-Treat an exported settings file exactly like a password. Do not put it in cloud storage
-you share, send it in a chat, or attach it to a bug report. Kesonode says this in the
-dialog that writes it, and refusing to export is always an option — the account can be
-connected again by hand in the setup wizard.
+If you tick **Include sign-in credentials**, Kesonode adds those secrets and encrypts
+the entire contents with a password you choose (AES-256-GCM, the same construction as
+the synced data). The file is only ever written in that encrypted form: choosing the
+option without a password does not produce a plaintext file. The password is not stored
+anywhere, so a lost password means the backup cannot be opened.
+
+Files exported by older versions (format v1) did carry their credentials in plain text.
+They remain importable, and the import still shows the risk confirmation that names
+them; a checksum detects accidental damage but is not a lock.
+
+Treat any credentials-bearing backup exactly like a password. Do not put it in cloud
+storage you share, send it in a chat, or attach it to a bug report. The default export
+is safe to hand to another install; the encrypted one is only as safe as its password.
 
 ## Optional end-to-end encryption
 

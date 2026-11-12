@@ -6,6 +6,15 @@ export type DataType = "bookmarks" | "history" | "sessions" | "extensions";
 export type BackendType = "gdrive" | "webdav" | "github";
 export type SyncStatus = "idle" | "syncing" | "success" | "error" | "conflict";
 export type ConflictStrategy = "lww" | "prefer-local" | "prefer-remote" | "manual";
+/**
+ * How this device treats a peer's placement of a bookmark it already holds.
+ *
+ * "lww" is the historical behaviour: the newer recorded move wins, so two devices that
+ * reorder the same folder end up on the same order. "keep-local" leaves this device's own
+ * arrangement alone — useful when one browser sorts a folder automatically and the user
+ * does not want that order pushed everywhere.
+ */
+export type BookmarkOrderMode = "lww" | "keep-local";
 
 /**
  * How a device that ALREADY has bookmarks joins a sync group whose peers also have some.
@@ -390,6 +399,29 @@ export interface SyncSettings {
   active_backend: BackendType | null;
   sync_interval_seconds: number; // default: 60
   conflict_strategy: ConflictStrategy;
+  /**
+   * Per-data-type overrides for `conflict_strategy`. Absent, or an absent key, means the
+   * global strategy applies. Stored as a small map rather than four top-level settings so
+   * a backup written by an older build remains a complete description.
+   */
+  conflict_strategies?: Partial<Record<DataType, ConflictStrategy>>;
+  /**
+   * Whether a peer's recorded move may reorder/relocate a bookmark this device already
+   * holds. See BookmarkOrderMode. Optional: older builds behave as "lww".
+   */
+  bookmark_order_mode?: BookmarkOrderMode;
+  /**
+   * Take a restore point automatically right before a merge that is about to remove a
+   * meaningful number of bookmarks here, so "Undo this sync" has something to go back to.
+   * Default on; optional so a settings blob from an older build keeps working.
+   */
+  auto_restore_point?: boolean;
+  /**
+   * Keep a local ring of recent open-tab sessions, so a crash or a closed window does not
+   * lose the tabs between two synced sessions. The ring never leaves this device through
+   * the sync protocol; it is browsing data and is only shown in Settings.
+   */
+  session_autosave_enabled?: boolean;
   history_days_limit: number; // default: 30
   // Safety net: the bookmark merge refuses a peer deletion that would remove more
   // than this % of local bookmarks (guards against a corrupt/oversized tombstone
@@ -462,17 +494,29 @@ export interface SettingsBackup {
   exportedAt: string;
   extensionVersion: string;
   /**
+   * What this file did with the secrets (v2+). Absent on a v1 file, which always carried
+   * them; the v1 migration marks it `included` so one reader handles both.
+   *
+   *   included   plain text, by explicit choice — the caller encrypts before writing
+   *   redacted   deliberately absent: passwords, tokens, session and passphrase
+   *   encrypted  the `keys` object lives inside `ciphertext`
+   */
+  credentials?: "included" | "redacted" | "encrypted";
+  /**
    * Optional SHA-256 over the whole envelope except this field. Optional on purpose: a
    * file written before checksums existed has none and must stay readable. It detects
    * accidental damage only — there is no secret, so it is not an authentication code.
    * See utils/checksum.ts.
    */
   checksum?: string;
-  keys: {
+  /** Absent only when `credentials` is `encrypted`, where it is inside `ciphertext`. */
+  keys?: {
     settings: SyncSettings;
     gdriveSession?: unknown;
     gdriveFolder?: unknown;
   };
+  /** `credentials: "encrypted"` only: base64 of salt + IV + AES-256-GCM ciphertext. */
+  ciphertext?: string;
 }
 
 // ─── Sync State ────────────────────────────────────────────────────────────
@@ -516,6 +560,11 @@ export interface SyncState {
    */
   sync_cycles?: number;
   bytes_transferred: number;
+  /**
+   * The receipt for the last completed cycle. Optional because state written by an older
+   * build does not carry it; the full ring lives in storage and is read by Activity.
+   */
+  sync_report?: SyncReport | null;
   // Set when the mass-delete guard blocked an unusual peer deletion on the last sync
   // (and an auto-snapshot was saved). Cleared at the start of each sync. `blocked` is
   // how many local bookmarks the guard refused to remove, out of `local_total`.
@@ -637,6 +686,168 @@ export interface DiffSide {
   total: number;
   sample: BlockedBookmark[];
 }
+
+// ─── Sync receipt ──────────────────────────────────────────────────────────
+
+/**
+ * What one data type actually did in a completed cycle, as Settings → Activity shows it.
+ *
+ * A sync used to answer only "success", which is true of a cycle that added nothing,
+ * merged a peer's entire tree, or removed half of this device's bookmarks. The receipt
+ * answers "what changed here" instead: counts before and after, what arrived, what left,
+ * and whether this device published.
+ */
+export interface SyncTypeReport {
+  data_type: DataType;
+  /** Peer files read this cycle. */
+  peers: number;
+  /** Items this device held before the merge. */
+  local_before: number;
+  /** Items this device holds after the merge. */
+  local_after: number;
+  /** Items that appeared here during the merge. */
+  added: number;
+  /** Items that disappeared here during the merge. */
+  removed: number;
+  /** Items relocated to a different folder/index. */
+  moved: number;
+  /** Titles changed to a peer's newer rename. */
+  retitled: number;
+  /** This device published its own file this cycle. */
+  uploaded: boolean;
+  /** The local change guard held this type's upload. */
+  held: boolean;
+  /** Restore point taken before applying this type, when one was. */
+  snapshot?: string;
+  /**
+   * What the merge was about to do here, measured on the pre-merge tree (bookmarks only).
+   * Recorded whether or not a snapshot was taken, so the receipt can say "this cycle
+   * removed N" even when the danger threshold was not crossed.
+   */
+  preview?: {
+    added: number;
+    removed: number;
+    moved: number;
+    local_total: number;
+    peer_total: number;
+    sample: Array<{ title: string; url: string }>;
+  };
+}
+
+/** The receipt for one completed sync cycle, newest first in History. */
+export interface SyncReport {
+  at: string;
+  duration_ms: number;
+  types: SyncTypeReport[];
+  added: number;
+  removed: number;
+  total_before: number;
+  total_after: number;
+  /** The merge would have removed enough here to warrant telling the user. */
+  dangerous: boolean;
+  /** The automatic pre-apply restore point, when one was taken. */
+  snapshot?: string;
+  errors?: string[];
+}
+
+// ─── Search ────────────────────────────────────────────────────────────────
+
+export type SearchSource = "bookmark" | "history" | "reading";
+
+/** One search result from the popup or the address bar. */
+export interface SearchHit {
+  source: SearchSource;
+  title: string;
+  url: string;
+  /** Folder path for bookmarks/reading list; omitted for history. */
+  folder?: string;
+  /** Local bookmark id, when the source has one. */
+  id?: string;
+  score: number;
+}
+
+// ─── Reading list ──────────────────────────────────────────────────────────
+
+/**
+ * One bookmark in the reading-list folder. The list is deliberately an ordinary bookmark
+ * folder (`Kesonode Reading List`) so it syncs with the existing protocol and shows up in
+ * every browser's own bookmark manager; this is just its display shape.
+ */
+export interface ReadingListItem {
+  id: string;
+  title: string;
+  url: string;
+  dateAdded: number;
+  folder: string;
+}
+
+// ─── Cleanup ───────────────────────────────────────────────────────────────
+
+/** The same canonical URL saved more than once. */
+export interface DuplicateGroup {
+  url: string;
+  items: Array<{ id: string; title: string; folder: string; dateAdded: number }>;
+}
+
+/** A bookmark whose host did not answer an opt-in liveness check. */
+export interface DeadLink {
+  id: string;
+  title: string;
+  url: string;
+  status?: number;
+  error?: string;
+}
+
+export interface CleanupReport {
+  duplicates: DuplicateGroup[];
+  dead: DeadLink[];
+  /** Bookmarks inspected for duplicates. */
+  scanned: number;
+  /** Whether the opt-in network check ran. */
+  dead_checked: boolean;
+  /** http(s) links the network check actually probed (cap and time limit apply). */
+  dead_probed?: number;
+  /** http(s) links it did not reach; 0 means the whole tree was covered. */
+  dead_unchecked?: number;
+}
+
+// ─── Autosaved sessions ────────────────────────────────────────────────────
+
+/**
+ * An open-tab snapshot kept on THIS device between syncs. Device-local working state:
+ * browsing data never travels through a SyncPacket from here.
+ */
+export interface AutosavedSession {
+  id: string;
+  saved_at: string;
+  label?: string;
+  /** A stable hash of the tab URLs, so an unchanged window does not add a row per sync. */
+  signature: string;
+  tabs: Array<{ url: string; title?: string; pinned: boolean }>;
+}
+
+// ─── Doctor ────────────────────────────────────────────────────────────────
+
+export type DoctorStatus = "ok" | "warn" | "error" | "info";
+
+export interface DoctorCheck {
+  id: string;
+  status: DoctorStatus;
+  /** Already-localised sentence, or a short technical detail when no sentence fits. */
+  detail?: string;
+}
+
+/**
+ * The redacted diagnostic bundle. `text` is preformatted so a user can copy it in one
+ * click; it contains no passphrase, token, password or full WebDAV URL.
+ */
+export interface DoctorReport {
+  generated_at: string;
+  version: string;
+  checks: DoctorCheck[];
+  text: string;
+}
+
 
 // ─── Backend Interface ─────────────────────────────────────────────────────
 
@@ -774,8 +985,11 @@ export type ExtensionMessage =
   | { type: "SAVE_SETTINGS"; payload: Partial<SyncSettings> }
   // Carry configuration across an extension-ID change. EXPORT answers SETTINGS_BACKUP;
   // IMPORT takes a parsed (untrusted) JSON value and validates it in utils/storage.ts.
-  | { type: "EXPORT_SETTINGS" }
-  | { type: "IMPORT_SETTINGS"; payload: unknown; confirmImport?: boolean; asNewDevice?: boolean }
+  // `includeCredentials` is opt-in and the result is encrypted by the caller before it
+  // reaches disk: the default export carries no secrets at all.
+  | { type: "EXPORT_SETTINGS"; payload?: { includeCredentials?: boolean } }
+  // `e2eePassphrase` fills the gap in a redacted backup, which by design carries none.
+  | { type: "IMPORT_SETTINGS"; payload: unknown; confirmImport?: boolean; asNewDevice?: boolean; e2eePassphrase?: string }
   | { type: "RESOLVE_CONFLICT"; payload: { id: string; resolution: "local" | "remote" } }
   // What differs on one pending conflict (#35). Read-only: opens the parked packet, applies nothing.
   | { type: "GET_CONFLICT_DIFF"; payload: { id: string } }
@@ -802,7 +1016,29 @@ export type ExtensionMessage =
   // other device adopts once. Read for Activity/Settings, set by this browser, or cleared.
   | { type: "GET_BASELINE" }
   | { type: "SET_BASELINE" }
-  | { type: "CLEAR_BASELINE" };
+  | { type: "CLEAR_BASELINE" }
+  // Popup/omnibox search across bookmarks, history and the reading list. Read-only.
+  | { type: "SEARCH"; payload: { query: string; limit?: number } }
+  // The reading list is an ordinary bookmark folder; these add/list/remove inside it.
+  | { type: "READING_LIST_ADD"; payload: { url: string; title?: string } }
+  | { type: "READING_LIST_LIST" }
+  | { type: "READING_LIST_REMOVE"; payload: { id: string } }
+  // Duplicate and (opt-in) dead-link scan. Apply removes the ids the preview listed.
+  | { type: "CLEANUP_SCAN"; payload?: { dead_links?: boolean } }
+  | { type: "CLEANUP_APPLY"; payload: { ids: string[] } }
+  // Escape hatches: a Netscape HTML file, a Raindrop CSV, or a self-contained read-only
+  // HTML snapshot. `upload` writes the self-contained snapshot to the sync folder instead
+  // of handing it back for download.
+  | { type: "EXPORT_BOOKMARKS"; payload: { format: "netscape" | "raindrop" | "view"; upload?: boolean } }
+  // Delete the plaintext read-only page from storage (published by the export above).
+  | { type: "REMOVE_VIEW_FILE" }
+  // Redacted diagnostics for a bug report. Never includes credentials or passphrases.
+  | { type: "RUN_DOCTOR" }
+  | { type: "GET_SYNC_REPORTS" }
+  | { type: "CLEAR_SYNC_REPORTS" }
+  // Device-local autosaved sessions, and restoring a chosen subset of tabs.
+  | { type: "LIST_AUTOSAVED_SESSIONS" }
+  | { type: "RESTORE_SESSION_TABS"; payload: { urls: string[] } };
 
 /**
  * One device with files in the sync folder.
@@ -871,4 +1107,13 @@ export type ExtensionResponse =
   | { type: "DEVICES"; payload: DeviceInfo[] }
   | { type: "DEVICE_FORGOTTEN"; payload: { removed: number } }
   | { type: "BASELINE"; payload: BaselineInfo }
-  | { type: "CONFLICT_DIFF"; payload: ConflictDiff };
+  | { type: "CONFLICT_DIFF"; payload: ConflictDiff }
+  | { type: "SEARCH_RESULTS"; payload: SearchHit[] }
+  | { type: "READING_LIST"; payload: ReadingListItem[] }
+  | { type: "READING_LIST_ADDED"; payload: { added: boolean; id?: string } }
+  | { type: "CLEANUP_REPORT"; payload: CleanupReport }
+  | { type: "CLEANUP_APPLIED"; payload: { removed: number } }
+  | { type: "EXPORT_FILE"; payload: { filename: string; mime: string; content: string; uploaded?: boolean } }
+  | { type: "DOCTOR"; payload: DoctorReport }
+  | { type: "SYNC_REPORTS"; payload: SyncReport[] }
+  | { type: "AUTOSAVED_SESSIONS"; payload: AutosavedSession[] };

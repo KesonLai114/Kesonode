@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from "react";
-import type { SyncSettings, SyncState, BackendType, DataType, BackendConfig, SyncExtension, SnapshotMeta, DeviceInfo, DeviceBrowser, BaselineInfo } from "@/lib/types";
+import type { SyncSettings, SyncState, BackendType, DataType, BackendConfig, SyncExtension, SnapshotMeta, DeviceInfo, DeviceBrowser, BaselineInfo, SyncReport, DoctorReport, CleanupReport, AutosavedSession } from "@/lib/types";
 import { sendMessage, request } from "@/lib/utils/messaging";
 import { t, tParts, plural, isolate, catalogueLocale } from "@/lib/utils/i18n";
 import { DORMANT_DEVICE_DAYS, isDormant, relativeTime } from "@/lib/device-activity";
@@ -10,8 +10,13 @@ import {
   hasPermission, unsupportedReason, eventPresent, permissionsToEnable, tabGroupsAskable,
   type Availability, type PermissionOutcome,
 } from "@/lib/utils/capabilities";
-import { importSettingsBackupFromFile } from "@/lib/utils/settings-import";
+import {
+  importSettingsBackupFromFile, isEncryptedSettingsBackup, missingImportedCredentials,
+  redactedBackupNeedsPassphrase,
+} from "@/lib/utils/settings-import";
 import { snapshotDisplayName, snapshotIsUnnamed } from "@/lib/sync/snapshots";
+import { searchAutosaved } from "@/lib/session-autosave";
+import { duplicateRemovalPlan } from "@/lib/cleanup";
 import {
   buildDataBackup, readDataBackup, type DataBackupBookmarkNode,
 } from "@/lib/utils/data-backup";
@@ -49,6 +54,7 @@ import {
   Loader2, ExternalLink, User, LogOut, Eye, EyeOff,
   Pencil, Key, Copy, Check, ArrowRight,
   Trash2, RotateCcw, Camera, Mail, Star, Pin, PinOff,
+  Stethoscope, ListChecks, Download, ShieldCheck, FileDown, Undo2,
 } from "lucide-react";
 import { BookmarkExclusionTree } from "@/lib/ui/bookmark-exclusion-tree";
 import { BookmarkList } from "@/lib/ui/bookmark-list";
@@ -113,7 +119,10 @@ function BrandMark({ size = 14, color = "currentColor" }: { size?: number; color
 }
 
 import { generateRecoveryKey, MIN_PASSPHRASE_LENGTH } from "@/lib/crypto/encryption";
-import { KEYS, normalizeRemoteExtensions, setRateAnswered, type AuditEntry } from "@/lib/utils/storage";
+import {
+  KEYS, normalizeRemoteExtensions, setRateAnswered, encryptSettingsBackup,
+  openSettingsBackup, type AuditEntry,
+} from "@/lib/utils/storage";
 import { auditLogText } from "@/lib/utils/audit-text";
 import { isSafeContentUrl } from "@/lib/utils/url";
 import { defaultOtherRootId } from "@/lib/utils/bookmark-roots";
@@ -238,6 +247,24 @@ function SecretField({
   );
 }
 
+// A secret being typed right now (import / export / confirm), vs SecretField's saved summary.
+function PwInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <div className="input-pw-wrap">
+      <input {...props} type={revealed ? "text" : "password"} />
+      <button
+        className="btn-eye"
+        type="button"
+        title={revealed ? t("common_hide") : t("common_show")}
+        onClick={() => setRevealed((v) => !v)}
+      >
+        {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
+      </button>
+    </div>
+  );
+}
+
 /** The bookmark folder an import creates, and the name the message reports.
  *
  *  Deliberately NOT a translated string: it is a folder name, so it travels to every other
@@ -260,8 +287,8 @@ const NAV: { id: NavSection; labelKey: string }[] = [
   { id: "backend",  labelKey: "opt_nav_backend" },
   { id: "data",     labelKey: "opt_nav_data" },
   { id: "device",   labelKey: "opt_nav_device" },
-  { id: "activity", labelKey: "opt_nav_activity" },
   { id: "advanced", labelKey: "opt_nav_advanced" },
+  { id: "activity", labelKey: "opt_nav_activity" },
 ];
 
 /** An information box. The icon belongs to the pattern, the same way notice-warn owns
@@ -318,6 +345,25 @@ export default function OptionsApp() {
   useEffect(() => {
     if (window.location.hash !== `#${activeNav}`) history.replaceState(null, "", `#${activeNav}`);
   }, [activeNav]);
+  // _locales are cached at extension load while page JS re-reads from disk: swapping the
+  // unpacked source without reloading renders new keys raw. Detect it and say what to do.
+  const [localeStale, setLocaleStale] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const tag = (catalogueLocale() ?? browser.i18n.getUILanguage() ?? "en").replace("-", "_");
+      for (const folder of [tag, tag.split("_")[0], "en"]) {
+        try {
+          const res = await fetch(browser.runtime.getURL(`_locales/${folder}/messages.json`));
+          if (!res.ok) continue;
+          const disk = (await res.json()) as Record<string, unknown>;
+          if (alive) setLocaleStale(Object.keys(disk).some((k) => !browser.i18n.getMessage(k)));
+          return;
+        } catch { /* unreadable folder: try the next */ }
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
   const [saving, setSaving]       = useState(false);
   const [saveOk, setSaveOk]       = useState(false);
   const [testStatus, setTestStatus] = useState<{ ok: boolean; message: string } | null>(null);
@@ -406,6 +452,21 @@ export default function OptionsApp() {
   const [importCount, setImportCount] = useState(0);
   const [configExportStatus, setConfigExportStatus] = useState<"idle" | "ok" | "error">("idle");
   const [configImportStatus, setConfigImportStatus] = useState<"idle" | "ok" | "error">("idle");
+  // Open export panel. Credentials are opt-in and, when requested, the whole file is
+  // encrypted with a password chosen here before it is ever written to disk.
+  const [cfgExport, setCfgExport] = useState<{ include: boolean; password: string; confirm: string } | null>(null);
+  const [cfgExportError, setCfgExportError] = useState<string | null>(null);
+  const [cfgExportBusy, setCfgExportBusy] = useState(false);
+  // A picked file that cannot be applied yet: an encrypted backup needs its password, and
+  // a redacted one that enables E2EE needs the passphrase it deliberately left out.
+  const [pendingConfig, setPendingConfig] = useState<{ doc: unknown; needs: "password" | "passphrase" } | null>(null);
+  const [pendingSecret, setPendingSecret] = useState("");
+  const [pendingConfigError, setPendingConfigError] = useState<string | null>(null);
+  const [pendingConfigBusy, setPendingConfigBusy] = useState(false);
+  const [configImportError, setConfigImportError] = useState<string | null>(null);
+  // Accounts the restored configuration cannot sign in to (a redacted backup has no
+  // secrets). Non-empty means syncing would fail, so it is not started.
+  const [configImportMissing, setConfigImportMissing] = useState<BackendType[] | null>(null);
   // 导入带入 WebDAV 后端却尚未授权时记下缺失的主机权限，UI 上给一个"点此授权"按钮，
   // 因为自动请求可能因跨越 await 失去用户手势而失败（#导入后未授权 bug）。
   const [webdavAuthNeeded, setWebdavAuthNeeded] = useState<string | null>(null);
@@ -497,6 +558,43 @@ export default function OptionsApp() {
 
   // Activity tab data (fetched once on mount; see the effect below).
   const [syncState, setSyncState] = useState<SyncState | null>(null);
+
+  // ── P0: sync receipts, doctor, cleanup, and escape-hatch exports ──
+  // The receipt history is local (konode_sync_reports), newest first.
+  const [reports, setReports] = useState<SyncReport[]>([]);
+  const [reportsLoad, setReportsLoad] = useState<"loading" | "ok" | string>("loading");
+  // Which report's Undo is armed, so the restore stays a two-step action.
+  const [reportUndoConfirm, setReportUndoConfirm] = useState<string | null>(null);
+  const [reportUndoBusy, setReportUndoBusy] = useState<string | null>(null);
+  const [reportMsg, setReportMsg] = useState<string | null>(null);
+  // Earlier cycles show five rows until asked for more; Clear is a two-step like Undo.
+  const [reportsExpanded, setReportsExpanded] = useState(false);
+  const [reportsClearConfirm, setReportsClearConfirm] = useState(false);
+
+  const [doctor, setDoctor] = useState<DoctorReport | null>(null);
+  const [doctorBusy, setDoctorBusy] = useState(false);
+  const [doctorMsg, setDoctorMsg] = useState<string | null>(null);
+  const [doctorCopied, setDoctorCopied] = useState(false);
+
+  const [cleanup, setCleanup] = useState<CleanupReport | null>(null);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupDead, setCleanupDead] = useState(false);
+  const [cleanupMsg, setCleanupMsg] = useState<string | null>(null);
+  const [cleanupSelected, setCleanupSelected] = useState<Set<string>>(new Set());
+  const [cleanupConfirm, setCleanupConfirm] = useState(false);
+
+  const [exportBusy, setExportBusy] = useState<string | null>(null);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
+
+  // P1: device-local session snapshots, and the one expanded for per-tab restore.
+  const [autosaved, setAutosaved] = useState<AutosavedSession[]>([]);
+  const [autosavedLoad, setAutosavedLoad] = useState<"loading" | "ok" | string>("loading");
+  const [autosaveOpen, setAutosaveOpen] = useState<string | null>(null);
+  const [autosaveSelected, setAutosaveSelected] = useState<Set<string>>(new Set());
+  const [autosaveBusy, setAutosaveBusy] = useState<string | null>(null);
+  const [autosaveMsg, setAutosaveMsg] = useState<string | null>(null);
+  const [autosaveQuery, setAutosaveQuery] = useState("");
+
   // When the periodic alarm next fires, or null for "no automatic sync". Read from the
   // worker rather than guessed from `last_sync + interval`: see the message's comment.
   const [nextSyncAt, setNextSyncAt] = useState<number | null>(null);
@@ -712,6 +810,31 @@ export default function OptionsApp() {
     void loadBaseline();
   }, [activeNav, loadBaseline]);
 
+  const loadReports = useCallback(async (quiet = false) => {
+    if (!quiet) setReportsLoad("loading");
+    const r = await request({ type: "GET_SYNC_REPORTS" });
+    if (!r.ok) { setReportsLoad(r.error); return; }
+    if (r.res.type === "SYNC_REPORTS") setReports(r.res.payload);
+    setReportsLoad("ok");
+  }, []);
+
+  useEffect(() => {
+    if (activeNav !== "activity") return;
+    void loadReports();
+  }, [activeNav, loadReports]);
+
+  const loadAutosaved = useCallback(async () => {
+    const r = await request({ type: "LIST_AUTOSAVED_SESSIONS" });
+    if (!r.ok) { setAutosavedLoad(r.error); return; }
+    if (r.res.type === "AUTOSAVED_SESSIONS") setAutosaved(r.res.payload);
+    setAutosavedLoad("ok");
+  }, []);
+
+  useEffect(() => {
+    if (activeNav !== "data") return;
+    void loadAutosaved();
+  }, [activeNav, loadAutosaved]);
+
   /**
    * The status bar's two moving parts: when the next pull is due, and how long ago the last
    * one was. Asked on the way onto the tab, and kept honest by a tick — the relative phrase
@@ -778,16 +901,18 @@ export default function OptionsApp() {
     // two answers are stale from this moment — cheap to re-ask, and false if we don't.
     setNow(Date.now());
     void loadSchedule();
+    if (activeNav === "data") void loadAutosaved();
     if (activeNav !== "activity" && activeNav !== "device") return;
     if (document.visibilityState !== "visible") { missedWhileHidden.current = true; return; }
     if (activeNav === "activity") {
       void loadDevices();
       void loadSnapshots(true);
+      void loadReports(true);
     }
     // The marker can change on another browser, and adoption happens during the cycle
     // that just finished, so both tabs' answer may be stale from this moment.
     void loadBaseline();
-  }, [syncState?.status, activeNav, loadDevices, loadSnapshots, loadRemoteExtensions, loadSchedule, loadBaseline]);
+  }, [syncState?.status, activeNav, loadDevices, loadSnapshots, loadReports, loadAutosaved, loadRemoteExtensions, loadSchedule, loadBaseline]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -969,6 +1094,18 @@ export default function OptionsApp() {
     else setAuditMsg(sent.error);
   };
 
+  const clearReports = async () => {
+    setReportsClearConfirm(false);
+    const sent = await request({ type: "CLEAR_SYNC_REPORTS" });
+    if (!sent.ok) { setReportsLoad(sent.error); return; }
+    setReports([]);
+    setReportsExpanded(false);
+    // The head card reads state.sync_report first; re-read so the cleared receipt
+    // does not stay on screen until the next sync.
+    const after = await request({ type: "GET_STATE" });
+    if (after.ok && after.res.type === "STATE") setSyncState(after.res.payload);
+  };
+
   const createSnapshot = async (pinned = false) => {
     setSnapBusy(true); setSnapMsg(null);
     try {
@@ -1010,6 +1147,183 @@ export default function OptionsApp() {
       else if (sent.res.type === "SNAPSHOT_RESTORED") setSnapMsg(plural("opt_snap_restored", sent.res.payload.restored));
     } finally {
       setSnapBusy(false);
+    }
+  };
+
+  /** Undo on a receipt's own row. Restoring replaces the local tree, so it is two steps. */
+  const undoReceipt = async (name: string) => {
+    if (reportUndoConfirm !== name) {
+      setReportUndoConfirm(name);
+      return;
+    }
+    setReportUndoConfirm(null);
+    setReportUndoBusy(name);
+    setReportMsg(null);
+    try {
+      const sent = await request({ type: "RESTORE_SNAPSHOT", payload: { name } });
+      if (!sent.ok) setReportMsg(sent.error);
+      else if (sent.res.type === "SNAPSHOT_RESTORED") {
+        setReportMsg(plural("opt_snap_restored", sent.res.payload.restored));
+        void loadSnapshots(true);
+      }
+    } finally {
+      setReportUndoBusy(null);
+    }
+  };
+
+  const runDoctor = async () => {
+    setDoctorBusy(true); setDoctorMsg(null);
+    try {
+      const r = await request({ type: "RUN_DOCTOR" });
+      if (!r.ok) setDoctorMsg(r.error);
+      else if (r.res.type === "DOCTOR") setDoctor(r.res.payload);
+    } finally {
+      setDoctorBusy(false);
+    }
+  };
+
+  const copyDoctor = async () => {
+    if (!doctor) return;
+    setDoctorMsg(null);
+    try {
+      await navigator.clipboard.writeText(doctor.text);
+      setDoctorCopied(true);
+      setTimeout(() => setDoctorCopied(false), 1500);
+    } catch {
+      setDoctorMsg(t("opt_log_copy_failed"));
+    }
+  };
+
+  const scanCleanup = async (deadLinks: boolean) => {
+    // Checking a link means fetching it, and a cross-origin fetch from the worker needs a
+    // host permission. `permissions.request()` must be the FIRST await in this click's
+    // task (see ensurePermission), so it goes before any state update or message.
+    const outcome = deadLinks
+      ? await ensurePermission({ origins: ["https://*/*", "http://*/*"] })
+      : "granted";
+    const checkDead = deadLinks && outcome === "granted";
+    setCleanupBusy(true); setCleanupMsg(null); setCleanupConfirm(false);
+    try {
+      const r = await request({ type: "CLEANUP_SCAN", payload: { dead_links: checkDead } });
+      if (!r.ok) { setCleanupMsg(r.error); return; }
+      if (r.res.type !== "CLEANUP_REPORT") return;
+      setCleanup(r.res.payload);
+      // Keep one copy per URL, oldest first, and leave the extra copies unchecked until
+      // the user confirms — a cleanup must never be a one-click deletion.
+      setCleanupSelected(new Set());
+      if (deadLinks && !checkDead) setCleanupMsg(t("opt_cleanup_host_needed"));
+    } finally {
+      setCleanupBusy(false);
+    }
+  };
+
+  const toggleCleanup = (id: string) => {
+    setCleanupSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setCleanupConfirm(false);
+  };
+
+  const applyCleanup = async () => {
+    if (!cleanupSelected.size) return;
+    if (!cleanupConfirm) {
+      setCleanupConfirm(true);
+      return;
+    }
+    setCleanupConfirm(false);
+    setCleanupBusy(true);
+    setCleanupMsg(null);
+    const ids = new Set(cleanupSelected);
+    // Even a hand-ticked full group must keep one copy: removing every copy is a deletion,
+    // not a dedup, and it syncs a tombstone to every peer.
+    if (cleanup) {
+      for (const group of cleanup.duplicates) {
+        if (group.items.length > 1 && group.items.every((i) => ids.has(i.id))) {
+          const plan = new Set(duplicateRemovalPlan([group]));
+          const kept = group.items.find((i) => !plan.has(i.id));
+          if (kept) ids.delete(kept.id);
+        }
+      }
+    }
+    try {
+      const r = await request({ type: "CLEANUP_APPLY", payload: { ids: [...ids] } });
+      if (!r.ok) { setCleanupMsg(r.error); return; }
+      if (r.res.type === "CLEANUP_APPLIED") {
+        const removed = r.res.payload.removed;
+        setCleanupMsg(plural("opt_cleanup_removed", removed));
+        setCleanupSelected(new Set());
+        // Prune what was removed rather than re-scanning: the dead-link check is opt-in
+        // and a re-scan would either repeat its network requests or quietly drop its list.
+        setCleanup((prev) => prev ? {
+          ...prev,
+          scanned: Math.max(0, prev.scanned - removed),
+          duplicates: prev.duplicates
+            .map((g) => ({ ...g, items: g.items.filter((i) => !ids.has(i.id)) }))
+            .filter((g) => g.items.length > 1),
+          dead: prev.dead.filter((d) => !ids.has(d.id)),
+        } : prev);
+      }
+    } finally {
+      setCleanupBusy(false);
+    }
+  };
+
+  const exportBookmarks = async (format: "netscape" | "raindrop" | "view", upload = false) => {
+    // The published page is plaintext by design: a phone without the extension cannot
+    // decrypt anything. With E2EE on, that is a surprise worth stopping for.
+    if (upload && settings?.encryption_enabled
+        && !window.confirm(t("opt_bm_export_view_upload_confirm"))) {
+      return;
+    }
+    const key = upload ? `${format}-upload` : format;
+    setExportBusy(key);
+    setExportMsg(null);
+    try {
+      const r = await request({ type: "EXPORT_BOOKMARKS", payload: { format, ...(upload ? { upload: true } : {}) } });
+      if (!r.ok) { setExportMsg(r.error); return; }
+      if (r.res.type !== "EXPORT_FILE") return;
+      const { filename, mime, content, uploaded } = r.res.payload;
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setExportMsg(uploaded ? t("opt_export_uploaded") : t("opt_exported"));
+    } finally {
+      setExportBusy(null);
+    }
+  };
+
+  const removePublishedView = async () => {
+    if (!window.confirm(t("opt_bm_export_view_remove_confirm"))) return;
+    setExportBusy("view-remove");
+    setExportMsg(null);
+    try {
+      const r = await request({ type: "REMOVE_VIEW_FILE" });
+      setExportMsg(r.ok ? t("opt_export_view_removed") : r.error);
+    } finally {
+      setExportBusy(null);
+    }
+  };
+
+  const restoreAutosave = async (session: AutosavedSession, only?: string[]) => {
+    const urls = only ?? session.tabs.map((tab) => tab.url);
+    if (!urls.length) return;
+    setAutosaveBusy(session.id);
+    setAutosaveMsg(null);
+    try {
+      const r = await request({ type: "RESTORE_SESSION_TABS", payload: { urls } });
+      if (!r.ok) setAutosaveMsg(r.error);
+      else setAutosaveMsg(plural("opt_autosave_opened", urls.length));
+    } finally {
+      setAutosaveBusy(null);
     }
   };
 
@@ -1486,51 +1800,147 @@ export default function OptionsApp() {
 
   // ─── Settings backup ──────────────────────────────────────────────────
 
-  const exportConfig = async () => {
+  const downloadSettingsBackup = (data: unknown) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kesonode-settings-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const openConfigExport = () => {
     setConfigExportStatus("idle");
-    // 设置备份文件包含明文凭据（WebDAV 密码、GitHub 令牌、Drive 刷新令牌、加密口令），
-    // 整份只有一个校验和——这是"能一键恢复"的代价。用户很可能把它放进网盘或聊天窗口，
-    // 所以在写出文件之前必须明确告知，并且用本地化文案（这里原本是硬编码中文）。
-    if (!window.confirm(t("opt_export_credentials_warning"))) {
-      setConfigExportStatus("idle");
-      return;
+    setCfgExportError(null);
+    setCfgExport({ include: false, password: "", confirm: "" });
+  };
+
+  const runConfigExport = async () => {
+    if (!cfgExport) return;
+    // Checked here rather than only disabling the button, so a stray Enter still gets a
+    // sentence instead of a file encrypted with a password the user mistyped.
+    if (cfgExport.include) {
+      if (cfgExport.password.length < MIN_PASSPHRASE_LENGTH) {
+        setCfgExportError(t("opt_cfg_export_pw_short", String(MIN_PASSPHRASE_LENGTH)));
+        return;
+      }
+      if (cfgExport.password !== cfgExport.confirm) {
+        setCfgExportError(t("opt_cfg_export_pw_mismatch"));
+        return;
+      }
     }
-    const sent = await request({ type: "EXPORT_SETTINGS" });
-    if (!sent.ok || sent.res.type !== "SETTINGS_BACKUP") {
-      setConfigExportStatus("error");
-      setTimeout(() => setConfigExportStatus("idle"), 3000);
-      return;
-    }
+    setCfgExportBusy(true);
+    setCfgExportError(null);
     try {
-      const blob = new Blob([JSON.stringify(sent.res.payload, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `kesonode-settings-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const sent = await request({
+        type: "EXPORT_SETTINGS",
+        payload: { includeCredentials: cfgExport.include },
+      });
+      if (!sent.ok || sent.res.type !== "SETTINGS_BACKUP") {
+        setConfigExportStatus("error");
+        setTimeout(() => setConfigExportStatus("idle"), 3000);
+        return;
+      }
+      // The worker never writes credentials in the clear: when they are included, this
+      // page seals the whole document before the download exists.
+      const doc = cfgExport.include
+        ? await encryptSettingsBackup(sent.res.payload, cfgExport.password)
+        : sent.res.payload;
+      downloadSettingsBackup(doc);
+      setCfgExport(null);
       setConfigExportStatus("ok");
       setTimeout(() => setConfigExportStatus("idle"), 3000);
     } catch {
       setConfigExportStatus("error");
       setTimeout(() => setConfigExportStatus("idle"), 3000);
+    } finally {
+      setCfgExportBusy(false);
     }
   };
 
-  const importConfig = async (file: File) => {
+  const clearPendingConfig = () => {
+    setPendingConfig(null);
+    setPendingSecret("");
+    setPendingConfigError(null);
+  };
+
+  const pickConfigFile = async (file: File) => {
     setConfigImportStatus("idle");
+    setConfigImportError(null);
+    setConfigImportMissing(null);
+    clearPendingConfig();
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(await file.text());
+      parsed = JSON.parse(await file.text());
+    } catch {
+      setConfigImportStatus("error");
+      setTimeout(() => setConfigImportStatus("idle"), 3000);
+      return;
+    }
+    if (isEncryptedSettingsBackup(parsed)) {
+      setPendingConfig({ doc: parsed, needs: "password" });
+      return;
+    }
+    // Asked before the overwrite questions: the worker refuses this import anyway, and
+    // refusing after every question is answered is worse than asking up front.
+    if (await redactedBackupNeedsPassphrase(parsed)) {
+      setPendingConfig({ doc: parsed, needs: "passphrase" });
+      return;
+    }
+    await importConfig(parsed, {});
+  };
+
+  const submitPendingConfig = async () => {
+    if (!pendingConfig) return;
+    setPendingConfigError(null);
+    if (pendingConfig.needs === "passphrase") {
+      if (!pendingSecret) {
+        setPendingConfigError(t("opt_cfg_import_need_passphrase"));
+        return;
+      }
+      if (pendingSecret.length < MIN_PASSPHRASE_LENGTH) {
+        setPendingConfigError(t("opt_cfg_import_pass_short", String(MIN_PASSPHRASE_LENGTH)));
+        return;
+      }
+      const doc = pendingConfig.doc;
+      const passphrase = pendingSecret;
+      clearPendingConfig();
+      await importConfig(doc, { e2eePassphrase: passphrase });
+      return;
+    }
+    setPendingConfigBusy(true);
+    try {
+      const doc = await openSettingsBackup(pendingConfig.doc, pendingSecret);
+      clearPendingConfig();
+      await importConfig(doc, {});
+    } catch (error) {
+      // A wrong password and a damaged file are the same failure to AES-GCM, so the
+      // helper's sentence covers both; keep it visible instead of collapsing to a tick.
+      setPendingConfigError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPendingConfigBusy(false);
+    }
+  };
+
+  const importConfig = async (
+    doc: unknown,
+    options: { e2eePassphrase?: string },
+  ) => {
+    setConfigImportStatus("idle");
+    setConfigImportError(null);
+    clearPendingConfig();
+    try {
       // The same conversation the setup wizard's first page offers: overwrite, new device,
       // risky changes, and the WebDAV origin that still needs granting.
-      const outcome = await importSettingsBackupFromFile(parsed, (message) => window.confirm(message));
+      const outcome = await importSettingsBackupFromFile(doc, (message) => window.confirm(message), options);
       if (!outcome.ok) {
-        if (outcome.reason === "failed") {
-          setConfigImportStatus("error");
-          setTimeout(() => setConfigImportStatus("idle"), 3000);
-        }
+        if (outcome.reason === "cancelled") return;
+        setConfigImportStatus("error");
+        setConfigImportError(outcome.error ?? null);
+        setTimeout(() => setConfigImportStatus("idle"), 5000);
         return;
       }
       // The worker has already reinitialised the engine; bring this page's copy of the
@@ -1548,16 +1958,25 @@ export default function OptionsApp() {
       if (outcome.hostOrigin && !(await hasPermission({ origins: [outcome.hostOrigin] }))) {
         setWebdavAuthNeeded(outcome.hostOrigin);
       }
-      // A restored configuration has never synced in THIS browser. Without a cycle here it
-      // sits idle until the next alarm, and if this device already has bookmarks that
-      // cycle parks on the "which side wins" question — which the popup shows and bookmark
-      // changes respect by doing nothing. Start it now so the question surfaces while the
-      // user is still looking at the import they just made.
-      void sendMessage({ type: "SYNC_NOW" }).catch(() => {});
+      // A redacted backup restores servers, folders and schedules but no secrets. Starting
+      // a sync then would only produce a failure the user did not ask for, so say which
+      // account has to be signed in to and leave the sync to them.
+      const missing = await missingImportedCredentials();
+      if (missing.length) {
+        setConfigImportMissing(missing);
+      } else {
+        // A restored configuration has never synced in THIS browser. Without a cycle here it
+        // sits idle until the next alarm, and if this device already has bookmarks that
+        // cycle parks on the "which side wins" question — which the popup shows and bookmark
+        // changes respect by doing nothing. Start it now so the question surfaces while the
+        // user is still looking at the import they just made.
+        void sendMessage({ type: "SYNC_NOW" }).catch(() => {});
+      }
       setTimeout(() => setConfigImportStatus("idle"), 4000);
-    } catch {
+    } catch (error) {
       setConfigImportStatus("error");
-      setTimeout(() => setConfigImportStatus("idle"), 3000);
+      setConfigImportError(error instanceof Error ? error.message : String(error));
+      setTimeout(() => setConfigImportStatus("idle"), 5000);
     }
   };
 
@@ -1679,6 +2098,28 @@ export default function OptionsApp() {
     : baselineAwaiting ? t("opt_baseline_waiting", isolate(baselineDeviceName))
     : null;
 
+  // The receipt the user is most likely asking about: what the last completed cycle did.
+  const latestReport = syncState?.sync_report ?? reports[0] ?? null;
+  const reportSample = latestReport?.types.find((row) => row.data_type === "bookmarks")?.preview?.sample ?? [];
+  // The head card already shows the newest receipt; "Earlier cycles" is everything else.
+  // Five rows until expanded: a ring of 30 receipts must not decide the page's height.
+  const earlierReports = latestReport
+    ? reports.filter((rep) => rep.at !== latestReport.at)
+    : reports;
+  const shownEarlier = reportsExpanded ? earlierReports : earlierReports.slice(0, 5);
+  // The autosave ring is capped at 20 rows, but a query is still the fastest way to find
+  // the window that had a particular tab in it.
+  const visibleAutosaved = autosaveQuery.trim()
+    ? searchAutosaved(autosaved, autosaveQuery)
+    : autosaved;
+  // "Select all" must mean "remove the extra copies", not "remove every copy": ticking
+  // all items of a duplicate group and applying would delete the bookmark outright and
+  // sync the tombstone. The keep-one plan is the selectable set; dead links are all removable.
+  const cleanupIds = cleanup
+    ? [...duplicateRemovalPlan(cleanup.duplicates), ...cleanup.dead.map((d) => d.id)]
+    : [];
+  const allCleanupSelected = cleanupIds.length > 0 && cleanupIds.every((id) => cleanupSelected.has(id));
+
   return (
     <div className="settings-root">
       <style>{STYLES}</style>
@@ -1708,6 +2149,15 @@ export default function OptionsApp() {
       {/* ── Content ── */}
       <main className="content">
         <div className="content-inner">
+
+          {/* Hardcoded, not t(): the catalogue that would translate this is the stale one. */}
+          {localeStale && (
+            <div role="alert" style={{ margin: "0 0 12px", padding: "10px 14px", border: "1px solid var(--danger)", borderRadius: 8, color: "var(--danger)", fontSize: 13, lineHeight: 1.6 }}>
+              语言资源未刷新：请在扩展页重新加载 Kesonode（或关闭再打开），然后刷新本页，新增按钮才会显示正确文字。
+              <br />
+              Locale files are cached when the extension loads. Reload Kesonode on the extensions page (or toggle it off and on), then refresh this page.
+            </div>
+          )}
 
           {/* ── First-run setup (esp. Orion/WebKit, where the wizard tab never opens) ── */}
           {showSetupCard && (
@@ -2094,9 +2544,8 @@ export default function OptionsApp() {
                       )}
                       {needsPassConfirm && (
                         <div style={{ marginTop: 8 }}>
-                          <input
+                          <PwInput
                             className="field-input mono"
-                            type="password"
                             value={passConfirm}
                             placeholder={t("opt_passphrase_confirm_placeholder")}
                             autoComplete="off"
@@ -2256,6 +2705,153 @@ export default function OptionsApp() {
                 );
               })()}
 
+              {/* Bookmark cleanup: duplicates are found from the local tree, dead links
+                  only when the network check is asked for. Nothing is removed until the
+                  user ticks the rows and confirms, because these are real deletions. */}
+              {availability.bookmarks?.state !== "unsupported" && (
+                <div className="settings-section">
+                  <div className="settings-card-head">
+                    {t("opt_cleanup_section")}
+                    <span className="head-sub">{t("opt_cleanup_section_sub")}</span>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div>
+                        <div className="row-label">{t("opt_cleanup_scan_label")}</div>
+                        <div className="row-desc">{t("opt_cleanup_scan_desc")}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                      <label className="toggle-wrap" title={t("opt_cleanup_dead_label")}>
+                        <input type="checkbox" className="toggle-input" checked={cleanupDead}
+                          aria-label={t("opt_cleanup_dead_label")}
+                          onChange={(e) => setCleanupDead(e.target.checked)} />
+                        <span className="toggle-track"><span className="toggle-thumb" /></span>
+                      </label>
+                      <button className="btn-secondary" onClick={() => void scanCleanup(cleanupDead)} disabled={cleanupBusy}>
+                        {cleanupBusy ? <Loader2 size={12} className="spin" /> : <ListChecks size={12} />}
+                        {" "}{t("opt_cleanup_scan")}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="settings-row" style={{ marginTop: -6 }}>
+                    <div className="settings-row-left">
+                      <div className="row-desc">{t("opt_cleanup_dead_desc")}</div>
+                    </div>
+                  </div>
+                  {cleanupMsg && (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="row-desc">{cleanupMsg}</div>
+                      </div>
+                    </div>
+                  )}
+                  {cleanup && (
+                    <>
+                      <div className="settings-row">
+                        <div className="settings-row-left">
+                          <div className="row-desc">
+                            {t("opt_cleanup_summary", [
+                              String(cleanup.scanned),
+                              String(cleanup.duplicates.length),
+                              String(cleanup.dead.length),
+                            ])}
+                          </div>
+                        </div>
+                      </div>
+                      {cleanup.dead_checked && (cleanup.dead_unchecked ?? 0) > 0 && (
+                        <div className="settings-row" style={{ marginTop: -6 }}>
+                          <div className="settings-row-left">
+                            <div className="row-desc">
+                              {t("opt_cleanup_dead_cap", String(cleanup.dead_probed ?? 0))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {cleanupIds.length > 0 && (
+                        <>
+                          <div className="settings-row">
+                            <div className="settings-row-left">
+                              <div className="row-desc">{t("opt_cleanup_select_all")}</div>
+                            </div>
+                            <label className="toggle-wrap">
+                              <input type="checkbox" className="toggle-input" checked={allCleanupSelected}
+                                aria-label={t("opt_cleanup_select_all")}
+                                onChange={() => setCleanupSelected(allCleanupSelected ? new Set() : new Set(cleanupIds))} />
+                              <span className="toggle-track"><span className="toggle-thumb" /></span>
+                            </label>
+                          </div>
+                          {/* A scan can return hundreds of rows (the dead-link probe alone
+                              caps at 300); the results scroll inside the card, not the page. */}
+                          <div className="list-scroll">
+                          {cleanup.duplicates.map((group) => (
+                            <div key={group.url} className="settings-row" style={{ alignItems: "flex-start" }}>
+                              <div className="settings-row-left" style={{ minWidth: 0 }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <div className="row-label" title={group.url} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {group.url}
+                                  </div>
+                                  {group.items.map((item) => (
+                                    <label key={item.id} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, minWidth: 0 }}>
+                                      <input type="checkbox" checked={cleanupSelected.has(item.id)}
+                                        onChange={() => toggleCleanup(item.id)} />
+                                      <span className="row-desc" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                        <bdi>{item.title || group.url}</bdi>
+                                        {item.folder ? ` · ${item.folder}` : ""}
+                                      </span>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          {cleanup.dead.map((link) => (
+                            <div key={link.id} className="settings-row" style={{ alignItems: "flex-start" }}>
+                              <div className="settings-row-left" style={{ minWidth: 0 }}>
+                                <label style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}>
+                                  <input type="checkbox" checked={cleanupSelected.has(link.id)}
+                                    onChange={() => toggleCleanup(link.id)} />
+                                  <span className="row-desc" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={link.url}>
+                                    <bdi>{link.title || link.url}</bdi>
+                                    {link.status ? ` · HTTP ${link.status}` : ""}
+                                  </span>
+                                </label>
+                              </div>
+                            </div>
+                          ))}
+                          </div>
+                          <div className="settings-row">
+                            <div className="settings-row-left">
+                              <div className="row-desc">{plural("opt_cleanup_selected", cleanupSelected.size)}</div>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                              {cleanupConfirm && (
+                                <button className="btn-secondary" onClick={() => setCleanupConfirm(false)}
+                                  disabled={cleanupBusy}>{t("opt_cancel")}</button>
+                              )}
+                              <button className="btn-secondary"
+                                style={{ color: "var(--danger)", borderColor: "var(--danger)" }}
+                                onClick={() => void applyCleanup()}
+                                disabled={!cleanupSelected.size || cleanupBusy}>
+                                {cleanupBusy ? <Loader2 size={12} className="spin" /> : <Trash2 size={12} />}
+                                {" "}{cleanupConfirm ? t("opt_cleanup_confirm") : t("opt_cleanup_apply")}
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      {cleanupIds.length === 0 && (
+                        <div className="settings-row">
+                          <div className="settings-row-left">
+                            <div className="row-desc">{t("opt_cleanup_none")}</div>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* Open tabs carry their groups wherever the browser has them; this row adds the
                   names and colours. Shown only where tabGroups can be asked for at all, so a
                   browser without it never sees a switch that can only fail. */}
@@ -2283,6 +2879,137 @@ export default function OptionsApp() {
                   </label>
                 </div>
               </div>
+              )}
+
+              {/* Device-local open-tab snapshots (P1). They never travel through a
+                  SyncPacket: this is working state the sync keeps on the device that has
+                  the tabs, so a crash or a closed window leaves a way back. */}
+              {availability.sessions?.state !== "unsupported" && (
+                <div className="settings-section">
+                  <div className="settings-card-head">
+                    {t("opt_autosave_section")}
+                    <span className="head-sub">{t("opt_autosave_section_sub")}</span>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div>
+                        <div className="row-label">{t("opt_autosave_enable_label")}</div>
+                        <div className="row-desc">{t("opt_autosave_enable_desc")}</div>
+                      </div>
+                    </div>
+                    <label className="toggle-wrap">
+                      <input type="checkbox" className="toggle-input"
+                        checked={settings.session_autosave_enabled !== false}
+                        onChange={(e) => update({ session_autosave_enabled: e.target.checked })} />
+                      <span className="toggle-track"><span className="toggle-thumb" /></span>
+                    </label>
+                  </div>
+                  {autosaveMsg && (
+                    <div className="settings-row">
+                      <div className="settings-row-left"><div className="row-desc">{autosaveMsg}</div></div>
+                    </div>
+                  )}
+                  {autosavedLoad === "loading" ? (
+                    <div className="settings-row">
+                      <div className="settings-row-left"><div className="row-desc">{t("opt_snap_loading")}</div></div>
+                    </div>
+                  ) : autosavedLoad !== "ok" ? (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="error-row" role="alert"><AlertTriangle size={12} /> {autosavedLoad}</div>
+                      </div>
+                    </div>
+                  ) : autosaved.length === 0 ? (
+                    <div className="settings-row">
+                      <div className="settings-row-left"><div className="row-desc">{t("opt_autosave_empty")}</div></div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="settings-row">
+                        <div className="settings-row-left" style={{ minWidth: 0 }}>
+                          <input className="field-input-inline" dir="auto" type="search"
+                            value={autosaveQuery}
+                            onChange={(e) => setAutosaveQuery(e.target.value)}
+                            placeholder={t("opt_autosave_search")}
+                            aria-label={t("opt_autosave_search")}
+                            style={{ width: "100%" }} />
+                        </div>
+                      </div>
+                      {visibleAutosaved.length === 0 ? (
+                        <div className="settings-row">
+                          <div className="settings-row-left"><div className="row-desc">{t("opt_autosave_search_empty")}</div></div>
+                        </div>
+                      ) : (
+                        <div className="list-scroll">
+                        {visibleAutosaved.map((session) => (
+                    <div key={session.id} className="settings-row" style={{ alignItems: "flex-start" }}>
+                      <div className="settings-row-left" style={{ minWidth: 0 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="row-label">
+                            {session.label ? <bdi>{session.label}</bdi> : t("opt_autosave_unnamed")}
+                          </div>
+                          <div className="row-desc">
+                            {new Date(session.saved_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                            {" · "}{plural("popup_tabs", session.tabs.length)}
+                          </div>
+                          {autosaveOpen === session.id && (
+                            <div className="tab-scroll" style={{ marginTop: 6 }}>
+                              {session.tabs.map((tab, index) => {
+                                const key = `${session.id}:${index}`;
+                                return (
+                                  <label key={key} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4, minWidth: 0 }}>
+                                    <input type="checkbox" checked={autosaveSelected.has(key)}
+                                      onChange={() => setAutosaveSelected((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(key)) next.delete(key);
+                                        else next.add(key);
+                                        return next;
+                                      })} />
+                                    <span className="row-desc" title={tab.url}
+                                      style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                      {tab.title ? <bdi>{tab.title}</bdi> : tab.url}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                        <button className="btn-secondary"
+                          onClick={() => {
+                            setAutosaveOpen(autosaveOpen === session.id ? null : session.id);
+                            setAutosaveSelected(new Set());
+                          }}>
+                          {autosaveOpen === session.id ? t("opt_autosave_collapse") : t("opt_autosave_choose")}
+                        </button>
+                        {autosaveOpen === session.id ? (
+                          <button className="btn-secondary" disabled={autosaveBusy !== null}
+                            onClick={() => {
+                              const urls = session.tabs
+                                .filter((_, index) => autosaveSelected.has(`${session.id}:${index}`))
+                                .map((tab) => tab.url);
+                              if (urls.length) void restoreAutosave(session, urls);
+                            }}>
+                            {autosaveBusy === session.id ? <Loader2 size={12} className="spin" /> : <RotateCcw size={12} />}
+                            {" "}{t("opt_autosave_restore_selected")}
+                          </button>
+                        ) : (
+                          <button className="btn-secondary" disabled={autosaveBusy !== null}
+                            onClick={() => void restoreAutosave(session)}>
+                            {autosaveBusy === session.id ? <Loader2 size={12} className="spin" /> : <RotateCcw size={12} />}
+                            {" "}{t("popup_restore")}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               )}
 
               {/* Nothing to configure when the browser has no history API — the row above
@@ -2530,6 +3257,49 @@ export default function OptionsApp() {
                 ))}
               </div>
 
+              {/* Per-type overrides (P0). Empty = follow the setting above, which is what
+                  every device did before this row existed, so an untouched map changes
+                  nothing. Bookmarks can ask while history follows latest-wins. Sessions and
+                  extensions are keyed per device (one slot per peer), so they have no
+                  two-sided conflict for a strategy to resolve — offering them here was a
+                  control that could never do anything. */}
+              <div className="settings-section">
+                <div className="settings-card-head">
+                  {t("opt_conflict_types_section")}
+                  <span className="head-sub">{t("opt_conflict_types_section_sub")}</span>
+                </div>
+                {DATA_TYPES.filter((type) => type === "bookmarks" || type === "history").map((type) => {
+                  const specific = settings.conflict_strategies?.[type] ?? "";
+                  return (
+                    <div key={type} className="settings-row">
+                      <div className="settings-row-left">
+                        <div>
+                          <div className="row-label">{t(`datatype_${type}`)}</div>
+                          <div className="row-desc">{t("opt_conflict_type_desc")}</div>
+                        </div>
+                      </div>
+                      <select className="field-input-inline" value={specific}
+                        aria-label={t(`datatype_${type}`)}
+                        onChange={(e) => {
+                          const next = { ...(settings.conflict_strategies ?? {}) };
+                          if (e.target.value) {
+                            next[type] = e.target.value as SyncSettings["conflict_strategy"];
+                          } else {
+                            delete next[type];
+                          }
+                          update({ conflict_strategies: next });
+                        }}>
+                        <option value="">{t("opt_conflict_type_global")}</option>
+                        <option value="lww">{t("opt_conflict_lww")}</option>
+                        <option value="prefer-local">{t("opt_conflict_local")}</option>
+                        <option value="prefer-remote">{t("opt_conflict_remote")}</option>
+                        <option value="manual">{t("opt_conflict_manual")}</option>
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+
               <div className="settings-section">
                 <div className="settings-card-head">{t("opt_safety_section")}</div>
                 <div className="settings-row">
@@ -2546,6 +3316,35 @@ export default function OptionsApp() {
                       className="slider" />
                     <span className="slider-val">{settings.bulk_delete_percent}%</span>
                   </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_auto_snapshot_label")}</div>
+                      <div className="row-desc">{t("opt_auto_snapshot_desc")}</div>
+                    </div>
+                  </div>
+                  <label className="toggle-wrap">
+                    <input type="checkbox" className="toggle-input"
+                      checked={settings.auto_restore_point !== false}
+                      onChange={(e) => update({ auto_restore_point: e.target.checked })} />
+                    <span className="toggle-track"><span className="toggle-thumb" /></span>
+                  </label>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_order_label")}</div>
+                      <div className="row-desc">{t("opt_order_desc")}</div>
+                    </div>
+                  </div>
+                  <select className="field-input-inline"
+                    aria-label={t("opt_order_label")}
+                    value={settings.bookmark_order_mode ?? "lww"}
+                    onChange={(e) => update({ bookmark_order_mode: e.target.value as "lww" | "keep-local" })}>
+                    <option value="lww">{t("opt_order_lww")}</option>
+                    <option value="keep-local">{t("opt_order_keep_local")}</option>
+                  </select>
                 </div>
               </div>
 
@@ -2919,7 +3718,9 @@ export default function OptionsApp() {
                     <div className="settings-row">
                       <div className="settings-row-left"><div className="row-desc">{t("opt_snap_empty")}</div></div>
                     </div>
-                  ) : snapshots.map((s) => (
+                  ) : (
+                    <div className="list-scroll">
+                    {snapshots.map((s) => (
                     <div key={s.name} className="settings-row">
                       <div className="settings-row-left">
                         <div>
@@ -2991,6 +3792,180 @@ export default function OptionsApp() {
                       )}
                     </div>
                   ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── What the last cycle did, with the pre-apply restore point ──
+                    "Success" is true of a cycle that changed nothing and of one that
+                    removed half the tree. This card answers "what changed here" and
+                    keeps the undo next to the numbers that made it necessary. */}
+                <div className="settings-section">
+                  <div className="settings-card-head" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                    <div>
+                      {t("opt_receipt_section")}
+                      <span className="head-sub">{t("opt_receipt_section_sub")}</span>
+                    </div>
+                    {(latestReport || reports.length > 0) && (
+                      reportsClearConfirm ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                          <button className="btn-secondary" onClick={() => setReportsClearConfirm(false)}>{t("opt_cancel")}</button>
+                          <button className="btn-secondary" style={{ color: "var(--danger)", borderColor: "var(--danger)" }}
+                            onClick={() => void clearReports()}>
+                            <Trash2 size={12} /> {t("opt_receipt_clear_confirm")}
+                          </button>
+                        </div>
+                      ) : (
+                        <button className="btn-secondary" style={{ flexShrink: 0 }} onClick={() => setReportsClearConfirm(true)}>
+                          <Trash2 size={12} /> {t("opt_receipt_clear")}
+                        </button>
+                      )
+                    )}
+                  </div>
+                  {latestReport ? (
+                    <>
+                      <div className="settings-row">
+                        <div className="settings-row-left">
+                          <div>
+                            <div className="row-label">
+                              {t("opt_receipt_headline", [String(latestReport.added), String(latestReport.removed)])}
+                            </div>
+                            <div className="row-desc">
+                              {new Date(latestReport.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                              {" · "}
+                              {(latestReport.duration_ms / 1000).toFixed(1)}s
+                              {" · "}
+                              {latestReport.total_before.toLocaleString()} → {latestReport.total_after.toLocaleString()}
+                            </div>
+                            {latestReport.dangerous && (
+                              <div className="row-desc" style={{ color: "var(--danger)" }}>{t("opt_receipt_danger")}</div>
+                            )}
+                            {latestReport.errors && latestReport.errors.length > 0 && (
+                              <div className="row-desc" style={{ color: "var(--danger)" }}>
+                                {latestReport.errors.join(" · ")}
+                              </div>
+                            )}
+                            {reportSample.length > 0 && (
+                              <div className="row-desc" style={{ marginTop: 4 }}>
+                                {t("opt_receipt_sample")}
+                                <ul style={{ margin: "4px 0 0 18px" }}>
+                                  {reportSample.map((s) => (
+                                    <li key={s.url}><bdi>{s.title || s.url}</bdi></li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="settings-row">
+                        <div className="settings-row-left">
+                          <div className="row-desc">
+                            {latestReport.types.map((row) => (
+                              <div key={row.data_type}>
+                                {t(`datatype_${row.data_type}`)}: +{row.added} / −{row.removed}
+                                {row.moved > 0 && ` · ${t("opt_receipt_moved", String(row.moved))}`}
+                                {row.retitled > 0 && ` · ${t("opt_receipt_retitled", String(row.retitled))}`}
+                                {row.uploaded && ` · ${t("opt_receipt_uploaded")}`}
+                                {row.held && ` · ${t("opt_receipt_held")}`}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      {latestReport.snapshot && (
+                        <div className="settings-row">
+                          <div className="settings-row-left">
+                            <div>
+                              <div className="row-label">{t("opt_receipt_undo_label")}</div>
+                              <div className="row-desc">{t("opt_receipt_undo_desc")}</div>
+                              {reportMsg && <div className="row-desc">{reportMsg}</div>}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                            {reportUndoConfirm === latestReport.snapshot && (
+                              <button className="btn-secondary" onClick={() => setReportUndoConfirm(null)}
+                                disabled={reportUndoBusy !== null}>{t("opt_cancel")}</button>
+                            )}
+                            <button className="btn-secondary"
+                              style={{ color: "var(--accent)", borderColor: "var(--accent)" }}
+                              onClick={() => void undoReceipt(latestReport.snapshot!)}
+                              disabled={reportUndoBusy !== null}>
+                              {reportUndoBusy === latestReport.snapshot
+                                ? <Loader2 size={12} className="spin" />
+                                : <Undo2 size={12} />}
+                              {" "}
+                              {reportUndoConfirm === latestReport.snapshot
+                                ? t("opt_snap_confirm_restore")
+                                : t("opt_receipt_undo")}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : reportsLoad === "loading" ? (
+                    <div className="settings-row">
+                      <div className="settings-row-left"><div className="row-desc">{t("opt_snap_loading")}</div></div>
+                    </div>
+                  ) : reportsLoad !== "ok" ? (
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="error-row" role="alert">
+                          <AlertTriangle size={12} /> {reportsLoad}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="settings-row">
+                      <div className="settings-row-left"><div className="row-desc">{t("opt_receipt_empty")}</div></div>
+                    </div>
+                  )}
+                  {earlierReports.length > 0 && (
+                    <>
+                      <div className="settings-card-head" style={{ marginTop: 4, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <span>{t("opt_receipt_history")}</span>
+                        {earlierReports.length > 5 && (
+                          <button className="btn-secondary" style={{ flexShrink: 0 }}
+                            onClick={() => setReportsExpanded((v) => !v)}>
+                            {reportsExpanded ? t("opt_receipt_show_less") : t("opt_receipt_show_all", [String(earlierReports.length)])}
+                          </button>
+                        )}
+                      </div>
+                      <div className={reportsExpanded ? "list-scroll" : undefined}>
+                      {shownEarlier.map((rep) => (
+                        <div key={rep.at} className="settings-row">
+                          <div className="settings-row-left">
+                            <div>
+                              <div className="row-label">
+                                {t("opt_receipt_headline", [String(rep.added), String(rep.removed)])}
+                              </div>
+                              <div className="row-desc">
+                                {new Date(rep.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                                {rep.snapshot && ` · ${t("opt_receipt_has_snapshot")}`}
+                              </div>
+                            </div>
+                          </div>
+                          {rep.snapshot && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                              {reportUndoConfirm === rep.snapshot && (
+                                <button className="btn-secondary" onClick={() => setReportUndoConfirm(null)}
+                                  disabled={reportUndoBusy !== null}>{t("opt_cancel")}</button>
+                              )}
+                              <button className="btn-secondary" onClick={() => void undoReceipt(rep.snapshot!)}
+                                disabled={reportUndoBusy !== null}>
+                                {reportUndoBusy === rep.snapshot
+                                  ? <Loader2 size={12} className="spin" />
+                                  : <Undo2 size={12} />}
+                                {" "}
+                                {reportUndoConfirm === rep.snapshot ? t("opt_snap_confirm_restore") : t("opt_receipt_undo")}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="settings-section">
@@ -3146,12 +4121,60 @@ export default function OptionsApp() {
                       <div className="row-desc">{t("opt_cfg_export_desc")}</div>
                     </div>
                   </div>
-                  <button className="btn-secondary" onClick={exportConfig}>
+                  <button className="btn-secondary" onClick={openConfigExport} disabled={cfgExportBusy}>
                     {configExportStatus === "ok" ? <><CheckCircle2 size={12} /> {t("opt_exported")}</> :
                      configExportStatus === "error" ? <><XCircle size={12} /> {t("opt_export_failed")}</> :
                      t("opt_export")}
                   </button>
                 </div>
+                {cfgExport && (
+                  <div className="settings-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 12 }}>
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer" }}>
+                      <input
+                        type="checkbox" checked={cfgExport.include} style={{ marginTop: 3 }}
+                        onChange={(e) => {
+                          setCfgExport({ ...cfgExport, include: e.target.checked });
+                          setCfgExportError(null);
+                        }}
+                      />
+                      <span>
+                        <span className="row-label">{t("opt_cfg_export_include_label")}</span>
+                        <div className="row-desc">{t("opt_cfg_export_include_desc")}</div>
+                      </span>
+                    </label>
+                    {cfgExport.include && (
+                      <>
+                        <PwInput
+                          className="field-input mono" autoComplete="new-password"
+                          placeholder={t("opt_cfg_export_password_ph")}
+                          value={cfgExport.password}
+                          onChange={(e) => { setCfgExport({ ...cfgExport, password: e.target.value }); setCfgExportError(null); }}
+                        />
+                        <PwInput
+                          className="field-input mono" autoComplete="new-password"
+                          placeholder={t("opt_cfg_export_confirm_ph")}
+                          value={cfgExport.confirm}
+                          onChange={(e) => { setCfgExport({ ...cfgExport, confirm: e.target.value }); setCfgExportError(null); }}
+                        />
+                        <div className="row-desc">{t("opt_cfg_export_password_note")}</div>
+                      </>
+                    )}
+                    {cfgExportError && (
+                      <div className="row-desc" style={{ color: "var(--danger)" }}>{cfgExportError}</div>
+                    )}
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                      <button className="btn-secondary" onClick={() => setCfgExport(null)} disabled={cfgExportBusy}>
+                        {t("opt_cancel")}
+                      </button>
+                      <button
+                        className="btn-secondary" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}
+                        onClick={() => void runConfigExport()} disabled={cfgExportBusy}
+                      >
+                        {cfgExportBusy ? <Loader2 size={12} className="spin" /> : <Download size={12} />} {t("opt_export")}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div className="settings-row">
                   <div className="settings-row-left">
                     <div>
@@ -3165,10 +4188,59 @@ export default function OptionsApp() {
                      t("opt_import")}
                     <input
                       type="file" accept=".json" style={{ display: "none" }}
-                      onChange={(e) => { const f = e.target.files?.[0]; if (f) importConfig(f); e.target.value = ""; }}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickConfigFile(f); e.target.value = ""; }}
                     />
                   </label>
                 </div>
+                {pendingConfig && (
+                  <div className="settings-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 12 }}>
+                    <div>
+                      <div className="row-label">
+                        {pendingConfig.needs === "password" ? t("opt_cfg_import_pw_label") : t("opt_cfg_import_pass_label")}
+                      </div>
+                      <div className="row-desc">
+                        {pendingConfig.needs === "password" ? t("opt_cfg_import_pw_desc") : t("opt_cfg_import_pass_desc")}
+                      </div>
+                    </div>
+                    <PwInput
+                      className="field-input mono" autoComplete="off" autoFocus
+                      placeholder={pendingConfig.needs === "password" ? t("opt_cfg_import_pw_ph") : t("opt_cfg_import_pass_ph")}
+                      value={pendingSecret}
+                      onChange={(e) => { setPendingSecret(e.target.value); setPendingConfigError(null); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") void submitPendingConfig(); }}
+                    />
+                    {pendingConfigError && (
+                      <div className="row-desc" style={{ color: "var(--danger)" }}>{pendingConfigError}</div>
+                    )}
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                      <button className="btn-secondary" onClick={clearPendingConfig} disabled={pendingConfigBusy}>
+                        {t("opt_cancel")}
+                      </button>
+                      <button
+                        className="btn-secondary" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}
+                        onClick={() => void submitPendingConfig()} disabled={pendingConfigBusy || !pendingSecret}
+                      >
+                        {pendingConfigBusy ? <Loader2 size={12} className="spin" /> : null} {t("opt_cfg_import_open_btn")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {configImportError && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div className="row-desc" style={{ color: "var(--danger)" }}>{configImportError}</div>
+                    </div>
+                  </div>
+                )}
+                {configImportMissing && configImportMissing.length > 0 && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div className="row-desc" style={{ color: "var(--danger)" }}>
+                        {t("opt_cfg_import_missing", configImportMissing.map((b) => BACKEND_LABEL[b]).join(", "))}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {webdavAuthNeeded && (
                   <div className="settings-row" style={{ borderTop: "1px solid var(--hairline)" }}>
                     <div className="settings-row-left">
@@ -3201,6 +4273,55 @@ export default function OptionsApp() {
                     </div>
                   </div>
                 )}
+
+                {/* Escape hatches (P1). The JSON backup above is Kesonode's own shape; these
+                    are formats another program reads: a browser's bookmark importer and
+                    Raindrop's CSV. The read-only page is for a phone that has neither. */}
+                {/* Column, not label-beside-controls: five buttons never fit beside the
+                    description, and as a wrapped flex ITEM the group was clipped by the
+                    card instead of wrapping its own buttons. Stacked, the group gets the
+                    row's full width and wraps inside it.
+                    Two groups, not one wrapping line: formats another program reads and
+                    publishing the read-only page are different decisions, and letting the
+                    line break fall between them keeps the rest from becoming a 4 + 1. */}
+                <div className="settings-row" style={{ flexDirection: "column", flexWrap: "nowrap", alignItems: "stretch", justifyContent: "flex-start", borderTop: "1px solid var(--hairline)" }}>
+                  {/* The row's text block is a flex item with `flex: 1 1 14rem`; in a column
+                      that 14rem becomes a MINIMUM HEIGHT and space-between spreads the
+                      leftover, so it has to give up growing here. */}
+                  <div className="settings-row-left" style={{ flex: "0 0 auto" }}>
+                    <div>
+                      <div className="row-label">{t("opt_bm_export_label")}</div>
+                      <div className="row-desc">{t("opt_bm_export_desc")}</div>
+                      {exportMsg && <div className="row-desc">{exportMsg}</div>}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", minWidth: 0 }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <button className="btn-secondary btn-wrap" onClick={() => void exportBookmarks("netscape")} disabled={exportBusy !== null}>
+                        {exportBusy === "netscape" ? <Loader2 size={12} className="spin" /> : <Download size={12} />}
+                        {" "}{t("opt_bm_export_netscape")}
+                      </button>
+                      <button className="btn-secondary btn-wrap" onClick={() => void exportBookmarks("raindrop")} disabled={exportBusy !== null}>
+                        {exportBusy === "raindrop" ? <Loader2 size={12} className="spin" /> : <FileDown size={12} />}
+                        {" "}{t("opt_bm_export_raindrop")}
+                      </button>
+                      <button className="btn-secondary btn-wrap" onClick={() => void exportBookmarks("view")} disabled={exportBusy !== null}>
+                        {exportBusy === "view" ? <Loader2 size={12} className="spin" /> : <FileDown size={12} />}
+                        {" "}{t("opt_bm_export_view")}
+                      </button>
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <button className="btn-secondary btn-wrap" onClick={() => void exportBookmarks("view", true)} disabled={exportBusy !== null}>
+                        {exportBusy === "view-upload" ? <Loader2 size={12} className="spin" /> : <ShieldCheck size={12} />}
+                        {" "}{t("opt_bm_export_view_upload")}
+                      </button>
+                      <button className="btn-secondary btn-wrap" onClick={() => void removePublishedView()} disabled={exportBusy !== null}>
+                        {exportBusy === "view-remove" ? <Loader2 size={12} className="spin" /> : <Trash2 size={12} />}
+                        {" "}{t("opt_bm_export_view_remove")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {(FORK_LINKS.issues || FORK_LINKS.email || REVIEW_PAGE) && (
@@ -3283,6 +4404,61 @@ export default function OptionsApp() {
                       <span className="slider-val">{settings.guard_cap ?? 20}</span>
                     </div>
                   </div>
+                )}
+              </div>
+
+              {/* Sync doctor (P0): a health summary in plain words, plus a bundle that is
+                  safe to paste into an issue — no passphrase, token, password or full
+                  storage URL survives redact(). */}
+              <div className="settings-section">
+                <div className="settings-card-head">
+                  {t("opt_doctor_section")}
+                  <span className="head-sub">{t("opt_doctor_section_sub")}</span>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_doctor_run_label")}</div>
+                      <div className="row-desc">{t("opt_doctor_run_desc")}</div>
+                      {doctorMsg && <div className="row-desc" style={{ color: "var(--danger)" }}>{doctorMsg}</div>}
+                    </div>
+                  </div>
+                  <button className="btn-secondary" onClick={() => void runDoctor()} disabled={doctorBusy}>
+                    {doctorBusy ? <Loader2 size={12} className="spin" /> : <Stethoscope size={12} />}
+                    {" "}{t("opt_doctor_run")}
+                  </button>
+                </div>
+                {doctor && (
+                  <>
+                    {doctor.checks.map((row) => (
+                      <div key={row.id} className="settings-row">
+                        <div className="settings-row-left">
+                          <div>
+                            <div className="row-label">
+                              {row.status === "ok"
+                                ? <CheckCircle2 size={13} className="audit-icon ok" style={{ verticalAlign: "-2px", marginRight: 6 }} />
+                                : row.status === "warn"
+                                  ? <AlertTriangle size={13} style={{ verticalAlign: "-2px", marginRight: 6, color: "var(--warn, #b45309)" }} />
+                                  : row.status === "error"
+                                    ? <XCircle size={13} className="audit-icon fail" style={{ verticalAlign: "-2px", marginRight: 6 }} />
+                                    : <Info size={13} style={{ verticalAlign: "-2px", marginRight: 6 }} />}
+                              <span className="mono-value">{row.id}</span>
+                            </div>
+                            {row.detail && <div className="row-desc" dir="auto">{row.detail}</div>}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div className="row-desc">{t("opt_doctor_copy_desc")}</div>
+                      </div>
+                      <button className="btn-secondary" onClick={() => void copyDoctor()}>
+                        {doctorCopied ? <Check size={12} /> : <Copy size={12} />}
+                        {" "}{doctorCopied ? t("opt_secret_copied") : t("opt_doctor_copy")}
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -3591,6 +4767,10 @@ const STYLES = `
   .btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-xs); height: var(--control-h-sm); padding: 0 var(--sp-xl); border-radius: var(--r-md); border: 1px solid var(--border-input); background: var(--bg-card); cursor: pointer; font-family: var(--font); font-size: var(--fs-sm); color: var(--text-secondary); transition: background .1s, border-color .1s, color .1s; white-space: nowrap; }
   .btn-secondary:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--accent); }
   .btn-secondary:disabled { opacity: .5; cursor: not-allowed; }
+  /* Long translated labels (German "Schreibgeschützte Seite veröffentlichen") can exceed a
+     narrow card. Let these shrink and wrap their text instead of overflowing the row; the
+     fixed .btn-secondary height would clip a second line, so height becomes a minimum. */
+  .btn-wrap { white-space: normal; min-width: 0; height: auto; min-height: var(--control-h-sm); padding-top: var(--sp-2xs); padding-bottom: var(--sp-2xs); }
   /* Icon-only: square by construction — one token drives both width and height, and
      flex-basis is pinned so a tight row can't squash it into a rectangle. A
      destructive action stays quiet until hover, so it's never the easiest hit. */
@@ -3639,6 +4819,12 @@ const STYLES = `
      numbers sit above it that premise is gone, and a height that depends on how much wraps
      above it is a height that collapses on a narrow window. */
   .audit-list { min-height: 12rem; max-height: 60vh; overflow-y: auto; }
+
+  /* Long result lists (expanded receipt history, cleanup rows, autosaved sessions, restore
+     points) scroll inside their card: the page's height must not depend on how much a scan
+     or a ring happens to hold. */
+  .list-scroll { max-height: 60vh; overflow-y: auto; }
+  .tab-scroll { max-height: 280px; overflow-y: auto; }
 
   /* ─── Scroll fades ────────────────────────────────────────────────────────
      A MASK rather than a gradient overlay, for two reasons: an overlay has to know the

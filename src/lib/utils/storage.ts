@@ -17,15 +17,18 @@ import type {
   SyncExtension,
   SyncSettings,
   SyncState,
+  SyncReport,
+  AutosavedSession,
   Tombstone,
   SettingsBackup,
+  BackendConfig,
 } from "@/lib/types";
 import { browser } from "@/lib/utils/ext";
 import { BACKEND_LABEL } from "@/lib/constants";
 import { setCompatMode } from "@/lib/compat/protocol";
 import { inferStore, storeUrlFor } from "@/lib/utils/extensions-match";
 import { canonicalUrlKey } from "@/lib/utils/url";
-import { passphraseViolatesPolicy, MIN_PASSPHRASE_LENGTH } from "@/lib/crypto/encryption";
+import { passphraseViolatesPolicy, MIN_PASSPHRASE_LENGTH, encrypt, decrypt } from "@/lib/crypto/encryption";
 import { sanitizeExclusions } from "@/lib/utils/bookmark-exclusions";
 import { withChecksum, verifyChecksum } from "@/lib/utils/checksum";
 
@@ -184,6 +187,15 @@ export const DEFAULT_SETTINGS: SyncSettings = {
   active_backend: null,
   sync_interval_seconds: 60,
   conflict_strategy: "lww",
+  // Per-type overrides start empty: the global strategy above is the whole answer until
+  // somebody asks for a different one on a specific type.
+  conflict_strategies: {},
+  // Peers' recorded moves win, which is what makes two browsers converge on one order.
+  bookmark_order_mode: "lww",
+  // A merge that removes a meaningful number of bookmarks here gets a restore point first.
+  auto_restore_point: true,
+  // Keep recent open-tab sessions locally so a crash does not lose the window.
+  session_autosave_enabled: true,
   history_days_limit: 30,
   bulk_delete_percent: 60,
   excluded_bookmarks: [],
@@ -211,6 +223,7 @@ export const DEFAULT_STATE: SyncState = {
   sync_totals: { bookmarks: 0, history: 0, sessions: 0, extensions: 0 },
   sync_cycles: 0,
   bytes_transferred: 0,
+  sync_report: null,
   recovery_notice: null,
   guard_notice: null,
 };
@@ -287,6 +300,11 @@ export const KEYS = {
   // working state and never travel in a SyncPacket.
   GUARD_STATE: "konode_guard_state",
   GUARD_SNAPSHOT: "konode_guard_snap",
+  // Once per dangerous-merge episode: the pre-apply restore point the sync takes before
+  // folding in a bulk deletion. Same reasoning as GUARD_SNAPSHOT — the same peer tombstones
+  // are re-evaluated every cycle, and a point per minute would evict the ring it is meant
+  // to protect. Cleared by the first cycle that removes nothing large.
+  DANGER_SNAPSHOT: "konode_danger_snap",
   // The user's one-shot "don't show the coexist tip again" for the local change guard.
   // Set by the popup, read there; the guard itself never touches it.
   GUARD_WARNED: "konode_guard_warned",
@@ -305,6 +323,12 @@ export const KEYS = {
   // the service worker counts into PROGRESS, the popup records the answer in ANSWERED.
   RATE_PROGRESS: "konode_rate_progress",
   RATE_ANSWERED: "konode_rate_answered",
+  // Receipts for recent syncs, newest first, capped in lib/sync/sync-report.ts. Device-
+  // local: what THIS device saw change is not something a peer needs.
+  SYNC_REPORTS: "konode_sync_reports",
+  // Device-local ring of recent open-tab sessions (lib/session-autosave.ts). Never part of
+  // a SyncPacket; the synced sessions file is a separate, explicitly enabled thing.
+  SESSION_AUTOSAVE: "konode_session_autosave",
 } as const;
 
 // ─── Generic Helpers ───────────────────────────────────────────────────────
@@ -495,27 +519,32 @@ export async function saveSettings(partial: Partial<SyncSettings>): Promise<Sync
 export const SETTINGS_BACKUP_FORMAT = "kesonode-settings";
 
 /**
- * The version this build WRITES. Do not bump it just because a setting was added: a new
- * OPTIONAL field with a default is readable by every older build, and a newer build fills
- * it in on import. Bump only when a field's meaning or shape changes in a way an old
- * reader cannot understand — and then add a migration below.
+ * The version this build WRITES.
+ *
+ * v2 does not change what a setting means; it changes what a file is allowed to contain.
+ * v1 carried every credential in plain text, so a reader that accepts one must keep the
+ * "this file has secrets" confirmation. v2 says what happened to them (`credentials`):
+ * left out, encrypted, or present because the user chose an encrypted export. A v1-era
+ * build refuses v2 outright, which is what stops it from importing a redacted file and
+ * overwriting a live password with an empty string.
  */
-export const SETTINGS_BACKUP_VERSION = 1;
+export const SETTINGS_BACKUP_VERSION = 2;
 
 /** Versions this build can READ. Unknown versions are refused, never guessed at. */
-export const SUPPORTED_BACKUP_VERSIONS: readonly number[] = [SETTINGS_BACKUP_VERSION];
+export const SUPPORTED_BACKUP_VERSIONS: readonly number[] = [1, SETTINGS_BACKUP_VERSION];
 
 export type BackupDocument = Record<string, unknown>;
 export type BackupMigration = (doc: BackupDocument) => BackupDocument;
 
 /**
- * One link per old version, each producing the next. Empty today because every backup
- * ever written is v1. To introduce v2: add `1: (v1) => ({ ...v1, version: 2, ... })`,
- * bump SETTINGS_BACKUP_VERSION to 2, and KEEP 1 in SUPPORTED_BACKUP_VERSIONS. Ship a
- * build that can READ v2 before shipping one that WRITES it, so an older install can
- * still be used to recover a file written by the new one.
+ * One link per old version, each producing the next.
+ *
+ * v1 → v2 is the same document with its secrets accounted for: every v1 file holds them,
+ * so it reads as `included`. Nothing else moved, which is why there is no shape to rewrite.
  */
-export const BACKUP_MIGRATIONS: Readonly<Record<number, BackupMigration>> = {};
+export const BACKUP_MIGRATIONS: Readonly<Record<number, BackupMigration>> = {
+  1: (doc) => ({ ...doc, version: 2, credentials: "included" }),
+};
 
 /**
  * Bring a document up to `current` through the chain. Pure and parameterised so the
@@ -575,14 +604,49 @@ const BACKEND_TYPES: readonly string[] = ["gdrive", "webdav", "github"];
 const CONFLICT_STRATEGIES: readonly string[] = ["lww", "prefer-local", "prefer-remote", "manual"];
 const COMPAT_MODES: readonly string[] = ["upstream", "isolated", "standalone"];
 
+// A device id becomes a file name on the backend; a sub-path becomes extra path segments.
+// Both arrive from an untrusted backup, so neither may carry traversal ("..", separators,
+// backslashes) or a non-http scheme that would send authenticated requests elsewhere.
+const isSafeDeviceId = (v: unknown): v is string =>
+  isString(v) && v.length > 0 && /^[A-Za-z0-9-]+$/.test(v);
+const isSafeSubPath = (v: unknown): boolean =>
+  v === undefined
+  || (isString(v) && !v.startsWith("/") && !v.includes("\\") && !v.includes("\0")
+    && v.split("/").every((seg) => seg !== ".." && seg !== "."));
+const backendTargetSafe = (b: Record<string, unknown>): boolean => {
+  const w = isRecord(b.webdav) ? b.webdav : null;
+  const g = isRecord(b.github) ? b.github : null;
+  if (w && !isSafeSubPath(w.path)) return false;
+  if (g && !isSafeSubPath(g.path)) return false;
+  if (w && isString(w.url) && w.url !== "") {
+    try {
+      const protocol = new URL(w.url).protocol;
+      if (protocol !== "http:" && protocol !== "https:") return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+};
+
 export const SETTINGS_BACKUP_SCHEMA: Record<keyof SyncSettings, BackupField> = {
-  device_id: { validate: (v) => isString(v) && v.length > 0 },
+  device_id: { validate: isSafeDeviceId },
   device_label: { validate: isString },
   enabled_types: { validate: arrayOf(oneOf(DATA_TYPES)) },
-  backends: { validate: arrayOf((b) => isRecord(b) && oneOf(BACKEND_TYPES)(b.type)) },
+  backends: { validate: arrayOf((b) => isRecord(b) && oneOf(BACKEND_TYPES)(b.type) && backendTargetSafe(b)) },
   active_backend: { validate: (v) => v === null || oneOf(BACKEND_TYPES)(v) },
   sync_interval_seconds: { validate: isPositiveNumber },
   conflict_strategy: { validate: oneOf(CONFLICT_STRATEGIES) },
+  conflict_strategies: {
+    validate: (v) =>
+      isRecord(v) &&
+      Object.entries(v).every(([type, strategy]) =>
+        DATA_TYPES.includes(type) && oneOf(CONFLICT_STRATEGIES)(strategy),
+      ),
+  },
+  bookmark_order_mode: { validate: oneOf(["lww", "keep-local"]) },
+  auto_restore_point: { validate: isBoolean },
+  session_autosave_enabled: { validate: isBoolean },
   history_days_limit: { validate: isPositiveNumber },
   bulk_delete_percent: { validate: (v) => isPositiveNumber(v) && v <= 100 },
   excluded_bookmarks: { validate: (v) => Array.isArray(v) },
@@ -602,7 +666,39 @@ export const SETTINGS_BACKUP_SCHEMA: Record<keyof SyncSettings, BackupField> = {
 
 export const BACKUP_SETTINGS_FIELDS = Object.keys(SETTINGS_BACKUP_SCHEMA) as (keyof SyncSettings)[];
 
-export async function exportSettingsBackup(extensionVersion: string): Promise<SettingsBackup> {
+/** Strip everything that authenticates: password, token, refresh token, passphrase. */
+function withoutSecrets(backend: BackendConfig): BackendConfig {
+  return {
+    ...backend,
+    ...(backend.webdav ? { webdav: { ...backend.webdav, password: "" } } : {}),
+    ...(backend.github ? { github: { ...backend.github, token: undefined } } : {}),
+  };
+}
+
+export interface ExportSettingsOptions {
+  /**
+   * Write the secrets into the file. There is no default: a caller that wants them must
+   * say so, and is expected to encrypt the result with `encryptSettingsBackup` before it
+   * reaches disk. This function never encrypts, so a plaintext file holding credentials
+   * cannot be produced by forgetting a step.
+   */
+  includeCredentials?: boolean;
+}
+
+/**
+ * The configuration as a restorable document.
+ *
+ * By DEFAULT the file carries no secrets at all. It still describes the whole setup —
+ * servers, folders, repositories, schedules, preferences, the device identity — so a
+ * restore recreates the configuration; what it cannot do is sign in, and the import path
+ * asks for the pieces it is missing (or keeps the ones this install already holds).
+ * Credentials are only ever written when the caller explicitly asks, and then into a
+ * file that is encrypted before download.
+ */
+export async function exportSettingsBackup(
+  extensionVersion: string,
+  options: ExportSettingsOptions = {},
+): Promise<SettingsBackup> {
   const raw = await browser.storage.local.get([...SETTINGS_BACKUP_KEYS]);
   // getSettings() merges the defaults and mints the device id if this install somehow
   // never had one, so the file is always a complete, restorable configuration. Export
@@ -614,7 +710,24 @@ export async function exportSettingsBackup(extensionVersion: string): Promise<Se
     const value = current[field];
     if (value !== undefined) portable[field] = value;
   }
-  const keys: SettingsBackup["keys"] = { settings: portable as unknown as SyncSettings };
+
+  if (!options.includeCredentials) {
+    // Missing, not empty: the importer's rule for an absent field is "keep what this
+    // install has", which is what lets someone re-import their own safe backup without
+    // being signed out of every account.
+    delete portable.encryption_passphrase;
+    portable.backends = ((portable.backends as BackendConfig[] | undefined) ?? []).map(withoutSecrets);
+    return withChecksum({
+      format: SETTINGS_BACKUP_FORMAT,
+      version: SETTINGS_BACKUP_VERSION,
+      exportedAt: new Date().toISOString(),
+      extensionVersion,
+      credentials: "redacted",
+      keys: { settings: portable as unknown as SyncSettings },
+    });
+  }
+
+  const keys: NonNullable<SettingsBackup["keys"]> = { settings: portable as unknown as SyncSettings };
   // Stored verbatim: a future session shape must not need a new backup format.
   if (raw[KEYS.GDRIVE_SESSION] !== undefined) keys.gdriveSession = raw[KEYS.GDRIVE_SESSION];
   if (raw[KEYS.GDRIVE_FOLDER] !== undefined) keys.gdriveFolder = raw[KEYS.GDRIVE_FOLDER];
@@ -623,12 +736,76 @@ export async function exportSettingsBackup(extensionVersion: string): Promise<Se
     version: SETTINGS_BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     extensionVersion,
+    credentials: "included",
     keys,
   });
 }
 
+/**
+ * Shrink a credentials-bearing backup into one that holds none in the clear.
+ *
+ * The whole `keys` object is encrypted (AES-256-GCM, salt + IV + ciphertext, base64, the
+ * same frozen derivation the synced data uses). Everything the envelope must say without
+ * decrypting — format, version, timestamps — stays outside; anything naming a server, an
+ * account, a token or the passphrase moves inside. The checksum is over the ciphertext,
+ * so damage is still detected before a password is asked for.
+ */
+export async function encryptSettingsBackup(
+  backup: SettingsBackup,
+  password: string,
+): Promise<SettingsBackup> {
+  if (!backup.keys) throw new Error("This settings backup has no contents to encrypt.");
+  const ciphertext = await encrypt(JSON.stringify(backup.keys), password);
+  return withChecksum({
+    format: SETTINGS_BACKUP_FORMAT,
+    version: SETTINGS_BACKUP_VERSION,
+    exportedAt: backup.exportedAt,
+    extensionVersion: backup.extensionVersion,
+    credentials: "encrypted",
+    ciphertext,
+  });
+}
+
+/**
+ * Open an encrypted backup into the document the importer understands.
+ *
+ * A wrong password and a damaged ciphertext are indistinguishable to AES-GCM's
+ * authentication tag; saying so is the honest answer rather than guessing which it was.
+ * The page calls this before showing the import risks, because those are read from the
+ * decrypted settings — an encrypted file cannot be described without its password.
+ */
+export async function openSettingsBackup(input: unknown, password: string): Promise<SettingsBackup> {
+  if (!isRecord(input) || input.format !== SETTINGS_BACKUP_FORMAT) {
+    throw new Error("This is not a Kesonode settings backup.");
+  }
+  if (input.credentials !== "encrypted" || typeof input.ciphertext !== "string") {
+    throw new Error("This settings backup is not encrypted.");
+  }
+  if (typeof input.version !== "number" || !SUPPORTED_BACKUP_VERSIONS.includes(input.version)) {
+    throw new Error("This settings backup was written in a format this build cannot read.");
+  }
+  await verifyChecksum(input);
+  let keys: unknown;
+  try {
+    keys = JSON.parse(await decrypt(input.ciphertext, password));
+  } catch {
+    throw new Error("That password did not open the backup, or the file is damaged. Check the password and try again.");
+  }
+  if (!isRecord(keys) || !isRecord(keys.settings)) {
+    throw new Error("The decrypted settings backup is malformed.");
+  }
+  return {
+    format: SETTINGS_BACKUP_FORMAT,
+    version: input.version,
+    exportedAt: typeof input.exportedAt === "string" ? input.exportedAt : new Date().toISOString(),
+    extensionVersion: typeof input.extensionVersion === "string" ? input.extensionVersion : "",
+    credentials: "included",
+    keys: keys as NonNullable<SettingsBackup["keys"]>,
+  };
+}
+
 async function readBackup(input: unknown): Promise<SettingsBackup> {
-  if (!isRecord(input) || input.format !== SETTINGS_BACKUP_FORMAT || !isRecord(input.keys)) {
+  if (!isRecord(input) || input.format !== SETTINGS_BACKUP_FORMAT) {
     throw new Error("This is not a Kesonode settings backup.");
   }
   const version = input.version;
@@ -650,6 +827,12 @@ async function readBackup(input: unknown): Promise<SettingsBackup> {
   // After the version gate, so a newer file is reported as newer rather than as damaged.
   // A missing checksum means a file written before the field existed: still readable.
   await verifyChecksum(input);
+  // The UI opens an encrypted file with its password (`openSettingsBackup`) and sends the
+  // result here. Refusing the sealed form keeps this path from ever needing a password,
+  // and from accidentally treating ciphertext as an empty configuration.
+  if (input.credentials === "encrypted") {
+    throw new Error("This settings backup is encrypted. Open it with its password before importing.");
+  }
   const doc = migrateBackupDocument(input, version, SETTINGS_BACKUP_VERSION, BACKUP_MIGRATIONS);
   const keys = doc.keys;
   const settings = isRecord(keys) ? keys.settings : undefined;
@@ -669,19 +852,52 @@ export interface ImportSettingsOptions {
    * SAME device after an extension-ID change or a reinstall.
    */
   asNewDevice?: boolean;
+  /**
+   * The E2EE passphrase the user typed at import, for a REDACTED backup (which by design
+   * carries none). E2EE cannot be enabled here without one, so the caller collects it
+   * before asking the worker to write anything.
+   */
+  e2eePassphrase?: string;
+}
+
+/**
+ * Fill the secrets a redacted backup deliberately left out from the ones this install
+ * already holds, so someone re-importing their own safe backup is not signed out of every
+ * account. A backend whose server or account changed keeps nothing: the stored password
+ * belonged to the old one.
+ */
+function keepLocalCredentials(incoming: BackendConfig[], current: BackendConfig[]): BackendConfig[] {
+  return incoming.map((backend) => {
+    const previous = current.find((b) => b.type === backend.type);
+    if (!previous) return backend;
+    if (backend.webdav && previous.webdav
+      && !backend.webdav.password
+      && backend.webdav.url === previous.webdav.url
+      && backend.webdav.username === previous.webdav.username) {
+      return { ...backend, webdav: { ...backend.webdav, password: previous.webdav.password } };
+    }
+    if (backend.github && previous.github && !backend.github.token
+      && backend.github.repo === previous.github.repo) {
+      return { ...backend, github: { ...backend.github, token: previous.github.token } };
+    }
+    return backend;
+  });
 }
 
 export async function importSettingsBackup(
   input: unknown, options: ImportSettingsOptions = {},
 ): Promise<SyncSettings> {
   const backup = await readBackup(input);
-  const raw = backup.keys.settings as unknown as Record<string, unknown>;
+  const keys = backup.keys as NonNullable<SettingsBackup["keys"]>;
+  const raw = keys.settings as unknown as Record<string, unknown>;
+  const redacted = backup.credentials === "redacted";
   const defaults = DEFAULT_SETTINGS as unknown as Record<string, unknown>;
 
   const partial: Record<string, unknown> = {};
   for (const field of BACKUP_SETTINGS_FIELDS) {
     // Missing: a backup written by an OLDER version. Keep this install's value, which
-    // is a default on a fresh install — that is what makes old files restorable.
+    // is a default on a fresh install — that is what makes old files restorable. A
+    // redacted file relies on this too: its credentials are absent on purpose.
     if (!(field in raw)) continue;
     const value = raw[field];
     if (SETTINGS_BACKUP_SCHEMA[field].validate(value)) {
@@ -701,6 +917,27 @@ export async function importSettingsBackup(
   // An imported configuration is by definition already set up. Without this the wizard
   // would open on top of restored accounts and ask for them a second time.
   partial.onboarding_completed = true;
+
+  const current = await getSettings();
+  if (redacted) {
+    // Credentials in this file are placeholders. Whatever this install already holds for
+    // the same server/account is kept; a first-time restore simply has none, and the UI
+    // tells the user which account to sign in to again.
+    partial.backends = keepLocalCredentials(partial.backends as BackendConfig[], current.backends);
+    if (options.e2eePassphrase !== undefined) partial.encryption_passphrase = options.e2eePassphrase;
+  }
+
+  // Enabling E2EE without a passphrase would make this device publish plaintext while its
+  // peers write ciphertext — the "plaintext downgrade" the whole encryption guard exists
+  // to prevent. Refused BEFORE saveSettings, so a rejected import writes nothing.
+  const passphrase = partial.encryption_passphrase ?? current.encryption_passphrase;
+  const encryptionEnabled = partial.encryption_enabled ?? current.encryption_enabled;
+  if (encryptionEnabled && !passphrase) {
+    throw new Error(
+      "This backup enables end-to-end encryption but does not include the passphrase. " +
+        "Enter your passphrase to import this configuration."
+    );
+  }
 
   // device_id names this install's `konode_<type>_<device_id>.json` files in the shared
   // backend. Copying a config to another browser must NOT copy the id: both installs
@@ -732,20 +969,49 @@ export async function importSettingsBackup(
 
   // The Drive refresh token is device-local too, and is what makes "sign in again"
   // unnecessary after the restore. Clear anything left behind by the previous config
-  // when the backup has no session, so a stale account cannot linger.
+  // when the backup has no session, so a stale account cannot linger — but a redacted
+  // backup has no session BY DESIGN, so an import must not sign this device out.
   const writes: Record<string, unknown> = {};
-  if (isRecord(backup.keys.gdriveSession)) writes[KEYS.GDRIVE_SESSION] = backup.keys.gdriveSession;
-  if (backup.keys.gdriveFolder !== undefined) writes[KEYS.GDRIVE_FOLDER] = backup.keys.gdriveFolder;
+  if (!redacted) {
+    if (isRecord(keys.gdriveSession)) writes[KEYS.GDRIVE_SESSION] = keys.gdriveSession;
+    if (keys.gdriveFolder !== undefined) writes[KEYS.GDRIVE_FOLDER] = keys.gdriveFolder;
+  }
   // 口令强度兜底（同 saveSettings）：导入启用了 E2EE 但口令过短的备份同样拒绝，
   // 防止社工构造弱口令备份绕过 UI 校验。
   if (passphraseViolatesPolicy(updated)) {
     throw new Error(`Import refused: with E2EE enabled the passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters.`);
   }
   if (Object.keys(writes).length) await browser.storage.local.set(writes);
-  if (!(KEYS.GDRIVE_SESSION in writes)) await browser.storage.local.remove(KEYS.GDRIVE_SESSION);
-  if (!(KEYS.GDRIVE_FOLDER in writes)) await browser.storage.local.remove(KEYS.GDRIVE_FOLDER);
+  if (!redacted) {
+    if (!(KEYS.GDRIVE_SESSION in writes)) await browser.storage.local.remove(KEYS.GDRIVE_SESSION);
+    if (!(KEYS.GDRIVE_FOLDER in writes)) await browser.storage.local.remove(KEYS.GDRIVE_FOLDER);
+  }
 
   return updated;
+}
+
+/**
+ * The connection target of a backend, independent of its credentials: the server/account/
+ * folder that data would actually be written to. Two backends of the same TYPE can point
+ * at different servers, so a type-only comparison misses a redirect.
+ */
+function backendEndpoint(backend: unknown): string | null {
+  const bo = isRecord(backend) ? backend : null;
+  if (!bo || typeof bo.type !== "string") return null;
+  const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  if (bo.type === "webdav") {
+    const w = isRecord(bo.webdav) ? bo.webdav : null;
+    return `webdav|${s(w?.url)}|${s(w?.username)}|${s(w?.path)}`;
+  }
+  if (bo.type === "github") {
+    const g = isRecord(bo.github) ? bo.github : null;
+    return `github|${s(g?.repo)}|${s(g?.branch)}|${s(g?.path)}`;
+  }
+  if (bo.type === "gdrive") {
+    const d = isRecord(bo.gdrive) ? bo.gdrive : null;
+    return `gdrive|${s(d?.folderId)}`;
+  }
+  return bo.type;
 }
 
 /**
@@ -771,6 +1037,16 @@ export function importSettingsRisks(current: SyncSettings, input: unknown): stri
   if (typeof inRec?.active_backend === "string" && inRec.active_backend !== current.active_backend) {
     risks.push("changes-backend");
   }
+  // Same type but a different server/account/folder is still a redirect: a crafted backup
+  // that keeps active_backend:"webdav" while pointing webdav.url at an attacker host must
+  // not import silently.
+  if (!risks.includes("changes-backend") && inRec) {
+    const activeType = typeof inRec.active_backend === "string" ? inRec.active_backend : current.active_backend;
+    const curSig = backendEndpoint(current.backends?.find((b) => b.type === activeType));
+    const inBackends = Array.isArray(inRec.backends) ? inRec.backends : [];
+    const inSig = backendEndpoint(inBackends.find((b) => isRecord(b) && b.type === activeType));
+    if (curSig !== null && (inSig === null || inSig !== curSig)) risks.push("changes-backend");
+  }
   if (Array.isArray(inRec?.backends) && inRec.backends.some((b) => {
     const bo = b && typeof b === "object" ? (b as Record<string, unknown>) : null;
     const wo = bo?.webdav && typeof bo.webdav === "object" ? (bo.webdav as Record<string, unknown>) : null;
@@ -787,7 +1063,9 @@ export function importSettingsRisks(current: SyncSettings, input: unknown): stri
 // ─── State ─────────────────────────────────────────────────────────────────
 
 export async function getState(): Promise<SyncState> {
-  return get<SyncState>(KEYS.STATE, DEFAULT_STATE);
+  const state = await get<SyncState>(KEYS.STATE, DEFAULT_STATE);
+  // The head card reads state.sync_report directly; a malformed one must not reach it.
+  return isSyncReport(state.sync_report) ? state : { ...state, sync_report: null };
 }
 
 export function setState(partial: Partial<SyncState> | ((current: SyncState) => Partial<SyncState>)): Promise<SyncState> {
@@ -795,6 +1073,81 @@ export function setState(partial: Partial<SyncState> | ((current: SyncState) => 
     ...current,
     ...(typeof partial === "function" ? partial(current) : partial),
   }), DEFAULT_STATE);
+}
+
+// ─── Sync receipts ─────────────────────────────────────────────────────────
+
+/** How many receipts Activity keeps. Enough to see a pattern, small enough to stay free. */
+export const MAX_SYNC_REPORTS = 30;
+
+const isSyncTypeReport = (value: unknown): boolean =>
+  isRecord(value)
+  && typeof value.data_type === "string"
+  && typeof value.added === "number"
+  && typeof value.removed === "number";
+
+// The Activity card calls .toLocaleString() on the totals and maps the type rows, so a
+// receipt missing those fields must be dropped here rather than crash the whole page.
+const isSyncReport = (value: unknown): value is SyncReport =>
+  isRecord(value)
+  && typeof value.at === "string"
+  && typeof value.duration_ms === "number"
+  && typeof value.added === "number"
+  && typeof value.removed === "number"
+  && typeof value.total_before === "number"
+  && typeof value.total_after === "number"
+  && typeof value.dangerous === "boolean"
+  && Array.isArray(value.types)
+  && value.types.every(isSyncTypeReport);
+
+const isAutosavedSession = (value: unknown): value is AutosavedSession =>
+  isRecord(value)
+  && typeof value.id === "string"
+  && typeof value.saved_at === "string"
+  && Array.isArray(value.tabs);
+
+export async function getSyncReports(): Promise<SyncReport[]> {
+  const raw = await get<unknown>(KEYS.SYNC_REPORTS, []);
+  // Storage is shared with older builds and partially written imports; a single bad
+  // entry must not take the whole Activity list (and its previews) down with it.
+  return Array.isArray(raw) ? raw.filter(isSyncReport) : [];
+}
+
+/**
+ * Append a receipt, newest first.
+ *
+ * Uses `updateKey` because a manual sync and an automatic one can overlap at the storage
+ * level even though the engine serializes the work; a plain read-then-write here would
+ * drop whichever finished first.
+ */
+export async function appendSyncReport(report: SyncReport): Promise<void> {
+  await updateKey<SyncReport[]>(
+    KEYS.SYNC_REPORTS,
+    (current) => [report, ...current].slice(0, MAX_SYNC_REPORTS),
+    []
+  );
+}
+
+/**
+ * Drop every receipt, including the one the state still points at — otherwise Activity's
+ * "last cycle" card would resurrect the newest receipt from the state after a clear.
+ */
+export async function clearSyncReports(): Promise<void> {
+  await updateKey<SyncReport[]>(KEYS.SYNC_REPORTS, () => [], []);
+  await setState({ sync_report: null });
+}
+
+// ─── Autosaved sessions ────────────────────────────────────────────────────
+
+export async function getAutosavedSessions(): Promise<AutosavedSession[]> {
+  const raw = await get<unknown>(KEYS.SESSION_AUTOSAVE, []);
+  return Array.isArray(raw) ? raw.filter(isAutosavedSession) : [];
+}
+
+export async function setAutosavedSessions(list: AutosavedSession[]): Promise<void> {
+  // updateKey, not set: an autosave can land while a prune or restore is mid-write, and a
+  // plain read-then-write here would drop whichever finished first.
+  await updateKey<AutosavedSession[]>(KEYS.SESSION_AUTOSAVE, () => list, []);
 }
 
 // ─── First-sync direction ─────────────────────────────────────────────────
@@ -1271,6 +1624,33 @@ export async function setGuardSnapshotTaken(taken: boolean): Promise<void> {
   await set(KEYS.GUARD_SNAPSHOT, taken);
 }
 
+// One pre-apply restore point per dangerous-merge episode. A peer's tombstones are
+// re-evaluated on every cycle until they are applied, so without this the same incident
+// would leave a point a minute; the first cycle that removes nothing large clears it.
+//
+// The stored value is the episode's snapshot NAME, not just a boolean: later cycles of
+// the same incident re-attach it to their receipt, so Activity's Undo button stays put
+// while the deletion keeps repeating instead of vanishing after the first cycle.
+export async function getDangerSnapshotName(): Promise<string | null> {
+  const stored = await get<string | boolean | null>(KEYS.DANGER_SNAPSHOT, null);
+  return typeof stored === "string" && stored ? stored : null;
+}
+
+export async function getDangerSnapshotTaken(): Promise<boolean> {
+  const stored = await get<string | boolean | null>(KEYS.DANGER_SNAPSHOT, null);
+  // A bare `true` is a latch left by an older build; the name is unrecoverable but the
+  // episode is still open, so it must keep suppressing fresh points.
+  return stored === true || (typeof stored === "string" && stored.length > 0);
+}
+
+export async function setDangerSnapshotName(name: string): Promise<void> {
+  await set(KEYS.DANGER_SNAPSHOT, name);
+}
+
+export async function setDangerSnapshotTaken(taken: boolean): Promise<void> {
+  await set(KEYS.DANGER_SNAPSHOT, taken ? true : null);
+}
+
 // The popup's one-time "you appear to be running Kesonode alongside the browser's own
 // bookmark sync" tip is dismissible. Persisted (not in konode_state) so closing the
 // popup doesn't bring it back, and NOT in the settings backup (it is a one-off UI choice).
@@ -1726,6 +2106,7 @@ export async function resetBookmarkMergeState(): Promise<void> {
     KEYS.BOOKMARK_PEER_REMOVED,
     KEYS.GUARD_STATE,
     KEYS.GUARD_SNAPSHOT,
+    KEYS.DANGER_SNAPSHOT,
     KEYS.RESOLVED_CONFLICTS,
     KEYS.CONFLICT_PACKETS,
     KEYS.UPLOAD_CHECKSUMS,

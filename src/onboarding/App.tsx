@@ -14,7 +14,12 @@ import {
   allDataTypeAvailability, ensurePermissionWatched, unsupportedReason,
   permissionsToEnable, tabGroupsAskable, missingPermissionsFor, type Availability,
 } from "@/lib/utils/capabilities";
-import { importSettingsBackupFromFile } from "@/lib/utils/settings-import";
+import {
+  importSettingsBackupFromFile, isEncryptedSettingsBackup, missingImportedCredentials,
+  redactedBackupNeedsPassphrase,
+} from "@/lib/utils/settings-import";
+import { openSettingsBackup } from "@/lib/utils/storage";
+import { BACKEND_LABEL } from "@/lib/constants";
 import { describePermission } from "@/lib/permission-copy";
 import {
   Bookmark,
@@ -115,6 +120,16 @@ export default function OnboardingApp() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
+  // A picked file that cannot be applied yet: an encrypted backup needs its password,
+  // and a redacted one that enables E2EE needs the passphrase it deliberately left out.
+  const [pendingBackup, setPendingBackup] = useState<{ doc: unknown; needs: "password" | "passphrase" } | null>(null);
+  const [pendingSecret, setPendingSecret] = useState("");
+  const [pendingShowSecret, setPendingShowSecret] = useState(false);
+  const [pendingError, setPendingError] = useState<string | null>(null);
+  const [pendingBusy, setPendingBusy] = useState(false);
+  // A redacted backup restores no secrets. Naming them is the only useful thing left to
+  // say — a first sync would fail on the account, not on the data.
+  const [importedMissing, setImportedMissing] = useState<BackendType[] | null>(null);
   const [missingPerms, setMissingPerms] = useState<{ permissions: string[]; origins: string[] }>({ permissions: [], origins: [] });
   // The stored setup, when this install is already configured — the manage page renders
   // from it and never writes to it. Separate from `current` reads elsewhere because this
@@ -326,6 +341,7 @@ export default function OnboardingApp() {
   const [encConfirm, setEncConfirm] = useState("");
   const [encGenerated, setEncGenerated] = useState("");
   const [showEncPass, setShowEncPass] = useState(false);
+  const [showEncConfirm, setShowEncConfirm] = useState(false);
   // Set once the user hits Finish with E2EE on but the passphrase not (correctly)
   // filled — drives the red border + inline error (clears itself as they fix it).
   const [encTouched, setEncTouched] = useState(false);
@@ -603,51 +619,124 @@ export default function OnboardingApp() {
   const importBackup = async (file: File) => {
     setImporting(true);
     setImportError(null);
+    setImportedMissing(null);
     try {
       const parsed: unknown = JSON.parse(await file.text());
-      const outcome = await importSettingsBackupFromFile(parsed, (message) => window.confirm(message));
-      if (!outcome.ok) {
-        if (outcome.reason === "failed") setImportError(t("onb_import_failed", outcome.error ?? ""));
+      if (isEncryptedSettingsBackup(parsed)) {
+        setPendingBackup({ doc: parsed, needs: "password" });
+        setPendingSecret("");
+        setPendingShowSecret(false);
+        setPendingError(null);
         return;
       }
-      // The worker already saved the imported settings. Mark setup done explicitly (a
-      // backup taken mid-setup may carry false), and drop the draft with its credentials.
-      await request({ type: "SAVE_SETTINGS", payload: { onboarding_completed: true } });
-      draftClosed.current = true;
-      clearEntryReason();
-      await clearDraft().catch(() => {});
-      // An imported setup may enable history/tabs/extensions that this browser has never
-      // granted, and a WebDAV server whose host permission was never requested. Check the
-      // settings as they stand now, with the reported origin as a belt.
-      const after = await request({ type: "GET_SETTINGS" });
-      const imported = after.ok && after.res.type === "SETTINGS" ? after.res.payload : null;
-      const missing: { permissions: string[]; origins: string[] } = imported
-        ? await missingPermissionsFor(imported)
-        : { permissions: [], origins: [] };
-      if (outcome.hostOrigin && !missing.origins.includes(outcome.hostOrigin)) {
-        missing.origins.push(outcome.hostOrigin);
-      }
-      const enabled = imported?.enabled_types ?? [];
-      // Nothing turned on is a valid configuration, and a sync of nothing would sit on the
-      // progress screen until it timed out. The plain "restored" screen is the right end
-      // for that case; anything else owes this browser a first sync (see startImportedSync).
-      if (!enabled.length) {
-        setStep("imported");
+      // Asked before the overwrite questions: the worker refuses this import anyway, and
+      // refusing after every question is answered is worse than asking up front.
+      if (await redactedBackupNeedsPassphrase(parsed)) {
+        setPendingBackup({ doc: parsed, needs: "passphrase" });
+        setPendingSecret("");
+        setPendingShowSecret(false);
+        setPendingError(null);
         return;
       }
-      importedSyncPending.current = true;
-      if (missing.permissions.length || missing.origins.length) {
-        setMissingPerms(missing);
-        setPermissionPhase("needed");
-        setStep("permissions");
-      } else {
-        importedSyncPending.current = false;
-        await startImportedSync(enabled);
-      }
+      await applyImportedBackup(parsed, {});
     } catch (err) {
       setImportError(t("onb_import_failed", err instanceof Error ? err.message : String(err)));
     } finally {
       setImporting(false);
+    }
+  };
+
+  const submitPendingBackup = async () => {
+    if (!pendingBackup) return;
+    setPendingError(null);
+    if (pendingBackup.needs === "passphrase") {
+      if (!pendingSecret) { setPendingError(t("opt_cfg_import_need_passphrase")); return; }
+      if (pendingSecret.length < MIN_PASSPHRASE_LENGTH) {
+        setPendingError(t("opt_cfg_import_pass_short", String(MIN_PASSPHRASE_LENGTH)));
+        return;
+      }
+      const doc = pendingBackup.doc;
+      const passphrase = pendingSecret;
+      setPendingBackup(null);
+      setPendingSecret("");
+      setImporting(true);
+      try {
+        await applyImportedBackup(doc, { e2eePassphrase: passphrase });
+      } catch (err) {
+        setImportError(t("onb_import_failed", err instanceof Error ? err.message : String(err)));
+      } finally {
+        setImporting(false);
+      }
+      return;
+    }
+    setPendingBusy(true);
+    try {
+      const doc = await openSettingsBackup(pendingBackup.doc, pendingSecret);
+      setPendingBackup(null);
+      setPendingSecret("");
+      setImporting(true);
+      await applyImportedBackup(doc, {});
+    } catch (err) {
+      // A wrong password and a damaged file are the same failure to AES-GCM; the helper's
+      // sentence covers both and stays in the panel until it is answered.
+      setPendingError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPendingBusy(false);
+      setImporting(false);
+    }
+  };
+
+  const applyImportedBackup = async (
+    doc: unknown,
+    options: { e2eePassphrase?: string },
+  ) => {
+    const outcome = await importSettingsBackupFromFile(doc, (message) => window.confirm(message), options);
+    if (!outcome.ok) {
+      if (outcome.reason === "failed") setImportError(t("onb_import_failed", outcome.error ?? ""));
+      return;
+    }
+    // The worker already saved the imported settings. Mark setup done explicitly (a
+    // backup taken mid-setup may carry false), and drop the draft with its credentials.
+    await request({ type: "SAVE_SETTINGS", payload: { onboarding_completed: true } });
+    draftClosed.current = true;
+    clearEntryReason();
+    await clearDraft().catch(() => {});
+    // An imported setup may enable history/tabs/extensions that this browser has never
+    // granted, and a WebDAV server whose host permission was never requested. Check the
+    // settings as they stand now, with the reported origin as a belt.
+    const after = await request({ type: "GET_SETTINGS" });
+    const imported = after.ok && after.res.type === "SETTINGS" ? after.res.payload : null;
+    // A redacted backup carries no secrets by design, so a fresh restore has no account
+    // to sync with. Say which one and send the user to Settings instead of running a sync
+    // that can only fail — and instead of a permission prompt for a backend not yet usable.
+    const missingCredentials = await missingImportedCredentials();
+    if (missingCredentials.length) {
+      setImportedMissing(missingCredentials);
+      setStep("imported");
+      return;
+    }
+    const missing: { permissions: string[]; origins: string[] } = imported
+      ? await missingPermissionsFor(imported)
+      : { permissions: [], origins: [] };
+    if (outcome.hostOrigin && !missing.origins.includes(outcome.hostOrigin)) {
+      missing.origins.push(outcome.hostOrigin);
+    }
+    const enabled = imported?.enabled_types ?? [];
+    // Nothing turned on is a valid configuration, and a sync of nothing would sit on the
+    // progress screen until it timed out. The plain "restored" screen is the right end
+    // for that case; anything else owes this browser a first sync (see startImportedSync).
+    if (!enabled.length) {
+      setStep("imported");
+      return;
+    }
+    importedSyncPending.current = true;
+    if (missing.permissions.length || missing.origins.length) {
+      setMissingPerms(missing);
+      setPermissionPhase("needed");
+      setStep("permissions");
+    } else {
+      importedSyncPending.current = false;
+      await startImportedSync(enabled);
     }
   };
 
@@ -997,6 +1086,52 @@ export default function OnboardingApp() {
           e.target.value = "";
           if (file) void importBackup(file);
         }} />
+
+      {/* A backup that cannot be opened without a secret. One panel for both screens that
+          import, and for both kinds of secret, because the file picker that got here is
+          the same in every case. */}
+      {pendingBackup && (
+        <div style={S.scrim} role="dialog" aria-modal="true">
+          <div className="onb-card" style={{ ...S.card, padding: 24, maxWidth: 420 }}>
+            <h1 style={{ ...S.h1, fontSize: 20 }}>
+              {pendingBackup.needs === "password" ? t("opt_cfg_import_pw_label") : t("opt_cfg_import_pass_label")}
+            </h1>
+            <p style={{ ...S.subtitle, marginBottom: 16 }}>
+              {pendingBackup.needs === "password" ? t("opt_cfg_import_pw_desc") : t("opt_cfg_import_pass_desc")}
+            </p>
+            <div style={{ position: "relative" }}>
+              <input
+                style={{ ...S.input, paddingRight: 32 }} type={pendingShowSecret ? "text" : "password"} autoComplete="off" autoFocus
+                placeholder={pendingBackup.needs === "password" ? t("opt_cfg_import_pw_ph") : t("opt_cfg_import_pass_ph")}
+                value={pendingSecret}
+                onChange={(e) => { setPendingSecret(e.target.value); setPendingError(null); }}
+                onKeyDown={(e) => { if (e.key === "Enter") void submitPendingBackup(); }}
+              />
+              <button type="button" style={S.eyeBtn} onClick={() => setPendingShowSecret((v) => !v)}
+                title={t(pendingShowSecret ? "common_hide" : "common_show")}>
+                {pendingShowSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+            {pendingError && <div style={{ ...S.errorRow, marginTop: 10 }}><XCircle size={12} /> {pendingError}</div>}
+            <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+              <button
+                style={{ ...S.btnSecondary, flex: 1, justifyContent: "center" }}
+                onClick={() => { setPendingBackup(null); setPendingSecret(""); setPendingError(null); }}
+                disabled={pendingBusy}
+              >
+                {t("opt_cancel")}
+              </button>
+              <button
+                style={{ ...S.btnPrimary, flex: 1 }}
+                onClick={() => void submitPendingBackup()}
+                disabled={pendingBusy || !pendingSecret}
+              >
+                {pendingBusy ? <Loader2 size={16} className="spin" /> : null} {t("opt_cfg_import_open_btn")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Progress. A count and the dots, then the way out: closing the tab is how people
           leave a setup they cannot finish right now, and saying so costs one line where
@@ -1423,14 +1558,21 @@ export default function OnboardingApp() {
               )}
               {confirmNeeded && (
                 <>
-                  <input
-                    style={{ ...S.input, marginTop: 8, ...((encTouched || encConfirm.length > 0) && confirmMismatch ? { borderColor: "var(--danger)" } : {}) }}
-                    type="password"
-                    placeholder={t("onb_pass_confirm_placeholder")}
-                    value={encConfirm}
-                    onChange={(e) => setEncConfirm(e.target.value)}
-                    aria-invalid={(encTouched || encConfirm.length > 0) && confirmMismatch}
-                  />
+                  <div style={{ position: "relative", marginTop: 8 }}>
+                    <input
+                      style={{ ...S.input, paddingRight: 34, ...((encTouched || encConfirm.length > 0) && confirmMismatch ? { borderColor: "var(--danger)" } : {}) }}
+                      type={showEncConfirm ? "text" : "password"}
+                      placeholder={t("onb_pass_confirm_placeholder")}
+                      value={encConfirm}
+                      onChange={(e) => setEncConfirm(e.target.value)}
+                      aria-invalid={(encTouched || encConfirm.length > 0) && confirmMismatch}
+                    />
+                    <div style={S.inputBtnGroup}>
+                      <button type="button" style={S.iconBtn} onClick={() => setShowEncConfirm((v) => !v)} title={t(showEncConfirm ? "common_hide" : "common_show")}>
+                        {showEncConfirm ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </div>
                   {(encTouched || encConfirm.length > 0) && confirmMismatch && (
                     <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 4 }}>
                       {t(encConfirm.length === 0 ? "onb_pass_confirm_missing" : "onb_pass_mismatch")}
@@ -1846,6 +1988,14 @@ export default function OnboardingApp() {
           <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
           <h1 style={S.h1}>{t("onb_import_done_title")}</h1>
           <p style={S.subtitle}>{t("onb_import_done_desc")}</p>
+          {importedMissing && importedMissing.length > 0 && (
+            <div style={{
+              border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px",
+              marginBottom: 16, textAlign: "left", fontSize: 13, color: "var(--danger)",
+            }}>
+              {t("opt_cfg_import_missing", importedMissing.map((b) => BACKEND_LABEL[b]).join(", "))}
+            </div>
+          )}
           <button style={S.btnPrimary} onClick={() => browser.runtime.openOptionsPage()}>
             {t("common_open_settings")} <ArrowRight size={16} />
           </button>
@@ -1878,6 +2028,11 @@ const S: Record<string, React.CSSProperties> = {
     cursor: "pointer", textDecoration: "underline",
   },
   dot: { width: 24, height: 4, borderRadius: 2, transition: "background .2s" },
+  scrim: {
+    position: "fixed", inset: 0, zIndex: 50,
+    background: "rgba(17, 21, 26, 0.45)",
+    display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+  },
   card: {
     width: "100%", maxWidth: 480,
     background: "var(--bg-card)",

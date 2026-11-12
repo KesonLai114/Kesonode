@@ -589,7 +589,7 @@
     "message": "扩展列表，显示缺失的扩展及其安装链接。"
   },
   "extension_name": {
-    "message": "Kesonode | 私人书签与标签页同步 v1.5.17"
+    "message": "Kesonode | 私人书签与标签页同步 v1.5.18"
   },
   "onb_err_perms_no_prompt": {
     "message": "此浏览器无法显示权限提示，因此 Kesonode 无法请求所需的访问权限。请在浏览器扩展设置的 Kesonode 权限页面上授予权限，然后再次点击完成。"
@@ -1694,10 +1694,6 @@
   "opt_export": {
     "message": "导出"
   },
-  "opt_export_credentials_warning": {
-    "message": "这个设置文件会包含明文凭据：WebDAV 密码、GitHub 令牌、Google 刷新令牌、加密口令。拿到文件的人可以直接使用它们。请妥善保管——不要放进共享网盘、发到聊天窗口，或附在问题反馈里。\n\n仍要导出吗？",
-    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
-  },
   "opt_exported": {
     "message": "已导出"
   },
@@ -1751,14 +1747,80 @@
   "opt_cfg_export_label": {
     "message": "导出配置"
   },
-  "opt_cfg_export_desc": {
-    "message": "把后端账号、加密口令、设备 ID 等设置保存为 JSON 文件。文件内含明文凭据，请妥善保管，不要分享。"
-  },
   "opt_cfg_import_label": {
     "message": "导入配置"
   },
+  "opt_cfg_export_desc": {
+    "message": "把你的配置——存储服务、文件夹、同步计划、偏好设置和设备 ID——保存为 JSON 文件。除非你选择包含登录凭据，否则文件不含任何凭据；包含时会用你设置的密码加密。"
+  },
+  "opt_cfg_export_include_label": {
+    "message": "包含登录凭据"
+  },
+  "opt_cfg_export_include_desc": {
+    "message": "加入 WebDAV 密码、GitHub 令牌、Google Drive 登录会话和端到端加密口令，并用下面的密码加密。不包含这些内容时，文件仍可恢复配置，但之后需要重新登录。"
+  },
+  "opt_cfg_export_password_ph": {
+    "message": "加密密码（至少 12 个字符）"
+  },
+  "opt_cfg_export_confirm_ph": {
+    "message": "再次输入密码"
+  },
+  "opt_cfg_export_password_note": {
+    "message": "没有密码就无法恢复这个文件。请把两者都妥善保管。"
+  },
+  "opt_cfg_export_pw_short": {
+    "message": "请至少输入 $LEN$ 个字符。",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_export_pw_mismatch": {
+    "message": "两次输入的密码不一致。"
+  },
   "opt_cfg_import_desc": {
-    "message": "升级或换浏览器后恢复配置，无需重新设置。导入会替换当前设置。"
+    "message": "升级后恢复你的配置，不必重新设置。会替换当前设置。如果文件已加密，会要求输入密码。"
+  },
+  "opt_cfg_import_pw_label": {
+    "message": "此备份已加密"
+  },
+  "opt_cfg_import_pw_desc": {
+    "message": "输入导出时设置的密码以打开文件。"
+  },
+  "opt_cfg_import_pw_ph": {
+    "message": "备份密码"
+  },
+  "opt_cfg_import_pass_label": {
+    "message": "此备份需要你的加密口令"
+  },
+  "opt_cfg_import_pass_desc": {
+    "message": "该备份启用了端到端加密，但不包含口令。请输入这台设备应使用的口令——没有它无法完成导入（也不能改为明文上传）。"
+  },
+  "opt_cfg_import_pass_ph": {
+    "message": "加密口令"
+  },
+  "opt_cfg_import_need_passphrase": {
+    "message": "请输入口令以继续。"
+  },
+  "opt_cfg_import_pass_short": {
+    "message": "口令至少需要 $LEN$ 个字符。",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_open_btn": {
+    "message": "继续"
+  },
+  "opt_cfg_import_missing": {
+    "message": "该备份不含登录凭据，因此在你登录以下账户前无法开始同步：$ACCOUNTS$。请打开“设置 → 存储”，填写后保存。",
+    "placeholders": {
+      "accounts": {
+        "content": "$1"
+      }
+    }
   },
   "opt_cfg_import_auth": {
     "message": "导入的配置指向 WebDAV 服务器 $HOST$，但 Kesonode 尚未获得访问授权。请立即授权，否则同步会因权限不足而失败（Failed to fetch）。",
@@ -2057,5 +2119,384 @@
   },
   "onb_done_multi_body": {
     "message": "在另一台设备上安装 Kesonode，选择同一个存储，书签、标签页等会自动汇合。"
+  },
+  "popup_receipt_line": {
+    "message": "上次同步：+$ADDED$ / −$REMOVED$",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "popup_receipt_danger": {
+    "message": "上次同步删除了 $REMOVED$ 个书签，已保存还原点。",
+    "placeholders": {
+      "removed": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_receipt_undo": {
+    "message": "撤销"
+  },
+  "popup_receipt_undo_confirm": {
+    "message": "还原？"
+  },
+  "popup_receipt_undone": {
+    "message": "已还原"
+  },
+  "popup_search_placeholder": {
+    "message": "搜索书签、历史记录和阅读列表"
+  },
+  "popup_search_clear": {
+    "message": "清除搜索"
+  },
+  "popup_search_empty": {
+    "message": "没有找到结果。"
+  },
+  "popup_source_bookmark": {
+    "message": "书签"
+  },
+  "popup_source_history": {
+    "message": "历史"
+  },
+  "popup_source_reading": {
+    "message": "阅读"
+  },
+  "popup_reading_head": {
+    "message": "阅读列表"
+  },
+  "popup_reading_save": {
+    "message": "保存标签页"
+  },
+  "popup_reading_saved": {
+    "message": "已保存"
+  },
+  "popup_reading_empty": {
+    "message": "还没有保存任何内容。"
+  },
+  "popup_reading_error": {
+    "message": "无法加载阅读列表：$ERROR$。这不代表列表为空。",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "404 Not Found"
+      }
+    }
+  },
+  "popup_reading_remove": {
+    "message": "从阅读列表移除"
+  },
+  "popup_reading_no_tab": {
+    "message": "当前标签页没有可保存的地址。"
+  },
+  "opt_receipt_section": {
+    "message": "上次同步回执"
+  },
+  "opt_receipt_section_sub": {
+    "message": "上一次完成的同步在本设备上改动了什么。"
+  },
+  "opt_receipt_headline": {
+    "message": "新增 +$ADDED$ · 删除 −$REMOVED$",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_receipt_danger": {
+    "message": "本次同步删除了本设备上很大一部分书签。合并前已保存还原点。"
+  },
+  "opt_receipt_sample": {
+    "message": "部分被删除的内容："
+  },
+  "opt_receipt_moved": {
+    "message": "移动 $COUNT$ 项",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_retitled": {
+    "message": "重命名 $COUNT$ 项",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_uploaded": {
+    "message": "已上传"
+  },
+  "opt_receipt_held": {
+    "message": "已暂缓上传"
+  },
+  "opt_receipt_undo_label": {
+    "message": "撤销本次同步"
+  },
+  "opt_receipt_undo_desc": {
+    "message": "恢复应用这些改动之前保存的书签树。"
+  },
+  "opt_receipt_undo": {
+    "message": "撤销"
+  },
+  "opt_receipt_empty": {
+    "message": "还没有完成的同步。"
+  },
+  "opt_receipt_history": {
+    "message": "更早的同步"
+  },
+  "opt_receipt_show_all": {
+    "message": "显示全部 $COUNT$ 条",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_show_less": {
+    "message": "收起"
+  },
+  "opt_receipt_clear": {
+    "message": "清除回执"
+  },
+  "opt_receipt_clear_confirm": {
+    "message": "确认清除全部回执？"
+  },
+  "opt_receipt_has_snapshot": {
+    "message": "已保存还原点"
+  },
+  "opt_conflict_types_section": {
+    "message": "按数据类型设置"
+  },
+  "opt_conflict_types_section_sub": {
+    "message": "除非某种类型需要单独处理，否则保持“跟随上方设置”。"
+  },
+  "opt_conflict_type_desc": {
+    "message": "此类型的冲突处理方式"
+  },
+  "opt_conflict_type_global": {
+    "message": "跟随上方设置"
+  },
+  "opt_cleanup_section": {
+    "message": "书签清理"
+  },
+  "opt_cleanup_section_sub": {
+    "message": "查找重复的网址，也可以检查已无法访问的链接。"
+  },
+  "opt_cleanup_scan_label": {
+    "message": "扫描书签"
+  },
+  "opt_cleanup_scan_desc": {
+    "message": "重复项来自本浏览器的书签树。在你勾选并确认之前，不会删除任何内容。"
+  },
+  "opt_cleanup_dead_label": {
+    "message": "在线检查链接"
+  },
+  "opt_cleanup_dead_desc": {
+    "message": "会为每个书签主机发起一次网络请求，每次最多检查 300 个链接。只有 404/410 才算失效；超时和登录墙会被忽略。默认关闭，因为这会从本设备联系这些网站。"
+  },
+  "opt_cleanup_dead_cap": {
+    "message": "本次检查了 $PROBED$ 个链接，其余留到下次。",
+    "placeholders": {
+      "probed": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_scan": {
+    "message": "扫描"
+  },
+  "opt_cleanup_summary": {
+    "message": "已扫描 $SCANNED$ 项 · $GROUPS$ 组重复 · $DEAD$ 个失效链接",
+    "placeholders": {
+      "scanned": {
+        "content": "$1"
+      },
+      "groups": {
+        "content": "$2"
+      },
+      "dead": {
+        "content": "$3"
+      }
+    }
+  },
+  "opt_cleanup_select_all": {
+    "message": "全选"
+  },
+  "opt_cleanup_selected_one": {
+    "message": "已选 $COUNT$ 项",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_selected_other": {
+    "message": "已选 $COUNT$ 项",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_apply": {
+    "message": "删除所选"
+  },
+  "opt_cleanup_confirm": {
+    "message": "确认删除"
+  },
+  "opt_cleanup_removed_one": {
+    "message": "已删除 $COUNT$ 个书签",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_removed_other": {
+    "message": "已删除 $COUNT$ 个书签",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_none": {
+    "message": "没有发现重复项或失效链接。"
+  },
+  "opt_auto_snapshot_label": {
+    "message": "风险合并前保存还原点"
+  },
+  "opt_auto_snapshot_desc": {
+    "message": "当一次合并会删除本设备很大一部分书签时，先保存还原点，并在活动页提供撤销。"
+  },
+  "opt_order_label": {
+    "message": "书签顺序"
+  },
+  "opt_order_desc": {
+    "message": "对端的位置是否移动你的副本（最新改动优先），或者本浏览器保留自己的顺序。"
+  },
+  "opt_order_lww": {
+    "message": "跟随最新改动"
+  },
+  "opt_order_keep_local": {
+    "message": "保留本浏览器顺序"
+  },
+  "opt_autosave_section": {
+    "message": "会话快照"
+  },
+  "opt_autosave_section_sub": {
+    "message": "在两次同步之间保留在本设备上的标签页，崩溃或关闭窗口后仍能找回。"
+  },
+  "opt_autosave_enable_label": {
+    "message": "保留会话快照"
+  },
+  "opt_autosave_enable_desc": {
+    "message": "在会话同步后保存，且不会从此设备上传。"
+  },
+  "opt_autosave_empty": {
+    "message": "还没有快照。本浏览器会话同步时会生成一个。"
+  },
+  "opt_autosave_unnamed": {
+    "message": "打开的标签页"
+  },
+  "opt_autosave_choose": {
+    "message": "选择标签页"
+  },
+  "opt_autosave_collapse": {
+    "message": "收起标签页"
+  },
+  "opt_autosave_restore_selected": {
+    "message": "打开所选"
+  },
+  "opt_autosave_search": {
+    "message": "按标题或网址搜索快照"
+  },
+  "opt_autosave_search_empty": {
+    "message": "没有匹配该搜索的快照。"
+  },
+  "opt_autosave_opened_one": {
+    "message": "已打开 $COUNT$ 个标签页",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_autosave_opened_other": {
+    "message": "已打开 $COUNT$ 个标签页",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_bm_export_label": {
+    "message": "导出给其他程序的书签"
+  },
+  "opt_bm_export_desc": {
+    "message": "Netscape HTML 可在任何浏览器的书签导入中使用，Raindrop CSV 可导入 Raindrop，只读页面是一个无需安装扩展即可在手机上打开的文件。"
+  },
+  "opt_bm_export_netscape": {
+    "message": "Netscape HTML"
+  },
+  "opt_bm_export_raindrop": {
+    "message": "Raindrop CSV"
+  },
+  "opt_bm_export_view": {
+    "message": "只读页面"
+  },
+  "opt_bm_export_view_upload": {
+    "message": "发布只读页面"
+  },
+  "opt_bm_export_view_upload_confirm": {
+    "message": "发布的页面是书签的纯文本副本，无法加密。仍要发布吗？"
+  },
+  "opt_bm_export_view_remove": {
+    "message": "移除已发布页面"
+  },
+  "opt_bm_export_view_remove_confirm": {
+    "message": "要从存储设备中移除已发布的只读页面吗？你的书签不受影响。"
+  },
+  "opt_export_uploaded": {
+    "message": "已保存并上传"
+  },
+  "opt_export_view_removed": {
+    "message": "已移除发布页面。"
+  },
+  "opt_doctor_section": {
+    "message": "同步诊断"
+  },
+  "opt_doctor_section_sub": {
+    "message": "检查本浏览器的配置，并生成可安全分享的诊断包。"
+  },
+  "opt_doctor_run_label": {
+    "message": "检查本浏览器"
+  },
+  "opt_doctor_run_desc": {
+    "message": "只在本机执行检查，不会离开设备。"
+  },
+  "opt_doctor_run": {
+    "message": "开始检查"
+  },
+  "opt_doctor_copy_desc": {
+    "message": "复制的诊断包包含版本、设置和最后一次错误。口令、令牌、密码和完整存储地址都会被移除。"
+  },
+  "opt_doctor_copy": {
+    "message": "复制诊断信息"
+  },
+  "omnibox_default": {
+    "message": "搜索 Kesonode 书签、历史记录和阅读列表"
+  },
+  "opt_cleanup_host_needed": {
+    "message": "检查死链需要访问书签中网站的权限。重复书签仍已完成扫描。"
   }
 }

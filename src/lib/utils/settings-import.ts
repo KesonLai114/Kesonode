@@ -13,12 +13,23 @@
 
 import { request } from "@/lib/utils/messaging";
 import { t } from "@/lib/utils/i18n";
-import { getSettings } from "@/lib/utils/storage";
+import { browser } from "@/lib/utils/ext";
+import { getSettings, KEYS, SETTINGS_BACKUP_FORMAT } from "@/lib/utils/storage";
 import { hasPermission } from "@/lib/utils/capabilities";
+import type { BackendType } from "@/lib/types";
 
 export type ImportOutcome =
   | { ok: true; hostOrigin: string | null }
   | { ok: false; reason: "cancelled" | "failed"; error?: string };
+
+export interface ImportSettingsOptions {
+  /**
+   * The user's E2EE passphrase, when a redacted backup needs one. It is written as part
+   * of the import: enabling E2EE without a passphrase would publish plaintext while the
+   * other devices write ciphertext.
+   */
+  e2eePassphrase?: string;
+}
 
 const CONFIRM_PREFIX = "IMPORT_SETTINGS_NEEDS_CONFIRM:";
 
@@ -28,6 +39,54 @@ const RISK_MESSAGES: Record<string, string> = {
   "has-credentials": "import_risk_has_credentials",
   "has-gdrive-session": "import_risk_has_gdrive_session",
 };
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** Does this file need its password before anything can be read from it? */
+export function isEncryptedSettingsBackup(doc: unknown): boolean {
+  const record = asRecord(doc);
+  return record?.format === SETTINGS_BACKUP_FORMAT && record.credentials === "encrypted";
+}
+
+/**
+ * Does a redacted backup enable E2EE while this install has no passphrase to run it with?
+ *
+ * Answered before importing so the page can ask for the passphrase in the same panel that
+ * opened the file. Importing without it is refused by the worker (see storage.ts), and
+ * that refusal would otherwise arrive after the user had answered every import question.
+ */
+export async function redactedBackupNeedsPassphrase(doc: unknown): Promise<boolean> {
+  const record = asRecord(doc);
+  if (record?.credentials !== "redacted") return false;
+  const settings = asRecord(asRecord(record.keys)?.settings);
+  if (settings?.encryption_enabled !== true) return false;
+  return !(await getSettings()).encryption_passphrase;
+}
+
+/**
+ * What this configuration still has to be given before sync can work again.
+ *
+ * Only the ACTIVE backend matters: a disabled row with no password is a valid config.
+ * A redacted backup restores servers, folders and schedules but never secrets, so after
+ * one the caller should say which account has to be signed in to instead of starting a
+ * sync that can only fail.
+ */
+export async function missingImportedCredentials(): Promise<BackendType[]> {
+  const settings = await getSettings();
+  const missing: BackendType[] = [];
+  const active = settings.backends.find((b) => b.type === settings.active_backend);
+  if (active?.webdav && !active.webdav.password) missing.push("webdav");
+  if (active?.github && !active.github.token) missing.push("github");
+  if (settings.active_backend === "gdrive") {
+    const stored = await browser.storage.local.get(KEYS.GDRIVE_SESSION);
+    if (!stored[KEYS.GDRIVE_SESSION]) missing.push("gdrive");
+  }
+  return missing;
+}
 
 /**
  * `parsed` is the untrusted JSON the user picked. `ask` is a synchronous confirm dialog
@@ -39,6 +98,7 @@ const RISK_MESSAGES: Record<string, string> = {
 export async function importSettingsBackupFromFile(
   parsed: unknown,
   ask: (message: string) => boolean,
+  options: ImportSettingsOptions = {},
 ): Promise<ImportOutcome> {
   if (!ask(t("import_confirm_overwrite"))) return { ok: false, reason: "cancelled" };
 
@@ -46,7 +106,13 @@ export async function importSettingsBackupFromFile(
   // must not make both installs write the same file and appear as one device.
   const asNewDevice = ask(t("import_confirm_new_device"));
   const send = (confirmImport: boolean) =>
-    request({ type: "IMPORT_SETTINGS", payload: parsed, confirmImport, asNewDevice });
+    request({
+      type: "IMPORT_SETTINGS",
+      payload: parsed,
+      confirmImport,
+      asNewDevice,
+      ...(options.e2eePassphrase !== undefined ? { e2eePassphrase: options.e2eePassphrase } : {}),
+    });
 
   let sent = await send(false);
   if (!sent.ok && sent.error.startsWith(CONFIRM_PREFIX)) {

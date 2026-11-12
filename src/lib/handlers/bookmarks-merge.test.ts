@@ -1756,3 +1756,27 @@ describe("importBookmarks — an Edge profile after the id renumbering (issue #6
     expect(await titlesIn("2")).toEqual([]);
   });
 });
+
+describe("importBookmarks — bookmark_order_mode keep-local", () => {
+  it("keeps this device's placement while adds and deletions still converge", async () => {
+    const wdt = await chrome.bookmarks.create({ parentId: "1", title: "WDT" });
+    await chrome.bookmarks.create({ parentId: wdt.id, title: "X", url: "https://x.com" });
+    await seed("Z", "https://z.com", "1");
+
+    // The peer moved X to the bar root and deleted Z, both newer than anything here.
+    const future = Date.now() + 60_000;
+    const p: BookmarkPayload = {
+      ...payload([link("X", "https://x.com"), link("Y", "https://y.com")], [
+        { url: "https://z.com", deletedAt: future },
+      ]),
+      moves: [{ url: "https://x.com", at: future }],
+    };
+    await importBookmarks(p, "merge", "lww", 100, 0, undefined, "keep-local");
+
+    // The reorder was refused: X is still exactly where the user put it.
+    expect((await chrome.bookmarks.getChildren(wdt.id)).map((c) => c.url)).toEqual(["https://x.com"]);
+    expect((await chrome.bookmarks.getChildren("1")).map((c) => c.url)).not.toContain("https://x.com");
+    // Everything else merged normally: the new bookmark arrived, the deletion stuck.
+    expect(await localUrls()).toEqual(["https://x.com", "https://y.com"]);
+  });
+});

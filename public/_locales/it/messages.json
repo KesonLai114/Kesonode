@@ -295,7 +295,7 @@
     "message": "Usa il tuo indirizzo Fastmail completo come nome utente e una password per l'app con accesso a Files (WebDAV)."
   },
   "extension_name": {
-    "message": "Kesonode | Sync privata di segnalibri e schede v1.5.17"
+    "message": "Kesonode | Sync privata di segnalibri e schede v1.5.18"
   },
   "popup_setup_title": {
     "message": "Completa la configurazione di Kesonode"
@@ -1724,10 +1724,6 @@
   "opt_export": {
     "message": "Esporta"
   },
-  "opt_export_credentials_warning": {
-    "message": "Questo file conterrà le tue credenziali IN CHIARO: la password WebDAV, il token GitHub, il token di aggiornamento Google e la passphrase di cifratura. Chiunque ottenga il file può usarle. Conservalo con cura: non in uno spazio condiviso, non in una chat e non come allegato di una segnalazione.\n\nEsportare comunque?",
-    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
-  },
   "opt_exported": {
     "message": "Esportato"
   },
@@ -1781,14 +1777,80 @@
   "opt_cfg_export_label": {
     "message": "Esporta impostazioni"
   },
-  "opt_cfg_export_desc": {
-    "message": "Salva account dei backend, passphrase di cifratura e ID dispositivo in un file JSON. Il file contiene credenziali in chiaro: conservalo in un luogo privato."
-  },
   "opt_cfg_import_label": {
     "message": "Importa impostazioni"
   },
+  "opt_cfg_export_desc": {
+    "message": "Salva la tua configurazione —provider di archiviazione, cartelle, pianificazione, preferenze e ID dispositivo— come file JSON. Le credenziali di accesso non sono incluse a meno che tu non scelga di includerle; in quel caso il file viene cifrato con una password che imposti tu."
+  },
+  "opt_cfg_export_include_label": {
+    "message": "Includi le credenziali di accesso"
+  },
+  "opt_cfg_export_include_desc": {
+    "message": "Aggiunge la password WebDAV, il token GitHub, la sessione Google Drive e la passphrase E2EE, cifrati con la password qui sotto. Senza di essi il file ripristina le impostazioni ma dovrai accedere di nuovo."
+  },
+  "opt_cfg_export_password_ph": {
+    "message": "Password di cifratura (almeno 12 caratteri)"
+  },
+  "opt_cfg_export_confirm_ph": {
+    "message": "Ripeti la password"
+  },
+  "opt_cfg_export_password_note": {
+    "message": "Non c'è modo di recuperare questo file senza la password. Conserva entrambe in un posto privato."
+  },
+  "opt_cfg_export_pw_short": {
+    "message": "Usa almeno $LEN$ caratteri.",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_export_pw_mismatch": {
+    "message": "Le due password non coincidono."
+  },
   "opt_cfg_import_desc": {
-    "message": "Ripristina la configurazione dopo un aggiornamento senza reimpostare tutto. Sostituisce le impostazioni attuali."
+    "message": "Ripristina la configurazione dopo un aggiornamento invece di riconfigurare tutto. Sostituisce le impostazioni attuali. Se il file è cifrato, ti verrà chiesta la password."
+  },
+  "opt_cfg_import_pw_label": {
+    "message": "Questo backup è cifrato"
+  },
+  "opt_cfg_import_pw_desc": {
+    "message": "Inserisci la password impostata al momento dell'esportazione per aprire il file."
+  },
+  "opt_cfg_import_pw_ph": {
+    "message": "Password del backup"
+  },
+  "opt_cfg_import_pass_label": {
+    "message": "Questo backup richiede la tua passphrase di cifratura"
+  },
+  "opt_cfg_import_pass_desc": {
+    "message": "Il backup attiva la cifratura end-to-end ma non contiene la passphrase. Inserisci quella che deve usare questo dispositivo: senza di essa l'importazione non può essere completata (e il caricamento in chiaro non è un'opzione)."
+  },
+  "opt_cfg_import_pass_ph": {
+    "message": "Passphrase di cifratura"
+  },
+  "opt_cfg_import_need_passphrase": {
+    "message": "Inserisci la passphrase per continuare."
+  },
+  "opt_cfg_import_pass_short": {
+    "message": "La passphrase deve contenere almeno $LEN$ caratteri.",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_open_btn": {
+    "message": "Continua"
+  },
+  "opt_cfg_import_missing": {
+    "message": "Il backup non conteneva credenziali, quindi la sincronizzazione non può iniziare finché non accedi a: $ACCOUNTS$. Apri Impostazioni → Archiviazione, inseriscile e salva.",
+    "placeholders": {
+      "accounts": {
+        "content": "$1"
+      }
+    }
   },
   "opt_feedback_section": {
     "message": "Feedback"
@@ -2057,5 +2119,384 @@
   },
   "onb_done_multi_body": {
     "message": "Installa Kesonode lì e scegli la stessa archiviazione. Segnalibri, schede e il resto si incontreranno."
+  },
+  "popup_receipt_line": {
+    "message": "Ultima sincronizzazione: +$ADDED$ / −$REMOVED$",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "popup_receipt_danger": {
+    "message": "L'ultima sincronizzazione ha rimosso $REMOVED$ segnalibri. È stato salvato un punto di ripristino.",
+    "placeholders": {
+      "removed": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_receipt_undo": {
+    "message": "Annulla"
+  },
+  "popup_receipt_undo_confirm": {
+    "message": "Ripristinare?"
+  },
+  "popup_receipt_undone": {
+    "message": "Ripristinato"
+  },
+  "popup_search_placeholder": {
+    "message": "Cerca segnalibri, cronologia e lista di lettura"
+  },
+  "popup_search_clear": {
+    "message": "Cancella ricerca"
+  },
+  "popup_search_empty": {
+    "message": "Nessun risultato."
+  },
+  "popup_source_bookmark": {
+    "message": "Segnalibro"
+  },
+  "popup_source_history": {
+    "message": "Cronologia"
+  },
+  "popup_source_reading": {
+    "message": "Lettura"
+  },
+  "popup_reading_head": {
+    "message": "Lista di lettura"
+  },
+  "popup_reading_save": {
+    "message": "Salva scheda"
+  },
+  "popup_reading_saved": {
+    "message": "Salvato"
+  },
+  "popup_reading_empty": {
+    "message": "Non hai ancora salvato nulla."
+  },
+  "popup_reading_error": {
+    "message": "Impossibile caricare la lista di lettura: $ERROR$. Non significa che sia vuota.",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "404 Not Found"
+      }
+    }
+  },
+  "popup_reading_remove": {
+    "message": "Rimuovi dalla lista di lettura"
+  },
+  "popup_reading_no_tab": {
+    "message": "Questa scheda non ha un indirizzo da salvare."
+  },
+  "opt_receipt_section": {
+    "message": "Ricevuta dell'ultima sincronizzazione"
+  },
+  "opt_receipt_section_sub": {
+    "message": "Cosa ha cambiato su questo dispositivo l'ultimo ciclo completato."
+  },
+  "opt_receipt_headline": {
+    "message": "+$ADDED$ aggiunti · −$REMOVED$ rimossi",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_receipt_danger": {
+    "message": "Questo ciclo ha rimosso gran parte dei segnalibri di questo dispositivo. Prima dell'unione è stato salvato un punto di ripristino."
+  },
+  "opt_receipt_sample": {
+    "message": "Parte di ciò che è stato rimosso:"
+  },
+  "opt_receipt_moved": {
+    "message": "$COUNT$ spostati",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_retitled": {
+    "message": "$COUNT$ rinominati",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_uploaded": {
+    "message": "pubblicato"
+  },
+  "opt_receipt_held": {
+    "message": "pubblicazione sospesa"
+  },
+  "opt_receipt_undo_label": {
+    "message": "Annulla questa sincronizzazione"
+  },
+  "opt_receipt_undo_desc": {
+    "message": "Ripristina l'albero dei segnalibri salvato subito prima di applicare queste modifiche."
+  },
+  "opt_receipt_undo": {
+    "message": "Annulla"
+  },
+  "opt_receipt_empty": {
+    "message": "Nessuna sincronizzazione completata."
+  },
+  "opt_receipt_history": {
+    "message": "Cicli precedenti"
+  },
+  "opt_receipt_show_all": {
+    "message": "Mostra tutte ($COUNT$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_show_less": {
+    "message": "Mostra meno"
+  },
+  "opt_receipt_clear": {
+    "message": "Cancella ricevute"
+  },
+  "opt_receipt_clear_confirm": {
+    "message": "Cancellare tutte le ricevute?"
+  },
+  "opt_receipt_has_snapshot": {
+    "message": "punto di ripristino salvato"
+  },
+  "opt_conflict_types_section": {
+    "message": "Per tipo di dato"
+  },
+  "opt_conflict_types_section_sub": {
+    "message": "Lascia un tipo su «Segui l'impostazione sopra» a meno che non richieda una risposta propria."
+  },
+  "opt_conflict_type_desc": {
+    "message": "Strategia di conflitto per questo tipo"
+  },
+  "opt_conflict_type_global": {
+    "message": "Segui l'impostazione sopra"
+  },
+  "opt_cleanup_section": {
+    "message": "Pulizia dei segnalibri"
+  },
+  "opt_cleanup_section_sub": {
+    "message": "Trova URL duplicati e, facoltativamente, link che non rispondono più."
+  },
+  "opt_cleanup_scan_label": {
+    "message": "Analizza segnalibri"
+  },
+  "opt_cleanup_scan_desc": {
+    "message": "I duplicati provengono dall'albero di questo browser. Nulla viene rimosso finché non scegli le righe e confermi."
+  },
+  "opt_cleanup_dead_label": {
+    "message": "Controlla i link online"
+  },
+  "opt_cleanup_dead_desc": {
+    "message": "Esegue una richiesta di rete per ogni host salvato, fino a 300 link per esecuzione. Solo 404/410 contano come morti; timeout e muri di login vengono ignorati. È disattivato per impostazione predefinita perché contatta i siti da questo dispositivo."
+  },
+  "opt_cleanup_dead_cap": {
+    "message": "In questa esecuzione sono stati controllati $PROBED$ link; il resto attende la prossima.",
+    "placeholders": {
+      "probed": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_scan": {
+    "message": "Analizza"
+  },
+  "opt_cleanup_summary": {
+    "message": "$SCANNED$ analizzati · $GROUPS$ gruppi duplicati · $DEAD$ link non attivi",
+    "placeholders": {
+      "scanned": {
+        "content": "$1"
+      },
+      "groups": {
+        "content": "$2"
+      },
+      "dead": {
+        "content": "$3"
+      }
+    }
+  },
+  "opt_cleanup_select_all": {
+    "message": "Seleziona tutto"
+  },
+  "opt_cleanup_selected_one": {
+    "message": "$COUNT$ selezionati",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_selected_other": {
+    "message": "$COUNT$ selezionati",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_apply": {
+    "message": "Rimuovi selezionati"
+  },
+  "opt_cleanup_confirm": {
+    "message": "Rimuovili"
+  },
+  "opt_cleanup_removed_one": {
+    "message": "Rimosso $COUNT$ segnalibro",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_removed_other": {
+    "message": "Rimossi $COUNT$ segnalibri",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_none": {
+    "message": "Nessun duplicato o link non attivo trovato."
+  },
+  "opt_auto_snapshot_label": {
+    "message": "Punto di ripristino prima di unioni rischiose"
+  },
+  "opt_auto_snapshot_desc": {
+    "message": "Quando un'unione rimuoverebbe gran parte dei segnalibri di questo dispositivo, viene salvato prima un punto di ripristino, offerto come Annulla in Attività."
+  },
+  "opt_order_label": {
+    "message": "Ordine dei segnalibri"
+  },
+  "opt_order_desc": {
+    "message": "Se la posizione di cartella di un peer sposta la tua copia (vince la modifica più recente) o questo browser mantiene il proprio ordine."
+  },
+  "opt_order_lww": {
+    "message": "Segui la modifica più recente"
+  },
+  "opt_order_keep_local": {
+    "message": "Mantieni l'ordine di questo browser"
+  },
+  "opt_autosave_section": {
+    "message": "Istantanee della sessione"
+  },
+  "opt_autosave_section_sub": {
+    "message": "Schede aperte conservate su questo dispositivo tra una sincronizzazione e l'altra, così un arresto o una finestra chiusa lasciano una via di ritorno."
+  },
+  "opt_autosave_enable_label": {
+    "message": "Conserva istantanee della sessione"
+  },
+  "opt_autosave_enable_desc": {
+    "message": "Salvate dopo una sincronizzazione di sessione e mai caricate da qui."
+  },
+  "opt_autosave_empty": {
+    "message": "Nessuna istantanea. Ne viene creata una quando la sessione di questo browser viene sincronizzata."
+  },
+  "opt_autosave_unnamed": {
+    "message": "Schede aperte"
+  },
+  "opt_autosave_choose": {
+    "message": "Scegli schede"
+  },
+  "opt_autosave_collapse": {
+    "message": "Nascondi schede"
+  },
+  "opt_autosave_restore_selected": {
+    "message": "Apri selezionate"
+  },
+  "opt_autosave_search": {
+    "message": "Cerca istantanee per titolo o URL"
+  },
+  "opt_autosave_search_empty": {
+    "message": "Nessuna istantanea corrisponde alla ricerca."
+  },
+  "opt_autosave_opened_one": {
+    "message": "Aperta $COUNT$ scheda",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_autosave_opened_other": {
+    "message": "Aperte $COUNT$ schede",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_bm_export_label": {
+    "message": "Segnalibri per un altro programma"
+  },
+  "opt_bm_export_desc": {
+    "message": "Netscape HTML si apre nell'importatore di qualsiasi browser, Raindrop CSV si importa in Raindrop e la pagina di sola lettura è un file che un telefono può aprire senza l'estensione."
+  },
+  "opt_bm_export_netscape": {
+    "message": "Netscape HTML"
+  },
+  "opt_bm_export_raindrop": {
+    "message": "Raindrop CSV"
+  },
+  "opt_bm_export_view": {
+    "message": "Pagina di sola lettura"
+  },
+  "opt_bm_export_view_upload": {
+    "message": "Pubblica pagina di sola lettura"
+  },
+  "opt_bm_export_view_upload_confirm": {
+    "message": "La pagina pubblicata è una copia in chiaro dei tuoi segnalibri e non può essere cifrata. Pubblicarla comunque?"
+  },
+  "opt_bm_export_view_remove": {
+    "message": "Rimuovi pagina pubblicata"
+  },
+  "opt_bm_export_view_remove_confirm": {
+    "message": "Rimuovere la pagina di sola lettura pubblicata dal tuo dispositivo di archiviazione? I tuoi segnalibri non saranno toccati."
+  },
+  "opt_export_uploaded": {
+    "message": "Salvato e caricato"
+  },
+  "opt_export_view_removed": {
+    "message": "Pagina pubblicata rimossa."
+  },
+  "opt_doctor_section": {
+    "message": "Diagnostica di sincronizzazione"
+  },
+  "opt_doctor_section_sub": {
+    "message": "Controlla la configurazione di questo browser e crea un pacchetto sicuro da condividere."
+  },
+  "opt_doctor_run_label": {
+    "message": "Controlla questo browser"
+  },
+  "opt_doctor_run_desc": {
+    "message": "Esegue solo controlli locali; nessun dato lascia il dispositivo."
+  },
+  "opt_doctor_run": {
+    "message": "Esegui controlli"
+  },
+  "opt_doctor_copy_desc": {
+    "message": "Il pacchetto copiato contiene versioni, impostazioni e l'ultimo errore. Passphrase, token, password e indirizzi di archiviazione completi vengono rimossi."
+  },
+  "opt_doctor_copy": {
+    "message": "Copia diagnostica"
+  },
+  "omnibox_default": {
+    "message": "Cerca nei segnalibri, nella cronologia e nella lista di lettura di Kesonode"
+  },
+  "opt_cleanup_host_needed": {
+    "message": "Il controllo dei link richiede l'accesso ai siti dei tuoi segnalibri. I duplicati sono stati comunque analizzati."
   }
 }

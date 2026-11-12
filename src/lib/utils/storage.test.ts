@@ -10,6 +10,8 @@ import {
   getSettings, saveSettings, DEFAULT_SETTINGS, ensureActiveBackendConfig,
   setRemoteSession, setRemoteExtensions, getRemoteSessions, getState, setState,
   getLastUploadChecksum, setLastUploadChecksum, clearUploadChecksum,
+  getSyncReports, getAutosavedSessions,
+  getDangerSnapshotName, getDangerSnapshotTaken, setDangerSnapshotName, setDangerSnapshotTaken,
 } from "@/lib/utils/storage";
 import { browser } from "@/lib/utils/ext";
 import type { RemoteSessionEntry, RemoteExtensionEntry, SyncExtension, SyncSettings } from "@/lib/types";
@@ -612,5 +614,60 @@ describe("clearUploadChecksum: one data type at a time", () => {
   it("is a no-op when nothing was recorded", async () => {
     await clearUploadChecksum("bookmarks");
     expect(await getLastUploadChecksum("bookmarks")).toBeNull();
+  });
+});
+
+describe("reading stored receipts and autosaves", () => {
+  it("skips a malformed receipt instead of taking the whole Activity list down", async () => {
+    const good = {
+      at: "2026-01-01T00:00:00.000Z",
+      duration_ms: 1,
+      types: [],
+      added: 0,
+      removed: 0,
+      total_before: 0,
+      total_after: 0,
+      dangerous: false,
+    };
+    await browser.storage.local.set({
+      [KEYS.SYNC_REPORTS]: [good, null, "nope", { at: 5, types: [] }, { at: "x" }],
+    });
+
+    expect(await getSyncReports()).toEqual([good]);
+  });
+
+  it("returns an empty list when the stored value is not an array", async () => {
+    await browser.storage.local.set({ [KEYS.SYNC_REPORTS]: { at: "x" } });
+    expect(await getSyncReports()).toEqual([]);
+  });
+
+  it("skips a malformed autosaved session", async () => {
+    const good = { id: "1", saved_at: "2026-01-01T00:00:00.000Z", signature: "1-abc", tabs: [] };
+    await browser.storage.local.set({
+      [KEYS.SESSION_AUTOSAVE]: [good, { id: 1 }, { id: "2", saved_at: "x" }],
+    });
+
+    expect(await getAutosavedSessions()).toEqual([good]);
+  });
+});
+
+describe("danger-merge episode latch", () => {
+  it("keeps the episode's snapshot name so a later cycle can re-attach it", async () => {
+    expect(await getDangerSnapshotTaken()).toBe(false);
+    expect(await getDangerSnapshotName()).toBeNull();
+
+    await setDangerSnapshotName("konode_snap_bookmarks_1");
+    expect(await getDangerSnapshotTaken()).toBe(true);
+    expect(await getDangerSnapshotName()).toBe("konode_snap_bookmarks_1");
+
+    await setDangerSnapshotTaken(false);
+    expect(await getDangerSnapshotTaken()).toBe(false);
+    expect(await getDangerSnapshotName()).toBeNull();
+  });
+
+  it("treats a bare true left by an older build as an open episode with no recoverable name", async () => {
+    await browser.storage.local.set({ [KEYS.DANGER_SNAPSHOT]: true });
+    expect(await getDangerSnapshotTaken()).toBe(true);
+    expect(await getDangerSnapshotName()).toBeNull();
   });
 });

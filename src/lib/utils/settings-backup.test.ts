@@ -5,7 +5,11 @@ import {
   DEFAULT_SETTINGS,
   saveSettings,
   exportSettingsBackup,
+  encryptSettingsBackup,
+  openSettingsBackup,
   importSettingsBackup,
+  importSettingsRisks,
+  getSettings,
   SETTINGS_BACKUP_FORMAT,
   SETTINGS_BACKUP_VERSION,
   SUPPORTED_BACKUP_VERSIONS,
@@ -16,6 +20,7 @@ import {
   detectDeviceOs,
 } from "@/lib/utils/storage";
 import { withChecksum } from "@/lib/utils/checksum";
+import type { SettingsBackup } from "@/lib/types";
 
 /**
  * A new unpacked folder means a new extension ID in Chromium, which means an empty
@@ -53,27 +58,64 @@ async function seedOldInstall(): Promise<void> {
   });
 }
 
+function keysOf(backup: SettingsBackup): NonNullable<SettingsBackup["keys"]> {
+  if (!backup.keys) throw new Error("test expected a backup with contents");
+  return backup.keys;
+}
+
 describe("settings backup", () => {
-  it("exports configuration and credentials, but no per-install working state", async () => {
+  it("exports the configuration WITHOUT credentials by default", async () => {
     await seedOldInstall();
     const backup = await exportSettingsBackup("1.5.2");
+    const keys = keysOf(backup);
 
     expect(backup.format).toBe("kesonode-settings");
-    expect(backup.version).toBe(1);
+    expect(backup.version).toBe(SETTINGS_BACKUP_VERSION);
+    expect(backup.credentials).toBe("redacted");
     expect(backup.extensionVersion).toBe("1.5.2");
-    expect(backup.keys.settings.device_id).toBe("device-from-old-id");
-    expect(backup.keys.settings.encryption_passphrase).toBe("correct horse battery staple");
-    expect(backup.keys.gdriveSession).toMatchObject({ refresh_token: "refresh" });
-    expect(backup.keys.gdriveFolder).toMatchObject({ id: "folder-1" });
-    expect(Object.keys(backup.keys).sort()).toEqual(
+    expect(keys.settings.device_id).toBe("device-from-old-id");
+    // Nothing that authenticates is in the file. A WebDAV password stays an empty
+    // string (the backend record has to remain valid); an import treats both an absent
+    // passphrase and an empty password as "keep what this install holds".
+    expect(keys.settings.encryption_passphrase).toBeUndefined();
+    expect(keys.settings.backends[0].webdav?.password).toBe("");
+    expect(keys.gdriveSession).toBeUndefined();
+    expect(keys.gdriveFolder).toBeUndefined();
+    expect(JSON.stringify(backup)).not.toContain("secret");
+    expect(JSON.stringify(backup)).not.toContain("correct horse");
+    expect(JSON.stringify(backup)).not.toContain("refresh");
+  });
+
+  it("includes credentials only when asked", async () => {
+    await seedOldInstall();
+    const backup = await exportSettingsBackup("1.5.2", { includeCredentials: true });
+    const keys = keysOf(backup);
+
+    expect(backup.credentials).toBe("included");
+    expect(keys.settings.device_id).toBe("device-from-old-id");
+    expect(keys.settings.encryption_passphrase).toBe("correct horse battery staple");
+    expect(keys.settings.backends[0].webdav?.password).toBe("secret");
+    expect(keys.gdriveSession).toMatchObject({ refresh_token: "refresh" });
+    expect(keys.gdriveFolder).toMatchObject({ id: "folder-1" });
+    expect(Object.keys(keys).sort()).toEqual(
       ["gdriveFolder", "gdriveSession", "settings"]
     );
   });
 
-  it("restores a fresh install without losing the device ID or making the wizard reopen", async () => {
+  it("does not describe a redacted file as carrying plaintext credentials", async () => {
+    await seedOldInstall();
+    const redacted = await exportSettingsBackup("1.5.2");
+    const risks = importSettingsRisks(await getSettings(), redacted);
+    expect(risks).not.toContain("has-credentials");
+    expect(risks).not.toContain("has-gdrive-session");
+  });
+
+  it("restores a fresh install from a credentials-bearing backup", async () => {
     await seedOldInstall();
     // A real upgrade round-trips through a file on disk, not a live object.
-    const file = JSON.parse(JSON.stringify(await exportSettingsBackup("1.5.2")));
+    const file = JSON.parse(JSON.stringify(
+      await exportSettingsBackup("1.5.2", { includeCredentials: true }),
+    ));
     await browser.storage.local.clear();
     // The browser kept syncing under the SAME identity after the export was written.
     await browser.storage.local.set({
@@ -106,9 +148,64 @@ describe("settings backup", () => {
       .toMatchObject({ bookmarks: "a".repeat(64) });
   });
 
-  it("importing onto a DIFFERENT device mints a new identity but keeps every account", async () => {
+  it("keeps this install's matching credentials when a redacted file is re-imported", async () => {
     await seedOldInstall();
     const file = JSON.parse(JSON.stringify(await exportSettingsBackup("1.5.2")));
+
+    // Same machine: the password in storage belongs to the same server and account, so
+    // re-importing one's own safe backup must not sign this install out.
+    const restored = await importSettingsBackup(file);
+
+    expect(restored.backends[0].webdav?.password).toBe("secret");
+    expect(restored.encryption_enabled).toBe(true);
+    expect(restored.encryption_passphrase).toBe("correct horse battery staple");
+    // The file carried no session, but it also cannot say "sign out": a redacted import
+    // leaves the existing one alone.
+    const session = (await browser.storage.local.get(KEYS.GDRIVE_SESSION))[KEYS.GDRIVE_SESSION];
+    expect(session.refresh_token).toBe("refresh");
+  });
+
+  it("does not keep a password for a different server or account", async () => {
+    await seedOldInstall();
+    const file = JSON.parse(JSON.stringify(await exportSettingsBackup("1.5.2")));
+    const keys = keysOf(file as SettingsBackup);
+    keys.settings.backends[0].webdav!.url = "https://other.example";
+    keys.settings.backends[0].webdav!.username = "someone-else";
+    (file as { checksum?: string }).checksum = undefined;
+
+    const restored = await importSettingsBackup(
+      await withChecksum(file as unknown as Record<string, unknown>),
+    );
+
+    expect(restored.backends[0].webdav?.password).toBe("");
+  });
+
+  it("refuses a redacted backup that enables E2EE unless the passphrase is supplied", async () => {
+    await seedOldInstall();
+    const file = JSON.parse(JSON.stringify(await exportSettingsBackup("1.5.2")));
+    await browser.storage.local.clear();
+
+    await expect(importSettingsBackup(file)).rejects.toThrow(/does not include the passphrase/);
+    // The refusal happens before saveSettings: this install may have minted an identity
+    // on read, but it holds neither the passphrase nor a backend from the refused file.
+    const stored = (await browser.storage.local.get(KEYS.SETTINGS))[KEYS.SETTINGS] as
+      | { encryption_passphrase?: string; backends?: unknown[] }
+      | undefined;
+    expect(stored?.encryption_passphrase).toBeUndefined();
+    expect(stored?.backends).toBeUndefined();
+
+    const restored = await importSettingsBackup(file, {
+      e2eePassphrase: "correct horse battery staple",
+    });
+    expect(restored.encryption_enabled).toBe(true);
+    expect(restored.encryption_passphrase).toBe("correct horse battery staple");
+  });
+
+  it("importing onto a DIFFERENT device mints a new identity but keeps every account", async () => {
+    await seedOldInstall();
+    const file = JSON.parse(JSON.stringify(
+      await exportSettingsBackup("1.5.2", { includeCredentials: true }),
+    ));
     await browser.storage.local.clear();
     // This browser had already synced under its own earlier identity before the import.
     await browser.storage.local.set({
@@ -146,7 +243,7 @@ describe("settings backup", () => {
     await expect(importSettingsBackup(null)).rejects.toThrow();
     await expect(importSettingsBackup({ version: "1.0", data: {} })).rejects.toThrow();
     await expect(importSettingsBackup({
-      format: "kesonode-settings", version: 2,
+      format: "kesonode-settings", version: 99,
       keys: { settings: { device_id: "x" } },
     })).rejects.toThrow();
     await expect(importSettingsBackup({
@@ -159,9 +256,9 @@ describe("settings backup", () => {
 
   it("drops unknown fields and repairs a broken array rather than trusting the file", async () => {
     await seedOldInstall();
-    const backup = await exportSettingsBackup("1.5.2");
-    (backup.keys.settings as unknown as Record<string, unknown>).injected = "not a setting";
-    (backup.keys.settings as unknown as Record<string, unknown>).enabled_types = "not-an-array";
+    const backup = await exportSettingsBackup("1.5.2", { includeCredentials: true });
+    (backup.keys!.settings as unknown as Record<string, unknown>).injected = "not a setting";
+    (backup.keys!.settings as unknown as Record<string, unknown>).enabled_types = "not-an-array";
 
     // A checksum has no secret, so it can be recomputed after an edit. Re-sign this
     // hand-edited file to exercise the whitelist/validator path; real damage (without
@@ -194,6 +291,70 @@ describe("settings backup", () => {
     await browser.storage.local.set({ [KEYS.GDRIVE_SESSION]: { refresh_token: "stale" } });
     await importSettingsBackup(legacy);
     expect((await browser.storage.local.get(KEYS.GDRIVE_SESSION))[KEYS.GDRIVE_SESSION]).toBeUndefined();
+  });
+});
+
+describe("encrypted settings backup", () => {
+  it("seals every identifier, token and passphrase inside the ciphertext", async () => {
+    await seedOldInstall();
+    const plain = await exportSettingsBackup("1.5.2", { includeCredentials: true });
+    const sealed = await encryptSettingsBackup(plain, "a long export password");
+
+    expect(sealed.credentials).toBe("encrypted");
+    expect(sealed.version).toBe(SETTINGS_BACKUP_VERSION);
+    expect(typeof sealed.ciphertext).toBe("string");
+    expect(sealed.keys).toBeUndefined();
+    const json = JSON.stringify(sealed);
+    // The envelope says what the file IS, never what it holds: a server address or an
+    // account name is as identifying as the password next to it.
+    expect(json).not.toContain("dav.example");
+    expect(json).not.toContain("me@example.com");
+    expect(json).not.toContain("secret");
+    expect(json).not.toContain("correct horse");
+  });
+
+  it("opens with the right password and restores everything", async () => {
+    await seedOldInstall();
+    const sealed = await encryptSettingsBackup(
+      await exportSettingsBackup("1.5.2", { includeCredentials: true }),
+      "a long export password",
+    );
+    const file = JSON.parse(JSON.stringify(sealed));
+    await browser.storage.local.clear();
+
+    // The worker refuses the sealed form: only the page (which shows the risks from the
+    // decrypted contents) is allowed to open it first.
+    await expect(importSettingsBackup(file)).rejects.toThrow(/encrypted/);
+
+    const opened = await openSettingsBackup(file, "a long export password");
+    expect(opened.credentials).toBe("included");
+    const restored = await importSettingsBackup(opened);
+    expect(restored.device_id).toBe("device-from-old-id");
+    expect(restored.backends[0].webdav?.password).toBe("secret");
+    expect(restored.encryption_passphrase).toBe("correct horse battery staple");
+    const session = (await browser.storage.local.get(KEYS.GDRIVE_SESSION))[KEYS.GDRIVE_SESSION];
+    expect(session.refresh_token).toBe("refresh");
+  });
+
+  it("refuses the wrong password", async () => {
+    await seedOldInstall();
+    const sealed = await encryptSettingsBackup(
+      await exportSettingsBackup("1.5.2", { includeCredentials: true }),
+      "a long export password",
+    );
+
+    await expect(openSettingsBackup(sealed, "the wrong password"))
+      .rejects.toThrow(/did not open the backup/);
+  });
+
+  it("detects damage before asking for a password", async () => {
+    await seedOldInstall();
+    const sealed = await encryptSettingsBackup(
+      await exportSettingsBackup("1.5.2", { includeCredentials: true }),
+      "a long export password",
+    );
+    (sealed as unknown as Record<string, unknown>).ciphertext = "AAAA";
+    await expect(openSettingsBackup(sealed, "a long export password")).rejects.toThrow(/checksum/i);
   });
 });
 
@@ -270,16 +431,20 @@ describe("settings backup compatibility matrix", () => {
 
   it("keeps the envelope and the portable field set stable", async () => {
     await seedOldInstall();
-    const backup = await exportSettingsBackup("1.5.2");
-    expect(Object.keys(backup).sort()).toEqual(
-      ["checksum", "exportedAt", "extensionVersion", "format", "keys", "version"]
+    const redacted = await exportSettingsBackup("1.5.2");
+    expect(Object.keys(redacted).sort()).toEqual(
+      ["checksum", "credentials", "exportedAt", "extensionVersion", "format", "keys", "version"]
     );
-    expect(backup.format).toBe(SETTINGS_BACKUP_FORMAT);
-    expect(backup.version).toBe(SETTINGS_BACKUP_VERSION);
-    expect(Object.keys(backup.keys).sort()).toEqual(
+    expect(redacted.format).toBe(SETTINGS_BACKUP_FORMAT);
+    expect(redacted.version).toBe(SETTINGS_BACKUP_VERSION);
+    // The safe form carries the settings and nothing else.
+    expect(Object.keys(keysOf(redacted))).toEqual(["settings"]);
+
+    const included = await exportSettingsBackup("1.5.2", { includeCredentials: true });
+    expect(Object.keys(keysOf(included)).sort()).toEqual(
       ["gdriveFolder", "gdriveSession", "settings"]
     );
-    const exported = Object.keys(backup.keys.settings as unknown as Record<string, unknown>);
+    const exported = Object.keys(keysOf(included).settings as unknown as Record<string, unknown>);
     expect(exported.every((k) => (BACKUP_SETTINGS_FIELDS as string[]).includes(k))).toBe(true);
     for (const key of Object.keys(DEFAULT_SETTINGS)) expect(exported).toContain(key);
   });
@@ -341,6 +506,14 @@ describe("settings backup compatibility matrix", () => {
     expect(result.marker).toBe("original");
   });
 
+  it("reads a v1 file as carrying credentials, so the plaintext warning still applies", () => {
+    // The migration is what keeps the historical file meaningful: a v1 file holds its
+    // secrets, so an import still asks before taking someone else's credentials.
+    const migrated = BACKUP_MIGRATIONS[1]({ version: 1 });
+    expect(migrated.version).toBe(2);
+    expect(migrated.credentials).toBe("included");
+  });
+
   it("refuses to guess when a migration link is missing", () => {
     expect(() => migrateBackupDocument({ version: 1 }, 1, 2, {})).toThrow(/migration/i);
   });
@@ -356,7 +529,7 @@ describe("settings backup compatibility matrix", () => {
 
   it("exports a SHA-256 checksum that survives re-serialisation", async () => {
     await seedOldInstall();
-    const backup = await exportSettingsBackup("1.5.2");
+    const backup = await exportSettingsBackup("1.5.2", { includeCredentials: true });
     expect(backup.checksum).toMatch(/^[0-9a-f]{64}$/);
     // A real file round-trips through disk, and a hand-edited one may reorder keys.
     const reordered: Record<string, unknown> = {};
@@ -368,9 +541,9 @@ describe("settings backup compatibility matrix", () => {
 
   it("refuses a file damaged after its checksum was written, and writes nothing", async () => {
     await seedOldInstall();
-    const backup = await exportSettingsBackup("1.5.2");
+    const backup = await exportSettingsBackup("1.5.2", { includeCredentials: true });
     await browser.storage.local.clear();
-    (backup.keys.settings as unknown as Record<string, unknown>).device_label = "tampered";
+    (backup.keys!.settings as unknown as Record<string, unknown>).device_label = "tampered";
     await expect(importSettingsBackup(backup)).rejects.toThrow(/checksum/i);
     expect((await browser.storage.local.get(KEYS.SETTINGS))[KEYS.SETTINGS]).toBeUndefined();
   });

@@ -22,7 +22,7 @@
     "message": "ru"
   },
   "extension_name": {
-    "message": "Kesonode | Синхронизация закладок и вкладок v1.5.17"
+    "message": "Kesonode | Синхронизация закладок и вкладок v1.5.18"
   },
   "extension_description": {
     "message": "Приватная синхронизация браузера с вашим собственным хранилищем: Google Drive, WebDAV, GitHub."
@@ -1724,10 +1724,6 @@
   "opt_export": {
     "message": "Экспортировать"
   },
-  "opt_export_credentials_warning": {
-    "message": "В этом файле будут ваши учётные данные в ОТКРЫТОМ ВИДЕ: пароль WebDAV, токен GitHub, refresh-токен Google и парольная фраза шифрования. Любой, кто получит файл, сможет ими воспользоваться. Храните его как пароль: не в общем облаке, не в переписке и не вложением к сообщению об ошибке.\n\nВсё равно экспортировать?",
-    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
-  },
   "opt_exported": {
     "message": "Экспортировано"
   },
@@ -1781,14 +1777,80 @@
   "opt_cfg_export_label": {
     "message": "Экспорт настроек"
   },
-  "opt_cfg_export_desc": {
-    "message": "Сохраняет учётные данные хранилищ, пароль шифрования и ID устройства в JSON-файл. Файл содержит учётные данные в открытом виде — храните его в надёжном месте."
-  },
   "opt_cfg_import_label": {
     "message": "Импорт настроек"
   },
+  "opt_cfg_export_desc": {
+    "message": "Сохраните конфигурацию — хранилища, папки, расписание, настройки и идентификатор устройства — в файл JSON. Учётные данные не включаются, если вы не выбрали это; в таком случае файл шифруется заданным вами паролем."
+  },
+  "opt_cfg_export_include_label": {
+    "message": "Включить учётные данные"
+  },
+  "opt_cfg_export_include_desc": {
+    "message": "Добавляет пароль WebDAV, токен GitHub, сеанс Google Drive и парольную фразу E2EE, зашифрованные паролем ниже. Без них файл восстановит настройки, но затем потребуется войти заново."
+  },
+  "opt_cfg_export_password_ph": {
+    "message": "Пароль шифрования (не менее 12 символов)"
+  },
+  "opt_cfg_export_confirm_ph": {
+    "message": "Повторите пароль"
+  },
+  "opt_cfg_export_password_note": {
+    "message": "Без пароля восстановить этот файл невозможно. Храните и файл, и пароль в надёжном месте."
+  },
+  "opt_cfg_export_pw_short": {
+    "message": "Используйте не менее $LEN$ символов.",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_export_pw_mismatch": {
+    "message": "Пароли не совпадают."
+  },
   "opt_cfg_import_desc": {
-    "message": "Восстанавливает конфигурацию после обновления без повторной настройки. Заменяет текущие настройки."
+    "message": "Восстановите конфигурацию после обновления, чтобы не настраивать всё заново. Заменяет текущие настройки. Если файл зашифрован, потребуется его пароль."
+  },
+  "opt_cfg_import_pw_label": {
+    "message": "Эта резервная копия зашифрована"
+  },
+  "opt_cfg_import_pw_desc": {
+    "message": "Введите пароль, заданный при экспорте, чтобы открыть файл."
+  },
+  "opt_cfg_import_pw_ph": {
+    "message": "Пароль резервной копии"
+  },
+  "opt_cfg_import_pass_label": {
+    "message": "Для этой резервной копии нужна ваша парольная фраза шифрования"
+  },
+  "opt_cfg_import_pass_desc": {
+    "message": "Копия включает сквозное шифрование, но не содержит парольную фразу. Введите ту, которую должно использовать это устройство — без неё импорт невозможен (а загрузка открытым текстом недопустима)."
+  },
+  "opt_cfg_import_pass_ph": {
+    "message": "Парольная фраза шифрования"
+  },
+  "opt_cfg_import_need_passphrase": {
+    "message": "Введите парольную фразу, чтобы продолжить."
+  },
+  "opt_cfg_import_pass_short": {
+    "message": "Парольная фраза должна содержать не менее $LEN$ символов.",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_open_btn": {
+    "message": "Продолжить"
+  },
+  "opt_cfg_import_missing": {
+    "message": "В копии не было учётных данных, поэтому синхронизация не начнётся, пока вы не войдёте в: $ACCOUNTS$. Откройте «Настройки → Хранилище», введите их и сохраните.",
+    "placeholders": {
+      "accounts": {
+        "content": "$1"
+      }
+    }
   },
   "opt_feedback_section": {
     "message": "Обратная связь"
@@ -2057,5 +2119,384 @@
   },
   "onb_done_multi_body": {
     "message": "Установите Kesonode там и выберите то же хранилище. Закладки, вкладки и остальное встретятся."
+  },
+  "popup_receipt_line": {
+    "message": "Последняя синхронизация: +$ADDED$ / −$REMOVED$",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "popup_receipt_danger": {
+    "message": "Последняя синхронизация удалила $REMOVED$ закладок. Точка восстановления сохранена.",
+    "placeholders": {
+      "removed": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_receipt_undo": {
+    "message": "Отменить"
+  },
+  "popup_receipt_undo_confirm": {
+    "message": "Восстановить?"
+  },
+  "popup_receipt_undone": {
+    "message": "Восстановлено"
+  },
+  "popup_search_placeholder": {
+    "message": "Поиск по закладкам, истории и списку чтения"
+  },
+  "popup_search_clear": {
+    "message": "Очистить поиск"
+  },
+  "popup_search_empty": {
+    "message": "Ничего не найдено."
+  },
+  "popup_source_bookmark": {
+    "message": "Закладка"
+  },
+  "popup_source_history": {
+    "message": "История"
+  },
+  "popup_source_reading": {
+    "message": "Чтение"
+  },
+  "popup_reading_head": {
+    "message": "Список чтения"
+  },
+  "popup_reading_save": {
+    "message": "Сохранить вкладку"
+  },
+  "popup_reading_saved": {
+    "message": "Сохранено"
+  },
+  "popup_reading_empty": {
+    "message": "Пока ничего не сохранено."
+  },
+  "popup_reading_error": {
+    "message": "Не удалось загрузить список чтения: $ERROR$. Это не значит, что он пуст.",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "404 Not Found"
+      }
+    }
+  },
+  "popup_reading_remove": {
+    "message": "Удалить из списка чтения"
+  },
+  "popup_reading_no_tab": {
+    "message": "У этой вкладки нет адреса для сохранения."
+  },
+  "opt_receipt_section": {
+    "message": "Отчёт о последней синхронизации"
+  },
+  "opt_receipt_section_sub": {
+    "message": "Что изменил на этом устройстве последний завершённый цикл."
+  },
+  "opt_receipt_headline": {
+    "message": "+$ADDED$ добавлено · −$REMOVED$ удалено",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_receipt_danger": {
+    "message": "Этот цикл удалил большую часть закладок на этом устройстве. Перед объединением сохранена точка восстановления."
+  },
+  "opt_receipt_sample": {
+    "message": "Часть удалённого:"
+  },
+  "opt_receipt_moved": {
+    "message": "$COUNT$ перемещено",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_retitled": {
+    "message": "$COUNT$ переименовано",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_uploaded": {
+    "message": "опубликовано"
+  },
+  "opt_receipt_held": {
+    "message": "публикация приостановлена"
+  },
+  "opt_receipt_undo_label": {
+    "message": "Отменить эту синхронизацию"
+  },
+  "opt_receipt_undo_desc": {
+    "message": "Восстановить дерево закладок, сохранённое непосредственно перед применением этих изменений."
+  },
+  "opt_receipt_undo": {
+    "message": "Отменить"
+  },
+  "opt_receipt_empty": {
+    "message": "Завершённых синхронизаций пока нет."
+  },
+  "opt_receipt_history": {
+    "message": "Предыдущие циклы"
+  },
+  "opt_receipt_show_all": {
+    "message": "Показать все ($COUNT$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_show_less": {
+    "message": "Свернуть"
+  },
+  "opt_receipt_clear": {
+    "message": "Очистить отчёты"
+  },
+  "opt_receipt_clear_confirm": {
+    "message": "Очистить все отчёты?"
+  },
+  "opt_receipt_has_snapshot": {
+    "message": "точка восстановления сохранена"
+  },
+  "opt_conflict_types_section": {
+    "message": "По типам данных"
+  },
+  "opt_conflict_types_section_sub": {
+    "message": "Оставьте тип на «Как в настройке выше», если ему не нужен отдельный ответ."
+  },
+  "opt_conflict_type_desc": {
+    "message": "Стратегия конфликтов для этого типа"
+  },
+  "opt_conflict_type_global": {
+    "message": "Как в настройке выше"
+  },
+  "opt_cleanup_section": {
+    "message": "Очистка закладок"
+  },
+  "opt_cleanup_section_sub": {
+    "message": "Поиск повторяющихся URL и, при желании, ссылок, которые больше не отвечают."
+  },
+  "opt_cleanup_scan_label": {
+    "message": "Проверить закладки"
+  },
+  "opt_cleanup_scan_desc": {
+    "message": "Дубликаты берутся из дерева этого браузера. Ничего не удаляется, пока вы не выберете строки и не подтвердите."
+  },
+  "opt_cleanup_dead_label": {
+    "message": "Проверять ссылки в сети"
+  },
+  "opt_cleanup_dead_desc": {
+    "message": "Отправляет сетевой запрос для каждого хоста закладок, до 300 ссылок за запуск. Мёртвыми считаются только 404/410; тайм-ауты и стены входа игнорируются. По умолчанию выключено, так как обращается к сайтам с этого устройства."
+  },
+  "opt_cleanup_dead_cap": {
+    "message": "В этом запуске проверено ссылок: $PROBED$; остальные — в следующий раз.",
+    "placeholders": {
+      "probed": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_scan": {
+    "message": "Проверить"
+  },
+  "opt_cleanup_summary": {
+    "message": "$SCANNED$ проверено · $GROUPS$ групп дубликатов · $DEAD$ мёртвых ссылок",
+    "placeholders": {
+      "scanned": {
+        "content": "$1"
+      },
+      "groups": {
+        "content": "$2"
+      },
+      "dead": {
+        "content": "$3"
+      }
+    }
+  },
+  "opt_cleanup_select_all": {
+    "message": "Выбрать все"
+  },
+  "opt_cleanup_selected_one": {
+    "message": "Выбрано: $COUNT$",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_selected_other": {
+    "message": "Выбрано: $COUNT$",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_apply": {
+    "message": "Удалить выбранное"
+  },
+  "opt_cleanup_confirm": {
+    "message": "Удалить их"
+  },
+  "opt_cleanup_removed_one": {
+    "message": "Удалена $COUNT$ закладка",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_removed_other": {
+    "message": "Удалено $COUNT$ закладок",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_none": {
+    "message": "Дубликатов и мёртвых ссылок не найдено."
+  },
+  "opt_auto_snapshot_label": {
+    "message": "Точка восстановления перед рискованными объединениями"
+  },
+  "opt_auto_snapshot_desc": {
+    "message": "Если объединение удалит большую часть закладок на этом устройстве, сначала сохраняется точка восстановления и предлагается как «Отменить» на вкладке «Активность»."
+  },
+  "opt_order_label": {
+    "message": "Порядок закладок"
+  },
+  "opt_order_desc": {
+    "message": "Перемещает ли позиция папки у другого устройства вашу копию (побеждает последнее изменение) или этот браузер сохраняет свой порядок."
+  },
+  "opt_order_lww": {
+    "message": "Следовать последнему изменению"
+  },
+  "opt_order_keep_local": {
+    "message": "Сохранять порядок этого браузера"
+  },
+  "opt_autosave_section": {
+    "message": "Снимки сеанса"
+  },
+  "opt_autosave_section_sub": {
+    "message": "Открытые вкладки, сохраняемые на этом устройстве между синхронизациями, чтобы сбой или закрытое окно оставляли путь назад."
+  },
+  "opt_autosave_enable_label": {
+    "message": "Хранить снимки сеанса"
+  },
+  "opt_autosave_enable_desc": {
+    "message": "Сохраняются после синхронизации сеанса и никогда не загружаются отсюда."
+  },
+  "opt_autosave_empty": {
+    "message": "Снимков пока нет. Он создаётся при синхронизации сеанса этого браузера."
+  },
+  "opt_autosave_unnamed": {
+    "message": "Открытые вкладки"
+  },
+  "opt_autosave_choose": {
+    "message": "Выбрать вкладки"
+  },
+  "opt_autosave_collapse": {
+    "message": "Скрыть вкладки"
+  },
+  "opt_autosave_restore_selected": {
+    "message": "Открыть выбранные"
+  },
+  "opt_autosave_search": {
+    "message": "Поиск снимков по заголовку или URL"
+  },
+  "opt_autosave_search_empty": {
+    "message": "Ни один снимок не соответствует запросу."
+  },
+  "opt_autosave_opened_one": {
+    "message": "Открыта $COUNT$ вкладка",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_autosave_opened_other": {
+    "message": "Открыто $COUNT$ вкладок",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_bm_export_label": {
+    "message": "Закладки для другой программы"
+  },
+  "opt_bm_export_desc": {
+    "message": "Netscape HTML открывается импортом закладок любого браузера, Raindrop CSV импортируется в Raindrop, а страница только для чтения — один файл, который телефон откроет без расширения."
+  },
+  "opt_bm_export_netscape": {
+    "message": "Netscape HTML"
+  },
+  "opt_bm_export_raindrop": {
+    "message": "Raindrop CSV"
+  },
+  "opt_bm_export_view": {
+    "message": "Страница только для чтения"
+  },
+  "opt_bm_export_view_upload": {
+    "message": "Опубликовать страницу только для чтения"
+  },
+  "opt_bm_export_view_upload_confirm": {
+    "message": "Опубликованная страница — это открытая копия ваших закладок, её нельзя зашифровать. Всё равно опубликовать?"
+  },
+  "opt_bm_export_view_remove": {
+    "message": "Удалить опубликованную страницу"
+  },
+  "opt_bm_export_view_remove_confirm": {
+    "message": "Удалить опубликованную страницу только для чтения из вашего хранилища? Закладки не пострадают."
+  },
+  "opt_export_uploaded": {
+    "message": "Сохранено и загружено"
+  },
+  "opt_export_view_removed": {
+    "message": "Опубликованная страница удалена."
+  },
+  "opt_doctor_section": {
+    "message": "Диагностика синхронизации"
+  },
+  "opt_doctor_section_sub": {
+    "message": "Проверяет настройки этого браузера и формирует пакет, который безопасно передавать."
+  },
+  "opt_doctor_run_label": {
+    "message": "Проверить этот браузер"
+  },
+  "opt_doctor_run_desc": {
+    "message": "Выполняются только локальные проверки; данные не покидают устройство."
+  },
+  "opt_doctor_run": {
+    "message": "Запустить проверки"
+  },
+  "opt_doctor_copy_desc": {
+    "message": "Скопированный пакет содержит версии, настройки и последнюю ошибку. Парольные фразы, токены, пароли и полные адреса хранилища удаляются."
+  },
+  "opt_doctor_copy": {
+    "message": "Копировать диагностику"
+  },
+  "omnibox_default": {
+    "message": "Поиск по закладкам, истории и списку для чтения Kesonode"
+  },
+  "opt_cleanup_host_needed": {
+    "message": "Для проверки ссылок нужен доступ к сайтам из ваших закладок. Дубликаты всё равно проверены."
   }
 }

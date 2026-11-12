@@ -10,6 +10,101 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+## [1.5.18] - 2026-11-12
+
+### Added
+
+- **Search in the popup.** One field searches bookmarks, history and the reading list
+  together and opens the result in a new tab. Everything is scanned from what this
+  browser already holds — no index to build, no index to go stale, nothing uploaded.
+- **A reading list that rides the existing bookmark sync.** Saving the current tab adds
+  it to an ordinary folder called `Kesonode Reading List`, which means it appears in the
+  browser's own bookmark manager, survives restore points and reaches other devices with
+  the next bookmark sync. A new data type would have needed a new file, a new encryption
+  path and a new merge; a folder needs none of that. The name is deliberately not
+  translated, because it is an identity that travels between devices. Saving the tab
+  uses the new `activeTab` permission rather than broad tab access.
+- **A sync receipt, and an Undo that goes with it.** Activity now answers "what did the
+  last sync actually change here" instead of only "success": items added and removed per
+  type, which device published, how many bookmarks moved or were retitled, and a sample
+  of what left. When a merge is about to remove a meaningful share of this browser's
+  bookmarks (at least 5 and at least 10%), a restore point is saved *before* it is
+  applied and **Undo this sync** restores that tree. The last 30 receipts are kept.
+- **Bookmark cleanup.** Settings → Bookmarks finds duplicate URLs (case- and
+  trailing-slash-insensitive) and, behind its own button, dead links. Duplicates are
+  shown with their folders and dates, and nothing is removed until the rows are chosen
+  and confirmed. The link check is opt-in and capped at 300 links per run because it is
+  one network request per host from this device; only 404 and 410 count as dead, so
+  timeouts, login walls and rate limits are left alone. Contacting arbitrary sites is
+  why `http://*/*` was added to the optional host permissions — it is requested when the
+  check is first used, not at install.
+- **Bookmark export in three forms.** Netscape HTML for any browser's bookmark importer,
+  Raindrop CSV for bookmark managers, and a self-contained read-only page that a phone
+  can open without the extension. The page can be published to the configured storage
+  device and removed again; publishing states plainly that this copy is not encrypted,
+  because a page meant to open anywhere cannot be.
+- **Session snapshots, kept locally.** The last 20 sessions this browser saw are kept in
+  a local ring, so a crash, a closed window or an unsynced interval leaves a way back to
+  the tabs. They are taken after a session sync, deduplicated by a signature over the tab
+  URLs, never uploaded, and only shown in Settings.
+- **A sync doctor.** Settings → Advanced runs local checks and copies a diagnostic
+  bundle for a bug report: versions, backend type, held permissions, relevant settings
+  and the last error. Passphrases, tokens, passwords and credentials embedded in storage
+  addresses are removed by construction, so the bundle is safe to paste into an issue.
+- **Per-type conflict strategies.** The global strategy can now be overridden for
+  bookmarks, history, sessions and extensions, so "merge history automatically, ask me
+  about bookmarks" is one setting rather than a compromise.
+- **A bookmark order mode.** With **Keep this browser's order**, a peer's recorded move
+  no longer repositions bookmarks here; additions, deletions and renames still converge.
+  This is for browsers that sort a folder automatically and would otherwise push that
+  order everywhere.
+- **An `kesonode` omnibox keyword.** Type the keyword and a few letters to get the same
+  local search from the address bar. Suggestion text is escaped, since Chrome parses it
+  as a small XML fragment and bookmark titles routinely contain `&` and `<`.
+
+### Changed
+
+- **Exported settings no longer carry credentials unless you ask for them.** The default
+  backup (format v2) restores providers, folders, schedules, preferences and the device
+  ID, but not the WebDAV password, GitHub token, Google Drive session or E2EE passphrase.
+  A restore signs in again, or keeps the credentials this browser already holds for the
+  same server and account.
+- **An opt-in encrypted backup.** Ticking **Include sign-in credentials** adds the
+  secrets and encrypts the whole file with a password you set (AES-256-GCM) before it is
+  written; there is no path that produces a plaintext credentials file. Importing an
+  encrypted backup asks for that password, and a redacted one that enables E2EE asks for
+  the passphrase it deliberately left out. Plaintext v1 files from older versions remain
+  importable and still show the "contains credentials" confirmation. The setup wizard
+  accepts the same file and asks for the missing secret in the same panel.
+- **Conflict buttons say what they do to this browser.** The popup now reads **Keep this
+  device** / **Use the other device** (保留本机 / 采用对方), the card's header action is
+  **View changes**, and each button's tooltip names the device it applies to instead of
+  relying on the heading above it. "Use the other device" still merges its copy into
+  this one; it does not replace this browser's bookmarks.
+- **A warning when the extension's text is out of date.** Replacing the source files
+  without reloading the extension leaves the browser serving the old language catalogue,
+  so new buttons show their raw keys. Settings detects this and shows a banner telling you
+  to reload the extension and refresh the page; the install guide ends with the same step.
+
+### Fixed
+
+- **A configuration import is checked against where it actually points.** The risk
+  confirmation already flagged a different backend type, but a backup of the same type
+  aimed at a different server, repo or folder slipped through unannounced — so restoring
+  it could silently redirect sync. The endpoint is compared now, and a device ID or storage
+  path that could escape its folder is refused rather than written.
+- **The diagnostic bundle redacts the storage username too.** It already stripped
+  passphrases, tokens and passwords and scrubbed credentials out of URLs; the WebDAV
+  account name and email were still copied verbatim. Both are removed now.
+- **Reusing this browser's GitHub token on import requires the same repository.** Keeping
+  the stored token while importing a backup that named a different repo handed the token to
+  a repo it was never meant for; it is kept only when the repo matches.
+- **The generated recovery key is unbiased.** It mapped random bytes onto its alphabet with
+  a remainder, which slightly over-weighted the first characters; rejection sampling now
+  makes every character equally likely.
+- **A failed reading-list load no longer looks like an empty list.** The popup says it
+  couldn't load the list, with the reason, instead of showing nothing.
+
 ## [1.5.17] - 2026-11-12
 
 ### Fixed

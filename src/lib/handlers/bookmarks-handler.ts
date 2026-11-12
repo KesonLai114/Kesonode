@@ -1,7 +1,7 @@
 import type {
   SyncBookmark, Tombstone, MoveRecord, FolderMoveRecord, TitleRecord, FolderRenameRecord,
   FolderDeleteRecord, AppearedRecord, KeptShellRecord, CreatedRecord, BookmarkPayload, ConflictStrategy,
-  BookmarkExclusion, BlockedBookmark,
+  BookmarkExclusion, BlockedBookmark, BookmarkOrderMode,
 } from "@/lib/types";
 import { logger } from "@/lib/utils/logger";
 import {
@@ -1030,7 +1030,10 @@ export async function importBookmarks(
   // the note on `bulkApprovedThisSync` in sync-engine.ts for why that matters.
   approvedFor = 0,
   // Called when the mass-delete guard blocks a peer's deletions (recovery signal).
-  onBulkBlocked?: (info: BulkDeleteBlock) => void
+  onBulkBlocked?: (info: BulkDeleteBlock) => void,
+  // Whether a peer's recorded reorder may move a bookmark here. `keep-local` leaves this
+  // device's ordering alone while deletions, adds and renames still converge.
+  orderMode: BookmarkOrderMode = "lww",
 ): Promise<void> {
   assertDataTypeApi("bookmarks");
   const normalized = normalizePayload(payload);
@@ -1081,7 +1084,7 @@ export async function importBookmarks(
     if (strategy === "replace") {
       await clearAndImport(tree, local?.part.excludedIds);
     } else {
-      await mergeBookmarks(tree, logs, conflictStrategy, deletePercent, approvedFor, onBulkBlocked, local?.part.excludedIds);
+      await mergeBookmarks(tree, logs, conflictStrategy, deletePercent, approvedFor, onBulkBlocked, local?.part.excludedIds, orderMode);
     }
   } finally {
     activeImports--;
@@ -1214,6 +1217,7 @@ async function mergeBookmarks(
   // this is the backstop for the folder lookups below, which match by title alone and must
   // never hand back an excluded folder to write into.
   excluded: Set<string> = new Set(),
+  orderMode: BookmarkOrderMode = "lww",
 ): Promise<void> {
   // All URL identity maps below are keyed by the CANONICAL url (canonicalUrlKey),
   // not the raw string, so a bare-origin bookmark that Chromium/Firefox store with
@@ -1494,6 +1498,9 @@ async function mergeBookmarks(
   };
 
   const shouldMove = (url: string): boolean => {
+    // This device's placement is its own: other signals (deletions, adds, renames) still
+    // merge, but a peer's reorder never reaches this browser.
+    if (orderMode === "keep-local") return false;
     if (strategy === "prefer-local") return false;               // local placement wins
     if (strategy === "prefer-remote") return true;               // peer placement wins
     const key = canonicalUrlKey(url);
@@ -1736,6 +1743,9 @@ async function mergeBookmarks(
   const localFolderMoveAt = toFolderMoveMap(logs.folderMoves.local);
   let folderMoved = 0;
   const applyFolderRepositions = async (): Promise<void> => {
+    // Same contract as shouldMove: with keep-local this browser's folder order is its own,
+    // so a peer's folder reorder must not reach it either.
+    if (orderMode === "keep-local") return;
     for (const rec of logs.folderMoves.remote) {
       const winsLWW = strategy === "prefer-local" ? false
         : strategy === "prefer-remote" ? true

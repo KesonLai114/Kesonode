@@ -22,7 +22,7 @@
     "message": "de"
   },
   "extension_name": {
-    "message": "Kesonode | Privater Lesezeichen- und Tab-Sync v1.5.17"
+    "message": "Kesonode | Privater Lesezeichen- und Tab-Sync v1.5.18"
   },
   "extension_description": {
     "message": "Datenschutzfreundliche Browser-Synchronisierung in deinen eigenen Speicher: Google Drive, WebDAV, GitHub."
@@ -1724,10 +1724,6 @@
   "opt_export": {
     "message": "Exportieren"
   },
-  "opt_export_credentials_warning": {
-    "message": "Diese Datei enthält deine Zugangsdaten im KLARTEXT: das WebDAV-Passwort, das GitHub-Token, das Google-Refresh-Token und die Verschlüsselungs-Passphrase. Wer die Datei hat, kann sie verwenden. Bewahre sie entsprechend auf – nicht in einem geteilten Cloud-Speicher, nicht in einem Chat, nicht als Anhang einer Fehlermeldung.\n\nTrotzdem exportieren?",
-    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
-  },
   "opt_exported": {
     "message": "Exportiert"
   },
@@ -1781,14 +1777,80 @@
   "opt_cfg_export_label": {
     "message": "Einstellungen exportieren"
   },
-  "opt_cfg_export_desc": {
-    "message": "Speichert Backend-Zugangsdaten, Verschlüsselungspassphrase und Geräte-ID als JSON-Datei. Die Datei enthält Zugangsdaten im Klartext — sicher aufbewahren."
-  },
   "opt_cfg_import_label": {
     "message": "Einstellungen importieren"
   },
+  "opt_cfg_export_desc": {
+    "message": "Speichere deine Konfiguration – Speicheranbieter, Ordner, Zeitpläne, Einstellungen und Geräte-ID – als JSON-Datei. Anmeldedaten sind nicht enthalten, es sei denn, du wählst sie aus; dann wird die Datei mit einem von dir festgelegten Passwort verschlüsselt."
+  },
+  "opt_cfg_export_include_label": {
+    "message": "Anmeldedaten einschließen"
+  },
+  "opt_cfg_export_include_desc": {
+    "message": "Fügt WebDAV-Passwort, GitHub-Token, Google-Drive-Sitzung und E2EE-Passphrase hinzu, verschlüsselt mit dem Passwort unten. Ohne sie stellt die Datei deine Einstellungen wieder her, du meldest dich danach aber neu an."
+  },
+  "opt_cfg_export_password_ph": {
+    "message": "Verschlüsselungspasswort (mindestens 12 Zeichen)"
+  },
+  "opt_cfg_export_confirm_ph": {
+    "message": "Passwort wiederholen"
+  },
+  "opt_cfg_export_password_note": {
+    "message": "Ohne das Passwort lässt sich diese Datei nicht wiederherstellen. Bewahre beides sicher auf."
+  },
+  "opt_cfg_export_pw_short": {
+    "message": "Verwende mindestens $LEN$ Zeichen.",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_export_pw_mismatch": {
+    "message": "Die beiden Passwörter stimmen nicht überein."
+  },
   "opt_cfg_import_desc": {
-    "message": "Stellt die Konfiguration nach einem Upgrade wieder her, ohne alles neu einzurichten. Ersetzt die aktuellen Einstellungen."
+    "message": "Stelle deine Konfiguration nach einem Upgrade wieder her, statt alles neu einzurichten. Ersetzt die aktuellen Einstellungen. Ist die Datei verschlüsselt, wirst du nach ihrem Passwort gefragt."
+  },
+  "opt_cfg_import_pw_label": {
+    "message": "Dieses Backup ist verschlüsselt"
+  },
+  "opt_cfg_import_pw_desc": {
+    "message": "Gib das Passwort ein, das du beim Export festgelegt hast, um die Datei zu öffnen."
+  },
+  "opt_cfg_import_pw_ph": {
+    "message": "Backup-Passwort"
+  },
+  "opt_cfg_import_pass_label": {
+    "message": "Dieses Backup benötigt deine Verschlüsselungs-Passphrase"
+  },
+  "opt_cfg_import_pass_desc": {
+    "message": "Das Backup aktiviert Ende-zu-Ende-Verschlüsselung, enthält aber keine Passphrase. Gib die ein, die dieses Gerät verwenden soll – ohne sie kann der Import nicht abgeschlossen werden (und ein Upload im Klartext ist keine Option)."
+  },
+  "opt_cfg_import_pass_ph": {
+    "message": "Verschlüsselungs-Passphrase"
+  },
+  "opt_cfg_import_need_passphrase": {
+    "message": "Gib deine Passphrase ein, um fortzufahren."
+  },
+  "opt_cfg_import_pass_short": {
+    "message": "Die Passphrase muss mindestens $LEN$ Zeichen lang sein.",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_open_btn": {
+    "message": "Weiter"
+  },
+  "opt_cfg_import_missing": {
+    "message": "Das Backup enthielt keine Anmeldedaten, daher kann die Synchronisierung erst starten, wenn du dich bei folgenden Diensten anmeldest: $ACCOUNTS$. Öffne Einstellungen → Speicher, trage sie ein und speichere.",
+    "placeholders": {
+      "accounts": {
+        "content": "$1"
+      }
+    }
   },
   "opt_feedback_section": {
     "message": "Feedback"
@@ -2057,5 +2119,384 @@
   },
   "onb_done_multi_body": {
     "message": "Installiere Kesonode dort und wähle denselben Speicher. Lesezeichen, Tabs und der Rest treffen sich in der Mitte."
+  },
+  "popup_receipt_line": {
+    "message": "Letzte Synchronisierung: +$ADDED$ / −$REMOVED$",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "popup_receipt_danger": {
+    "message": "Die letzte Synchronisierung hat $REMOVED$ Lesezeichen entfernt. Ein Wiederherstellungspunkt wurde gespeichert.",
+    "placeholders": {
+      "removed": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_receipt_undo": {
+    "message": "Rückgängig"
+  },
+  "popup_receipt_undo_confirm": {
+    "message": "Wiederherstellen?"
+  },
+  "popup_receipt_undone": {
+    "message": "Wiederhergestellt"
+  },
+  "popup_search_placeholder": {
+    "message": "Lesezeichen, Verlauf und Leseliste durchsuchen"
+  },
+  "popup_search_clear": {
+    "message": "Suche löschen"
+  },
+  "popup_search_empty": {
+    "message": "Nichts gefunden."
+  },
+  "popup_source_bookmark": {
+    "message": "Lesezeichen"
+  },
+  "popup_source_history": {
+    "message": "Verlauf"
+  },
+  "popup_source_reading": {
+    "message": "Leseliste"
+  },
+  "popup_reading_head": {
+    "message": "Leseliste"
+  },
+  "popup_reading_save": {
+    "message": "Tab speichern"
+  },
+  "popup_reading_saved": {
+    "message": "Gespeichert"
+  },
+  "popup_reading_empty": {
+    "message": "Noch nichts gespeichert."
+  },
+  "popup_reading_error": {
+    "message": "Leseliste konnte nicht geladen werden: $ERROR$. Das bedeutet nicht, dass sie leer ist.",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "404 Not Found"
+      }
+    }
+  },
+  "popup_reading_remove": {
+    "message": "Aus der Leseliste entfernen"
+  },
+  "popup_reading_no_tab": {
+    "message": "Dieser Tab hat keine Adresse zum Speichern."
+  },
+  "opt_receipt_section": {
+    "message": "Beleg der letzten Synchronisierung"
+  },
+  "opt_receipt_section_sub": {
+    "message": "Was der letzte abgeschlossene Durchlauf auf diesem Gerät geändert hat."
+  },
+  "opt_receipt_headline": {
+    "message": "+$ADDED$ hinzugefügt · −$REMOVED$ entfernt",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_receipt_danger": {
+    "message": "Dieser Durchlauf hat einen großen Teil der Lesezeichen dieses Geräts entfernt. Vor dem Zusammenführen wurde ein Wiederherstellungspunkt gespeichert."
+  },
+  "opt_receipt_sample": {
+    "message": "Ein Teil des Entfernten:"
+  },
+  "opt_receipt_moved": {
+    "message": "$COUNT$ verschoben",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_retitled": {
+    "message": "$COUNT$ umbenannt",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_uploaded": {
+    "message": "veröffentlicht"
+  },
+  "opt_receipt_held": {
+    "message": "Veröffentlichung angehalten"
+  },
+  "opt_receipt_undo_label": {
+    "message": "Diese Synchronisierung rückgängig machen"
+  },
+  "opt_receipt_undo_desc": {
+    "message": "Den Lesezeichenbaum wiederherstellen, der kurz vor dem Anwenden dieser Änderungen gespeichert wurde."
+  },
+  "opt_receipt_undo": {
+    "message": "Rückgängig"
+  },
+  "opt_receipt_empty": {
+    "message": "Noch keine abgeschlossene Synchronisierung."
+  },
+  "opt_receipt_history": {
+    "message": "Frühere Durchläufe"
+  },
+  "opt_receipt_show_all": {
+    "message": "Alle $COUNT$ anzeigen",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_show_less": {
+    "message": "Weniger anzeigen"
+  },
+  "opt_receipt_clear": {
+    "message": "Belege löschen"
+  },
+  "opt_receipt_clear_confirm": {
+    "message": "Alle Belege löschen?"
+  },
+  "opt_receipt_has_snapshot": {
+    "message": "Wiederherstellungspunkt gespeichert"
+  },
+  "opt_conflict_types_section": {
+    "message": "Pro Datentyp"
+  },
+  "opt_conflict_types_section_sub": {
+    "message": "Lass einen Typ auf „Der obigen Einstellung folgen“, außer er braucht eine eigene Antwort."
+  },
+  "opt_conflict_type_desc": {
+    "message": "Konfliktstrategie für diesen Typ"
+  },
+  "opt_conflict_type_global": {
+    "message": "Der obigen Einstellung folgen"
+  },
+  "opt_cleanup_section": {
+    "message": "Lesezeichen bereinigen"
+  },
+  "opt_cleanup_section_sub": {
+    "message": "Doppelte URLs finden und optional Links, die nicht mehr antworten."
+  },
+  "opt_cleanup_scan_label": {
+    "message": "Lesezeichen durchsuchen"
+  },
+  "opt_cleanup_scan_desc": {
+    "message": "Duplikate stammen aus dem Baum dieses Browsers. Nichts wird entfernt, bis du die Zeilen wählst und bestätigst."
+  },
+  "opt_cleanup_dead_label": {
+    "message": "Links online prüfen"
+  },
+  "opt_cleanup_dead_desc": {
+    "message": "Sendet eine Netzwerkanfrage pro Lesezeichen-Host, bis zu 300 Links pro Lauf. Nur 404/410 gelten als tot; Zeitüberschreitungen und Anmeldehürden bleiben unberücksichtigt. Standardmäßig aus, weil dabei von diesem Gerät aus Websites kontaktiert werden."
+  },
+  "opt_cleanup_dead_cap": {
+    "message": "In diesem Lauf wurden $PROBED$ Links geprüft; der Rest folgt beim nächsten Lauf.",
+    "placeholders": {
+      "probed": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_scan": {
+    "message": "Durchsuchen"
+  },
+  "opt_cleanup_summary": {
+    "message": "$SCANNED$ geprüft · $GROUPS$ doppelte Gruppen · $DEAD$ tote Links",
+    "placeholders": {
+      "scanned": {
+        "content": "$1"
+      },
+      "groups": {
+        "content": "$2"
+      },
+      "dead": {
+        "content": "$3"
+      }
+    }
+  },
+  "opt_cleanup_select_all": {
+    "message": "Alle auswählen"
+  },
+  "opt_cleanup_selected_one": {
+    "message": "$COUNT$ ausgewählt",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_selected_other": {
+    "message": "$COUNT$ ausgewählt",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_apply": {
+    "message": "Ausgewählte entfernen"
+  },
+  "opt_cleanup_confirm": {
+    "message": "Wirklich entfernen"
+  },
+  "opt_cleanup_removed_one": {
+    "message": "$COUNT$ Lesezeichen entfernt",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_removed_other": {
+    "message": "$COUNT$ Lesezeichen entfernt",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_none": {
+    "message": "Keine Duplikate oder toten Links gefunden."
+  },
+  "opt_auto_snapshot_label": {
+    "message": "Wiederherstellungspunkt vor riskanten Zusammenführungen"
+  },
+  "opt_auto_snapshot_desc": {
+    "message": "Wenn eine Zusammenführung einen großen Teil der Lesezeichen dieses Geräts entfernen würde, wird zuerst ein Wiederherstellungspunkt gespeichert und unter Aktivität als Rückgängig angeboten."
+  },
+  "opt_order_label": {
+    "message": "Lesezeichen-Reihenfolge"
+  },
+  "opt_order_desc": {
+    "message": "Ob die Ordnerposition eines Peers deine Kopie verschiebt (neueste Änderung gewinnt) oder dieser Browser seine eigene Reihenfolge behält."
+  },
+  "opt_order_lww": {
+    "message": "Der neuesten Änderung folgen"
+  },
+  "opt_order_keep_local": {
+    "message": "Reihenfolge dieses Browsers behalten"
+  },
+  "opt_autosave_section": {
+    "message": "Sitzungs-Snapshots"
+  },
+  "opt_autosave_section_sub": {
+    "message": "Offene Tabs, die zwischen Synchronisierungen auf diesem Gerät bleiben, damit ein Absturz oder ein geschlossenes Fenster einen Weg zurück lässt."
+  },
+  "opt_autosave_enable_label": {
+    "message": "Sitzungs-Snapshots behalten"
+  },
+  "opt_autosave_enable_desc": {
+    "message": "Wird nach einer Sitzungssynchronisierung gespeichert und von hier nie hochgeladen."
+  },
+  "opt_autosave_empty": {
+    "message": "Noch keine Snapshots. Einer entsteht, wenn die Sitzung dieses Browsers synchronisiert wird."
+  },
+  "opt_autosave_unnamed": {
+    "message": "Offene Tabs"
+  },
+  "opt_autosave_choose": {
+    "message": "Tabs auswählen"
+  },
+  "opt_autosave_collapse": {
+    "message": "Tabs ausblenden"
+  },
+  "opt_autosave_restore_selected": {
+    "message": "Ausgewählte öffnen"
+  },
+  "opt_autosave_search": {
+    "message": "Snapshots nach Titel oder URL durchsuchen"
+  },
+  "opt_autosave_search_empty": {
+    "message": "Kein Snapshot passt zu dieser Suche."
+  },
+  "opt_autosave_opened_one": {
+    "message": "$COUNT$ Tab geöffnet",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_autosave_opened_other": {
+    "message": "$COUNT$ Tabs geöffnet",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_bm_export_label": {
+    "message": "Lesezeichen für andere Programme"
+  },
+  "opt_bm_export_desc": {
+    "message": "Netscape HTML öffnet jeder Browser-Import, Raindrop CSV lässt sich in Raindrop importieren, und die schreibgeschützte Seite ist eine Datei, die ein Telefon ohne Erweiterung öffnen kann."
+  },
+  "opt_bm_export_netscape": {
+    "message": "Netscape HTML"
+  },
+  "opt_bm_export_raindrop": {
+    "message": "Raindrop CSV"
+  },
+  "opt_bm_export_view": {
+    "message": "Schreibgeschützte Seite"
+  },
+  "opt_bm_export_view_upload": {
+    "message": "Schreibgeschützte Seite veröffentlichen"
+  },
+  "opt_bm_export_view_upload_confirm": {
+    "message": "Die veröffentlichte Seite ist eine Klartextkopie Ihrer Lesezeichen und kann nicht verschlüsselt werden. Trotzdem veröffentlichen?"
+  },
+  "opt_bm_export_view_remove": {
+    "message": "Veröffentlichte Seite entfernen"
+  },
+  "opt_bm_export_view_remove_confirm": {
+    "message": "Die veröffentlichte schreibgeschützte Seite aus Ihrem Speicher entfernen? Ihre Lesezeichen sind nicht betroffen."
+  },
+  "opt_export_uploaded": {
+    "message": "Gespeichert und hochgeladen"
+  },
+  "opt_export_view_removed": {
+    "message": "Veröffentlichte Seite entfernt."
+  },
+  "opt_doctor_section": {
+    "message": "Synchronisierungs-Doktor"
+  },
+  "opt_doctor_section_sub": {
+    "message": "Prüft die Konfiguration dieses Browsers und erzeugt ein Paket, das sicher geteilt werden kann."
+  },
+  "opt_doctor_run_label": {
+    "message": "Diesen Browser prüfen"
+  },
+  "opt_doctor_run_desc": {
+    "message": "Führt nur lokale Prüfungen aus; keine Daten verlassen das Gerät."
+  },
+  "opt_doctor_run": {
+    "message": "Prüfungen starten"
+  },
+  "opt_doctor_copy_desc": {
+    "message": "Das kopierte Paket enthält Versionen, Einstellungen und den letzten Fehler. Passphrasen, Tokens, Passwörter und vollständige Speicheradressen werden entfernt."
+  },
+  "opt_doctor_copy": {
+    "message": "Diagnose kopieren"
+  },
+  "omnibox_default": {
+    "message": "Kesonode-Lesezeichen, Verlauf und Leseliste durchsuchen"
+  },
+  "opt_cleanup_host_needed": {
+    "message": "Die Prüfung toter Links benötigt Zugriff auf die Websites in Ihren Lesezeichen. Duplikate wurden trotzdem geprüft."
   }
 }

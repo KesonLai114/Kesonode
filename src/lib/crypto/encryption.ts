@@ -199,11 +199,22 @@ export function passphraseViolatesPolicy(settings: {
  */
 export function generateRecoveryKey(): string {
   const ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"; // no i / l / o / 0 / 1
-  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  // 256 % 30 = 16, so a plain `% 30` over-weights the first 16 characters. Reject bytes
+  // at or above the largest multiple of 30 below 256 so every character is equally likely.
+  const LIMIT = 256 - (256 % ALPHABET.length);
+  const chars: string[] = [];
+  while (chars.length < 20) {
+    const bytes = crypto.getRandomValues(new Uint8Array(28));
+    for (const b of bytes) {
+      if (b >= LIMIT) continue;
+      chars.push(ALPHABET[b % ALPHABET.length]);
+      if (chars.length === 20) break;
+    }
+  }
   let out = "";
-  for (let i = 0; i < bytes.length; i++) {
-    out += ALPHABET[bytes[i] % ALPHABET.length]; // negligible modulo bias at this entropy
-    if ((i + 1) % 4 === 0 && i < bytes.length - 1) out += "-";
+  for (let i = 0; i < chars.length; i++) {
+    out += chars[i];
+    if ((i + 1) % 4 === 0 && i < chars.length - 1) out += "-";
   }
   return out;
 }

@@ -1,5 +1,5 @@
 import type { SyncSettings, SyncState, DataType, SyncPacket, SyncSession, SyncExtension, ConflictItem, BackendConfig,
-  DeviceInfo, DeviceBrowser, ConflictDiff, ListedFile, BookmarkPayload, FirstSyncChoice, IBackend,
+  DeviceInfo, DeviceBrowser, ConflictDiff, ListedFile, BookmarkPayload, FirstSyncChoice, IBackend, SyncTypeReport,
 } from "@/lib/types";
 import { createBackend } from "@/lib/backends/abstract-backend";
 import { normalizeRepoSlug } from "@/lib/backends/github-backend";
@@ -44,6 +44,10 @@ import {
   setListFailureNoted,
   getGuardSnapshotTaken,
   setGuardSnapshotTaken,
+  getDangerSnapshotTaken,
+  getDangerSnapshotName,
+  setDangerSnapshotName,
+  setDangerSnapshotTaken,
   acquireSyncLock,
   releaseSyncLock,
   syncCooldownRemaining,
@@ -60,8 +64,12 @@ import {
   setFirstSync,
   resetBookmarkMergeState,
   cleanDeviceLabel,
+  appendSyncReport,
+  getAutosavedSessions,
+  setAutosavedSessions,
 } from "@/lib/utils/storage";
 import { logger } from "@/lib/utils/logger";
+import { isSafeContentUrl } from "@/lib/utils/url";
 import { noteCleanSync } from "@/lib/rate-prompt";
 import { PERMISSION_LOST_PREFIX } from "@/lib/constants";
 import { encrypt, decrypt, sha256, verifyPassphrase } from "@/lib/crypto/encryption";
@@ -78,8 +86,16 @@ import {
   readPrefixes,
   setCompatMode,
 } from "@/lib/compat/protocol";
-import { ConflictResolver, notifyConflict, notifyFirstSync, orderPeersByTime } from "./conflict-resolver";
+import { ConflictResolver, notifyConflict, notifyFirstSync, orderPeersByTime, strategyFor } from "./conflict-resolver";
 import { evaluateLocalDrift, GUARD_ABSOLUTE_FLOOR } from "./change-guard";
+import {
+  buildSyncReport,
+  buildTypeReport,
+  isDangerousRemoval,
+  previewBookmarkChanges,
+  type ChangePreview,
+} from "./sync-report";
+import { rememberAutosave } from "@/lib/session-autosave";
 
 // How long the persisted sync lock stays valid before it's treated as stale, so a
 // crashed/suspended sync self-heals. Only governs cross-instance recovery speed:
@@ -150,9 +166,15 @@ export function conflictsThatCanExist(list: ConflictItem[]): ConflictItem[] {
  */
 export function conflictsStillOpen(
   list: ConflictItem[],
-  strategy: SyncSettings["conflict_strategy"]
+  strategy:
+    | SyncSettings["conflict_strategy"]
+    | Pick<SyncSettings, "conflict_strategy" | "conflict_strategies">
 ): ConflictItem[] {
-  return strategy === "manual" ? conflictsThatCanExist(list) : [];
+  const open = conflictsThatCanExist(list);
+  // The global strategy still answers for every type that has no override, which is
+  // every type until the user opens the per-type controls.
+  if (typeof strategy === "string") return strategy === "manual" ? open : [];
+  return open.filter((c) => strategyFor(strategy, c.data_type) === "manual");
 }
 
 /**
@@ -309,6 +331,13 @@ export function statusAfterSync(problems: number, pendingConflicts: number): Syn
 // env3: `device_browser` (#10).
 const PACKET_ENVELOPE = "env3";
 
+/**
+ * The read-only HTML view published next to the device files, so a phone can open the
+ * bookmarks from the same storage without installing anything. Deliberately outside the
+ * `konode_<type>_` namespace: downloadAll must never try to parse it as a peer packet.
+ */
+const VIEW_FILE_NAME = "kesonode_view.html";
+
 export class SyncEngine {
   public isSyncing = false;
   // Asked once per engine: the answer cannot change while the browser runs.
@@ -395,16 +424,25 @@ export class SyncEngine {
    * Losing an approval is recoverable in one click; leaving one armed is not.
    */
   private bulkApprovedThisSync = 0;
+  /**
+   * Whether this cycle saved the pre-apply danger point. The mass-delete guard's own
+   * snapshot can then reuse it instead of writing a second copy of the same tree.
+   */
+  private dangerSnapshotThisSync = false;
   // Canonical URL -> local last-visit time, built at most once per sync and shared by
   // every peer's history import. Null until a history import needs it, so a cycle that
   // syncs no history never pays for it. See `buildLocalHistoryIndex`.
   private historyIndexThisSync: Map<string, number> | null = null;
+  /** Per-type receipts for the cycle in progress; folded into `state.sync_report` at the end. */
+  private typeReportsThisSync: SyncTypeReport[] = [];
+  /** When this cycle started, for the receipt's duration. */
+  private syncStartedAt = 0;
 
   constructor(
     private settings: SyncSettings,
     private onStateChange: (state: SyncState) => void
   ) {
-    this.resolver = new ConflictResolver(settings.conflict_strategy);
+    this.resolver = new ConflictResolver(strategyFor(settings, "bookmarks"));
     // Settings are the source of truth for the namespace this device writes. An old
     // settings blob has no compat_mode, which resolves to "upstream".
     setCompatMode(settings.compat_mode);
@@ -421,7 +459,7 @@ export class SyncEngine {
       this.settings.encryption_passphrase !== settings.encryption_passphrase;
     const targetChanged = connectionTarget(this.settings) !== connectionTarget(settings);
     this.settings = settings;
-    this.resolver.updateStrategy(settings.conflict_strategy);
+    this.resolver.updateStrategy(strategyFor(settings, "bookmarks"));
     setCompatMode(settings.compat_mode);
     if (encChanged) {
       if ((await getLastUploadChecksum("bookmarks")) !== null && !(await getFirstSync())?.done) {
@@ -501,6 +539,7 @@ export class SyncEngine {
       // but leaving the stale number on the instance made any later operation that
       // consulted it inherit a consent the user gave for a different cycle.
       this.bulkApprovedThisSync = 0;
+      this.dangerSnapshotThisSync = false;
       this.isSyncing = false;
     }
   }
@@ -604,6 +643,8 @@ export class SyncEngine {
     this.mergeBookmarksThisSync = options.mergeBookmarks === true;
     this.guardNoticeThisSync = null;
     this.guardClearedThisSync = false;
+    this.typeReportsThisSync = [];
+    this.syncStartedAt = Date.now();
 
     try {
       // A manual press is the retry, so it starts the count over: whatever this cycle runs
@@ -709,8 +750,10 @@ export class SyncEngine {
       // The other way to be left holding one is to leave `manual`: every other strategy
       // answers in the merge, so this very sync folded those peers in and the cards are
       // now asking about something already decided. See conflictsStillOpen.
-      const manual = this.settings.conflict_strategy === "manual";
-      const conflicts = conflictsStillOpen(prevState.pending_conflicts, this.settings.conflict_strategy);
+      // Only the conflictable types can be on `manual` in a way that leaves a card up;
+      // this boolean picks the sentence the drop-line below uses, so it follows the same set.
+      const manual = [...CONFLICTABLE_TYPES].some((dt) => strategyFor(this.settings, dt) === "manual");
+      const conflicts = conflictsStillOpen(prevState.pending_conflicts, this.settings);
       const stale = prevState.pending_conflicts.length - conflicts.length;
       if (stale > 0) {
         await pruneConflictPackets(conflicts.map((c) => c.id));
@@ -725,6 +768,25 @@ export class SyncEngine {
       // been bumped by every type by now. A state written before `sync_cycles` existed is
       // seeded from its largest per-type count, which is the best record of past cycles.
       const cycles = (state.sync_cycles ?? Math.max(0, ...Object.values(state.sync_counts))) + 1;
+      // The receipt for this cycle. Only types that actually ran have a row, so a cycle
+      // that did nothing has nothing to show; `errors` mirrors the problems the status
+      // line reports, so the receipt never contradicts it.
+      const report = this.typeReportsThisSync.length
+        ? buildSyncReport(
+            this.typeReportsThisSync,
+            Date.now() - this.syncStartedAt,
+            typeErrors.length ? typeErrors : undefined
+          )
+        : null;
+      if (report) {
+        // The ring is for browsing; a storage failure there must not fail a sync that
+        // already moved the user's data.
+        try {
+          await appendSyncReport(report);
+        } catch (e) {
+          logger.warn("SyncEngine", `Could not keep this sync's receipt: ${e instanceof Error ? e.message : e}`);
+        }
+      }
       const newState = await setState({
         // Read AFTER the fold, so it sees any conflict syncType just queued.
         status: statusAfterSync(problems.length, conflicts.length),
@@ -735,6 +797,7 @@ export class SyncEngine {
         bytes_transferred: prevState.bytes_transferred + this.bytesThisSync,
         recovery_notice: recovery,
         guard_notice: guardNotice,
+        ...(report ? { sync_report: report } : {}),
         ...(stale > 0 ? { pending_conflicts: conflicts } : {}),
       });
       this.onStateChange(newState);
@@ -1083,7 +1146,9 @@ export class SyncEngine {
           "restore point was saved. Apply it or keep them in Settings → Activity."
       );
       try {
-        await this.snapshotNow({ origin: "auto" }, open);
+        // The pre-apply danger point describes the same tree this block is about; writing a
+        // second one would only spend a slot in the ring.
+        if (!this.dangerSnapshotThisSync) await this.snapshotNow({ origin: "auto" }, open);
         await setRecoverySnapshotTaken(true);
       } catch (e) {
         // Leave the latch clear so the next cycle retries the write — a failed
@@ -1583,7 +1648,7 @@ export class SyncEngine {
         );
       }
 
-      await importBookmarks(payload, "replace", this.settings.conflict_strategy, this.settings.bulk_delete_percent, 0);
+      await importBookmarks(payload, "replace", strategyFor(this.settings, "bookmarks"), this.settings.bulk_delete_percent, 0);
       // importBookmarks folds the peer's deletion/move/rename logs in BEFORE replacing
       // the tree. Dropping them is what makes "use the remote copy" actually stick:
       // otherwise the very next merge would re-apply that peer's old deletions.
@@ -1849,7 +1914,7 @@ export class SyncEngine {
       return;
     }
     try {
-      await importBookmarks(payload, "replace", this.settings.conflict_strategy, this.settings.bulk_delete_percent, 0);
+      await importBookmarks(payload, "replace", strategyFor(this.settings, "bookmarks"), this.settings.bulk_delete_percent, 0);
     } catch (err) {
       logger.warn("Baseline", `Couldn't apply the baseline bookmarks: ${err instanceof Error ? err.message : err}`);
       return;
@@ -2066,8 +2131,19 @@ export class SyncEngine {
     _state: SyncState
   ): Promise<void> {
     logger.info("SyncEngine", `Syncing: ${dataType}`);
+    // Per-cycle, and reset HERE because syncType is also the entry point for callers that
+    // bypass sync() (manual resolutions, the group tests). A stale true from the previous
+    // cycle would make recordBlockedDeletion skip the restore point it owes this incident.
+    if (dataType === "bookmarks") this.dangerSnapshotThisSync = false;
 
     try {
+      // The strategy for THIS type: its own override, else the global one. Read once, so
+      // the gate below, the conflict cards and the merge all agree within one cycle.
+      const strategy = strategyFor(this.settings, dataType);
+      let uploaded = false;
+      // The pre-apply preview and any restore point taken because of it, for the receipt.
+      let preview: ChangePreview | undefined;
+      let preApplySnapshot: string | undefined;
 
       // 1. PULL every peer's file (excluding our own), so we converge against
       //    ALL devices in one cycle — not just the most recent one. Order
@@ -2129,17 +2205,17 @@ export class SyncEngine {
       }
 
       // Verbose troubleshooting line (only emitted when Debug mode is on).
-      logger.debug("SyncEngine", `${dataType}: ${peers.length} peer(s), local ${isEmpty ? "empty" : "non-empty"}, strategy ${this.settings.conflict_strategy}`);
+      logger.debug("SyncEngine", `${dataType}: ${peers.length} peer(s), local ${isEmpty ? "empty" : "non-empty"}, strategy ${strategy}`);
 
       // 3. Decide flow
       if (peers.length === 0) {
         // No peers yet — push our own data if we have any.
         if (!isEmpty) {
-          await this.uploadIfChanged(backend, dataType, localPayload);
+          uploaded = await this.uploadIfChanged(backend, dataType, localPayload);
         } else {
           logger.info("SyncEngine", `${dataType}: nothing to sync`);
         }
-      } else if (!isEmpty && this.settings.conflict_strategy === "manual" && CONFLICTABLE_TYPES.has(dataType)
+      } else if (!isEmpty && strategy === "manual" && CONFLICTABLE_TYPES.has(dataType)
         && !(dataType === "bookmarks" && this.mergeBookmarksThisSync)) {
         // Manual: queue a conflict for EACH diverging peer, not just the newest —
         // otherwise with 3+ devices the other peers' differences are never surfaced.
@@ -2168,6 +2244,9 @@ export class SyncEngine {
         // genuine later change on the peer still surfaces a fresh conflict.
         const resolved = await getResolvedConflicts();
         const fresh: ConflictItem[] = [];
+        // The resolver carries one strategy at a time; this type's is the one that must
+        // answer the conflicts queued below.
+        this.resolver.updateStrategy(strategy);
         for (const peer of peers) {
           const key = `${dataType}:${peer.device_id}`;
           if (already.has(key)) {
@@ -2240,7 +2319,7 @@ export class SyncEngine {
         // yet" and a keep-local resolution), so its changes reached no other device —
         // silently, while the sync reported success. Same principle as the E2EE-mismatch
         // path above: skip the merge, still publish, let the group converge.
-        await this.uploadIfChanged(backend, dataType, localPayload);
+        uploaded = await this.uploadIfChanged(backend, dataType, localPayload);
       } else {
         // Auto-resolve across ALL peers. applyRemote is non-destructive for every
         // data type (bookmarks/history merge additively + tombstones; sessions/
@@ -2262,6 +2341,66 @@ export class SyncEngine {
         // republished it to the whole mesh. Newest-first establishes the most recent
         // deletions and moves BEFORE older trees are folded in, which also saves the
         // redundant intermediate move an older peer's stale placement used to cause.
+        // Decrypt every consumable peer ONCE: the danger preview must see exactly the
+        // payload the merge will consume, and paying a 600k-round PBKDF2 twice per peer
+        // per cycle is a real cost on the ordinary two-device case. Only bookmarks have
+        // a preview; the other types fold as before and pay nothing extra.
+        const openedPeers = new Map<string, unknown>();
+        if (dataType === "bookmarks") {
+          for (const peer of peers) {
+            if (this.encryptionBarrier(peer) !== null) continue;
+            try {
+              openedPeers.set(peer.device_id, await this.openPacket(peer));
+            } catch {
+              // The fold below reports this peer under the existing rules; a preview
+              // that cannot read it simply leaves it out.
+            }
+          }
+          if (openedPeers.size) {
+            preview = previewBookmarkChanges(localPayload, [...openedPeers.values()], {
+              // A merge the user asked for forces lww (see applyRemote), so only a real
+              // prefer-local cycle may report "nothing will be deleted".
+              preferLocal: !this.mergeBookmarksThisSync && strategy === "prefer-local",
+            });
+            const dangerous = isDangerousRemoval(preview.removed, preview.localTotal);
+            // One point per episode. Until these tombstones are applied (or refused), the
+            // same removal is previewed again every cycle; the latch is what keeps the ring
+            // for real incidents. A cycle with nothing large clears it.
+            //
+            // This used to skip the point when the mass-delete guard was predicted to
+            // block, on the theory that the guard's own snapshot covers the incident. The
+            // prediction was wrong in the dangerous direction: the preview counts tombstone
+            // hits without the merge's contradiction/kept-form/prefer-local exclusions, so
+            // it could predict a block for a deletion that then went through unguarded —
+            // leaving neither snapshot. The guard still takes its own point when it really
+            // blocks; that is the one case where two points describe the same incident.
+            if (dangerous && this.settings.auto_restore_point !== false) {
+              const episodeName = await getDangerSnapshotName();
+              if (episodeName) {
+                // Same incident, a later cycle: re-attach the point already taken so the
+                // receipt keeps its Undo snapshot while the deletion repeats. No new point
+                // is written here, and dangerSnapshotThisSync stays false — the guard below
+                // still owes its own recovery point for the tree it is refusing now.
+                preApplySnapshot = episodeName;
+              } else if (!(await getDangerSnapshotTaken())) {
+                try {
+                  preApplySnapshot = (await this.snapshotNow({ origin: "auto" }, backend)).name;
+                  await setDangerSnapshotName(preApplySnapshot);
+                  this.dangerSnapshotThisSync = true;
+                  logger.warn(
+                    "SyncEngine",
+                    `This merge would remove ${preview.removed} of ${preview.localTotal} bookmarks here; ` +
+                      `saved restore point ${preApplySnapshot} first`
+                  );
+                } catch (e) {
+                  logger.warn("SyncEngine", `Could not save a pre-merge restore point: ${e instanceof Error ? e.message : e}`);
+                }
+              }
+            } else if (!dangerous && (await getDangerSnapshotTaken())) {
+              await setDangerSnapshotTaken(false);
+            }
+          }
+        }
         for (const peer of peers) {
           // We're encrypted, this peer's file is plaintext. It's either a stale/orphan
           // file (a device that was removed → its file lingers forever) or a device
@@ -2279,7 +2418,7 @@ export class SyncEngine {
             // The approval belongs to THIS cycle and is handed down explicitly: the field
             // is per-sync state, and a caller outside a cycle (a manual resolution) must
             // never inherit whatever a finished sync left behind.
-            await this.applyRemote(dataType, peer, false, this.bulkApprovedThisSync);
+            await this.applyRemote(dataType, peer, false, this.bulkApprovedThisSync, openedPeers.get(peer.device_id));
           } catch (err) {
             // An encryption disagreement (plaintext peer while we encrypt, encrypted
             // peer we can't decrypt, or a wrong passphrase) must NOT be swallowed
@@ -2311,7 +2450,7 @@ export class SyncEngine {
         finalPayload = merged;
         const mergedEmpty = rebuild ? await this.isPayloadEmpty(dataType, merged) : isEmpty;
         if (!mergedEmpty) {
-          await this.uploadIfChanged(backend, dataType, merged);
+          uploaded = await this.uploadIfChanged(backend, dataType, merged);
         }
       }
 
@@ -2331,6 +2470,44 @@ export class SyncEngine {
           [dataType]: items,
         },
       });
+
+      // 4b. The receipt row for this type. Sessions and extensions have no item identity
+      // to diff, so they report their own payload sizes — the number the popup has always
+      // shown for them — rather than a stream of zeroes.
+      const sizeOf = (payload: unknown): number =>
+        dataType === "sessions"
+          ? ((payload as SyncSession | null)?.tabs?.length ?? 0)
+          : Array.isArray(payload)
+            ? payload.length
+            : 0;
+      this.typeReportsThisSync.push(
+        buildTypeReport({
+          dataType,
+          peers: peers.length,
+          before: localPayload,
+          after: finalPayload,
+          uploaded,
+          held: dataType === "bookmarks" && this.guardHoldThisSync,
+          ...(preApplySnapshot ? { snapshot: preApplySnapshot } : {}),
+          ...(preview ? { preview } : {}),
+          ...(MERGE_MUTATES_LOCAL.has(dataType)
+            ? {}
+            : { beforeTotal: sizeOf(localPayload), afterTotal: sizeOf(finalPayload) }),
+        })
+      );
+
+      // 4c. Keep a local copy of this device's open tabs after a sessions sync, so a crash
+      // or a mistyped close can be undone without waiting for the next peer to publish.
+      // Device-local and bounded (see session-autosave.ts); never uploaded.
+      if (dataType === "sessions" && this.settings.session_autosave_enabled !== false) {
+        try {
+          const current = await getAutosavedSessions();
+          const next = rememberAutosave(current, finalPayload as SyncSession);
+          if (next !== current) await setAutosavedSessions(next);
+        } catch (e) {
+          logger.warn("SyncEngine", `Could not keep today's session locally: ${e instanceof Error ? e.message : e}`);
+        }
+      }
     } catch (err) {
       logger.error(`SyncEngine.syncType[${dataType}]`, err);
       throw err;
@@ -2523,14 +2700,14 @@ export class SyncEngine {
     backend: ReturnType<typeof createBackend>,
     dataType: DataType,
     payload: unknown
-  ): Promise<void> {
+  ): Promise<boolean> {
     // The local change guard gates PUBLISHING only. Pulling and merging peers still ran
     // this cycle: receiving another device's changes is never dangerous, while
     // broadcasting a half-finished rewrite of our own tree is. This is the one gate
     // all three upload paths (no peers / manual / auto) go through.
     if (dataType === "bookmarks" && this.guardHoldThisSync) {
       logger.info("changeGuard", "bookmarks: publishing held by the local change guard this cycle");
-      return;
+      return false;
     }
     // Compute the (cheap) plaintext checksum BEFORE building the full packet, so an
     // unchanged encrypted sync doesn't pay the expensive PBKDF2 for encrypt+verifier
@@ -2550,7 +2727,7 @@ export class SyncEngine {
     }
     if (!missing && (await getLastUploadChecksum(dataType)) === tag) {
       logger.info("SyncEngine", `${dataType}: unchanged since last upload, skipping`);
-      return;
+      return false;
     }
     const packet = await this.buildPacket(dataType, payload);
     await backend.upload(packet);
@@ -2559,6 +2736,7 @@ export class SyncEngine {
     if (dataType === "bookmarks" && !(await getFirstSync())?.done) {
       await setFirstSync({ done: true, at: new Date().toISOString() });
     }
+    return true;
   }
 
   private async buildPacket(dataType: DataType, payload: unknown): Promise<SyncPacket> {
@@ -2603,9 +2781,12 @@ export class SyncEngine {
     dataType: DataType,
     packet: SyncPacket,
     isLocalEmpty = false,
-    approvedFor = 0
+    approvedFor = 0,
+    // The payload already decrypted for the pre-apply preview, when this peer had one.
+    // Passing it avoids a second 600k-round PBKDF2 for the same file in the same cycle.
+    opened?: unknown
   ): Promise<BulkDeleteBlock | null> {
-    const payload = await this.openPacket(packet);
+    const payload = opened !== undefined ? opened : await this.openPacket(packet);
     return this.applyPayload(dataType, payload, {
       device_id: packet.device_id,
       timestamp: packet.timestamp,
@@ -2718,7 +2899,7 @@ export class SyncEngine {
         await importBookmarks(
           payload,
           isLocalEmpty ? "replace" : "merge",
-          this.mergeBookmarksThisSync ? "lww" : this.settings.conflict_strategy,
+          this.mergeBookmarksThisSync ? "lww" : strategyFor(this.settings, "bookmarks"),
           this.settings.bulk_delete_percent,
           approvedFor,
           (info) => {
@@ -2732,6 +2913,7 @@ export class SyncEngine {
               };
             }
           },
+          this.settings.bookmark_order_mode ?? "lww",
         );
         return blockedHere;
       }
@@ -2955,5 +3137,39 @@ export class SyncEngine {
       return;
     }
     await importSession(entry.session);
+  }
+
+  /**
+   * Open a chosen subset of tabs from a synced/autosaved session.
+   *
+   * `importSession` deliberately restores a whole session; the mobile/selective case needs
+   * "these five". URLs are re-checked by `openTabUrls`, which is the same http(s)-only gate
+   * a packet restore goes through — a list that reaches this method is not proof it is safe.
+   */
+  async restoreSessionTabs(urls: string[]): Promise<number> {
+    const safe = urls.filter((url) => isSafeContentUrl(url));
+    if (!safe.length) return 0;
+    // Report what actually opened, not what was asked: importSession skips tabs already
+    // open and caps the burst, so a repeat restore opens fewer (or zero).
+    return importSession({
+      id: `selective_${this.settings.device_id}`,
+      device_id: this.settings.device_id,
+      savedAt: new Date().toISOString(),
+      label: "Selected tabs",
+      tabs: safe.map((url) => ({ url, pinned: false })),
+    });
+  }
+
+  /** Publish the self-contained read-only view next to the sync files. */
+  async uploadViewHtml(content: string): Promise<void> {
+    await this.withBackend((b) => b.putFile(VIEW_FILE_NAME, content));
+  }
+
+  /**
+   * Remove the published read-only page. It is plaintext even when E2EE is on, so enabling
+   * encryption deletes it and the Settings button can remove it on demand.
+   */
+  async removeViewHtml(): Promise<void> {
+    await this.withBackend((b) => b.deleteFile(VIEW_FILE_NAME));
   }
 }

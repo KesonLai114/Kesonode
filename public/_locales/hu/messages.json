@@ -22,7 +22,7 @@
     "message": "hu"
   },
   "extension_name": {
-    "message": "Kesonode | Privát könyvjelző- és lapszinkron v1.5.17"
+    "message": "Kesonode | Privát könyvjelző- és lapszinkron v1.5.18"
   },
   "extension_description": {
     "message": "Adatvédelem-központú böngésző-szinkronizálás a saját tárhelyedre: Google Drive, WebDAV, GitHub."
@@ -1724,10 +1724,6 @@
   "opt_export": {
     "message": "Exportálás"
   },
-  "opt_export_credentials_warning": {
-    "message": "Ez a fájl a hitelesítő adataidat NYÍLT SZÖVEGBEN tartalmazza: a WebDAV-jelszót, a GitHub-tokent, a Google frissítő tokent és a titkosítási jelmondatot. A fájl birtokában bárki használhatja őket. Tartsd bizalmasan: ne tedd megosztott tárhelyre, ne küldd csevegésben, és ne csatold hibajelentéshez.\n\nMégis exportálod?",
-    "description": "Shown before the settings backup is written. This file really does contain the passwords, so the warning has to be unmissable and say what to do with it."
-  },
   "opt_exported": {
     "message": "Exportálva"
   },
@@ -1781,14 +1777,80 @@
   "opt_cfg_export_label": {
     "message": "Beállítások exportálása"
   },
-  "opt_cfg_export_desc": {
-    "message": "A háttértár-fiókokat, a titkosítási jelszót és az eszközazonosítót JSON-fájlba menti. A fájl a hitelesítő adatokat titkosítatlanul tartalmazza — tartsa biztonságos helyen."
-  },
   "opt_cfg_import_label": {
     "message": "Beállítások importálása"
   },
+  "opt_cfg_export_desc": {
+    "message": "Mentsd a beállításaidat – tárolási szolgáltatók, mappák, ütemezés, beállítások és eszközazonosító – JSON-fájlba. A bejelentkezési adatok nem kerülnek bele, hacsak nem választod ezt; akkor a fájlt az általad megadott jelszóval titkosítjuk."
+  },
+  "opt_cfg_export_include_label": {
+    "message": "Bejelentkezési adatok hozzáadása"
+  },
+  "opt_cfg_export_include_desc": {
+    "message": "Hozzáadja a WebDAV-jelszót, a GitHub-tokent, a Google Drive-munkamenetet és az E2EE-jelmondatot, az alábbi jelszóval titkosítva. Ezek nélkül a fájl visszaállítja a beállításokat, de utána újra be kell jelentkezned."
+  },
+  "opt_cfg_export_password_ph": {
+    "message": "Titkosítási jelszó (legalább 12 karakter)"
+  },
+  "opt_cfg_export_confirm_ph": {
+    "message": "Jelszó megismétlése"
+  },
+  "opt_cfg_export_password_note": {
+    "message": "A jelszó nélkül ez a fájl nem állítható vissza. Mindkettőt tartsd biztonságos helyen."
+  },
+  "opt_cfg_export_pw_short": {
+    "message": "Használj legalább $LEN$ karaktert.",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_export_pw_mismatch": {
+    "message": "A két jelszó nem egyezik."
+  },
   "opt_cfg_import_desc": {
-    "message": "Frissítés vagy böngészőváltás után visszaállítja a beállításokat, nem kell mindent újra beállítani. Felülírja a jelenlegi beállításokat."
+    "message": "Frissítés után állítsd vissza a beállításaidat ahelyett, hogy mindent újra beállítanál. Lecseréli a jelenlegi beállításokat. Ha a fájl titkosított, a jelszavát kérni fogjuk."
+  },
+  "opt_cfg_import_pw_label": {
+    "message": "Ez a biztonsági mentés titkosított"
+  },
+  "opt_cfg_import_pw_desc": {
+    "message": "Add meg az exportáláskor beállított jelszót a fájl megnyitásához."
+  },
+  "opt_cfg_import_pw_ph": {
+    "message": "Biztonsági mentés jelszava"
+  },
+  "opt_cfg_import_pass_label": {
+    "message": "Ehhez a biztonsági mentéshez szükség van a titkosítási jelmondatodra"
+  },
+  "opt_cfg_import_pass_desc": {
+    "message": "A mentés végpontok közötti titkosítást kapcsol be, de nem tartalmazza a jelmondatot. Add meg azt, amelyet ennek az eszköznek használnia kell – nélküle az import nem fejezhető be (és a nyílt szövegű feltöltés nem opció)."
+  },
+  "opt_cfg_import_pass_ph": {
+    "message": "Titkosítási jelmondat"
+  },
+  "opt_cfg_import_need_passphrase": {
+    "message": "A folytatáshoz add meg a jelmondatodat."
+  },
+  "opt_cfg_import_pass_short": {
+    "message": "A jelmondatnak legalább $LEN$ karakterből kell állnia.",
+    "placeholders": {
+      "len": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cfg_import_open_btn": {
+    "message": "Folytatás"
+  },
+  "opt_cfg_import_missing": {
+    "message": "A mentés nem tartalmazott bejelentkezési adatokat, ezért a szinkronizálás addig nem indulhat el, amíg be nem jelentkezel ide: $ACCOUNTS$. Nyisd meg a Beállítások → Tároló oldalt, add meg őket, majd mentsd el.",
+    "placeholders": {
+      "accounts": {
+        "content": "$1"
+      }
+    }
   },
   "opt_feedback_section": {
     "message": "Visszajelzés"
@@ -2057,5 +2119,384 @@
   },
   "onb_done_multi_body": {
     "message": "Telepítsd ott is a Kesonode-ot, és válaszd ugyanazt a tárhelyet. A könyvjelzők, lapok és a többi ott találkozik."
+  },
+  "popup_receipt_line": {
+    "message": "Utolsó szinkron: +$ADDED$ / −$REMOVED$",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "popup_receipt_danger": {
+    "message": "Az utolsó szinkron $REMOVED$ könyvjelzőt törölt. Visszaállítási pont készült.",
+    "placeholders": {
+      "removed": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_receipt_undo": {
+    "message": "Visszavonás"
+  },
+  "popup_receipt_undo_confirm": {
+    "message": "Visszaállítod?"
+  },
+  "popup_receipt_undone": {
+    "message": "Visszaállítva"
+  },
+  "popup_search_placeholder": {
+    "message": "Könyvjelzők, előzmények és olvasási lista keresése"
+  },
+  "popup_search_clear": {
+    "message": "Keresés törlése"
+  },
+  "popup_search_empty": {
+    "message": "Nincs találat."
+  },
+  "popup_source_bookmark": {
+    "message": "Könyvjelző"
+  },
+  "popup_source_history": {
+    "message": "Előzmények"
+  },
+  "popup_source_reading": {
+    "message": "Olvasás"
+  },
+  "popup_reading_head": {
+    "message": "Olvasási lista"
+  },
+  "popup_reading_save": {
+    "message": "Lap mentése"
+  },
+  "popup_reading_saved": {
+    "message": "Mentve"
+  },
+  "popup_reading_empty": {
+    "message": "Még nincs mentett elem."
+  },
+  "popup_reading_error": {
+    "message": "Nem sikerült betölteni az olvasási listát: $ERROR$. Ez nem jelenti azt, hogy üres.",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "404 Not Found"
+      }
+    }
+  },
+  "popup_reading_remove": {
+    "message": "Eltávolítás az olvasási listáról"
+  },
+  "popup_reading_no_tab": {
+    "message": "Ennek a lapnak nincs menthető címe."
+  },
+  "opt_receipt_section": {
+    "message": "Az utolsó szinkron bizonylata"
+  },
+  "opt_receipt_section_sub": {
+    "message": "Mit változtatott ezen az eszközön az utolsó befejezett ciklus."
+  },
+  "opt_receipt_headline": {
+    "message": "+$ADDED$ hozzáadva · −$REMOVED$ eltávolítva",
+    "placeholders": {
+      "added": {
+        "content": "$1"
+      },
+      "removed": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_receipt_danger": {
+    "message": "Ez a ciklus az eszköz könyvjelzőinek nagy részét eltávolította. Az egyesítés előtt visszaállítási pont készült."
+  },
+  "opt_receipt_sample": {
+    "message": "Az eltávolítottak egy része:"
+  },
+  "opt_receipt_moved": {
+    "message": "$COUNT$ áthelyezve",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_retitled": {
+    "message": "$COUNT$ átnevezve",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_uploaded": {
+    "message": "közzétéve"
+  },
+  "opt_receipt_held": {
+    "message": "közzététel visszatartva"
+  },
+  "opt_receipt_undo_label": {
+    "message": "Szinkron visszavonása"
+  },
+  "opt_receipt_undo_desc": {
+    "message": "A változtatások alkalmazása előtt mentett könyvjelzőfa visszaállítása."
+  },
+  "opt_receipt_undo": {
+    "message": "Visszavonás"
+  },
+  "opt_receipt_empty": {
+    "message": "Még nincs befejezett szinkron."
+  },
+  "opt_receipt_history": {
+    "message": "Korábbi ciklusok"
+  },
+  "opt_receipt_show_all": {
+    "message": "Mind a(z) $COUNT$ megjelenítése",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_receipt_show_less": {
+    "message": "Kevesebb megjelenítése"
+  },
+  "opt_receipt_clear": {
+    "message": "Bizonylatok törlése"
+  },
+  "opt_receipt_clear_confirm": {
+    "message": "Törli az összes bizonylatot?"
+  },
+  "opt_receipt_has_snapshot": {
+    "message": "visszaállítási pont mentve"
+  },
+  "opt_conflict_types_section": {
+    "message": "Adattípusonként"
+  },
+  "opt_conflict_types_section_sub": {
+    "message": "Hagyd egy típuson a „Fenti beállítás követése” értéket, hacsak nem kell saját válasz."
+  },
+  "opt_conflict_type_desc": {
+    "message": "Konfliktuskezelés ehhez a típushoz"
+  },
+  "opt_conflict_type_global": {
+    "message": "Fenti beállítás követése"
+  },
+  "opt_cleanup_section": {
+    "message": "Könyvjelzők tisztítása"
+  },
+  "opt_cleanup_section_sub": {
+    "message": "Duplikált URL-ek és opcionálisan a már nem válaszoló hivatkozások keresése."
+  },
+  "opt_cleanup_scan_label": {
+    "message": "Könyvjelzők vizsgálata"
+  },
+  "opt_cleanup_scan_desc": {
+    "message": "A duplikátumok ebből a böngészőből származnak. Semmi nem törlődik, amíg ki nem jelölöd a sorokat és meg nem erősíted."
+  },
+  "opt_cleanup_dead_label": {
+    "message": "Hivatkozások online ellenőrzése"
+  },
+  "opt_cleanup_dead_desc": {
+    "message": "Hálózati kérést küld minden könyvjelzős gazdagéphez, futtatásonként legfeljebb 300 hivatkozásra. Csak a 404/410 számít halottnak; az időtúllépéseket és a bejelentkezési falakat figyelmen kívül hagyja. Alapból ki van kapcsolva, mert erről az eszközről keresi fel a webhelyeket."
+  },
+  "opt_cleanup_dead_cap": {
+    "message": "Ebben a futásban $PROBED$ hivatkozás lett ellenőrizve; a többi a következő futásra vár.",
+    "placeholders": {
+      "probed": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_scan": {
+    "message": "Vizsgálat"
+  },
+  "opt_cleanup_summary": {
+    "message": "$SCANNED$ vizsgálva · $GROUPS$ duplikált csoport · $DEAD$ halott hivatkozás",
+    "placeholders": {
+      "scanned": {
+        "content": "$1"
+      },
+      "groups": {
+        "content": "$2"
+      },
+      "dead": {
+        "content": "$3"
+      }
+    }
+  },
+  "opt_cleanup_select_all": {
+    "message": "Összes kijelölése"
+  },
+  "opt_cleanup_selected_one": {
+    "message": "$COUNT$ kijelölve",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_selected_other": {
+    "message": "$COUNT$ kijelölve",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_apply": {
+    "message": "Kijelöltek eltávolítása"
+  },
+  "opt_cleanup_confirm": {
+    "message": "Eltávolítod őket"
+  },
+  "opt_cleanup_removed_one": {
+    "message": "$COUNT$ könyvjelző eltávolítva",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_removed_other": {
+    "message": "$COUNT$ könyvjelző eltávolítva",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_cleanup_none": {
+    "message": "Nem található duplikátum vagy halott hivatkozás."
+  },
+  "opt_auto_snapshot_label": {
+    "message": "Visszaállítási pont kockázatos egyesítés előtt"
+  },
+  "opt_auto_snapshot_desc": {
+    "message": "Ha egy egyesítés az eszköz könyvjelzőinek nagy részét eltávolítaná, előbb visszaállítási pont készül, amely a Tevékenység lapon Visszavonásként jelenik meg."
+  },
+  "opt_order_label": {
+    "message": "Könyvjelzők sorrendje"
+  },
+  "opt_order_desc": {
+    "message": "A társ mappapozíciója áthelyezi-e a példányodat (a legújabb változás nyer), vagy ez a böngésző megtartja a saját sorrendjét."
+  },
+  "opt_order_lww": {
+    "message": "Legújabb változás követése"
+  },
+  "opt_order_keep_local": {
+    "message": "Böngésző sorrendjének megtartása"
+  },
+  "opt_autosave_section": {
+    "message": "Munkamenet-pillanatképek"
+  },
+  "opt_autosave_section_sub": {
+    "message": "A szinkronok között ezen az eszközön tartott nyitott lapok, hogy egy összeomlás vagy bezárt ablak után legyen visszaút."
+  },
+  "opt_autosave_enable_label": {
+    "message": "Munkamenet-pillanatképek megtartása"
+  },
+  "opt_autosave_enable_desc": {
+    "message": "Munkamenet-szinkron után mentődik, és innen soha nem töltődik fel."
+  },
+  "opt_autosave_empty": {
+    "message": "Még nincs pillanatkép. Akkor készül, amikor a böngésző munkamenete szinkronizál."
+  },
+  "opt_autosave_unnamed": {
+    "message": "Nyitott lapok"
+  },
+  "opt_autosave_choose": {
+    "message": "Lapok kiválasztása"
+  },
+  "opt_autosave_collapse": {
+    "message": "Lapok elrejtése"
+  },
+  "opt_autosave_restore_selected": {
+    "message": "Kijelöltek megnyitása"
+  },
+  "opt_autosave_search": {
+    "message": "Pillanatképek keresése cím vagy URL alapján"
+  },
+  "opt_autosave_search_empty": {
+    "message": "Egy pillanatkép sem felel meg a keresésnek."
+  },
+  "opt_autosave_opened_one": {
+    "message": "$COUNT$ lap megnyitva",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_autosave_opened_other": {
+    "message": "$COUNT$ lap megnyitva",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_bm_export_label": {
+    "message": "Könyvjelzők más programnak"
+  },
+  "opt_bm_export_desc": {
+    "message": "A Netscape HTML bármely böngésző könyvjelző-importjában megnyílik, a Raindrop CSV a Raindropba importálható, az írásvédett oldal pedig egyetlen fájl, amelyet telefon is megnyit kiterjesztés nélkül."
+  },
+  "opt_bm_export_netscape": {
+    "message": "Netscape HTML"
+  },
+  "opt_bm_export_raindrop": {
+    "message": "Raindrop CSV"
+  },
+  "opt_bm_export_view": {
+    "message": "Írásvédett oldal"
+  },
+  "opt_bm_export_view_upload": {
+    "message": "Írásvédett oldal közzététele"
+  },
+  "opt_bm_export_view_upload_confirm": {
+    "message": "A közzétett oldal a könyvjelzők nyílt szövegű másolata, ezért nem titkosítható. Mégis közzéteszi?"
+  },
+  "opt_bm_export_view_remove": {
+    "message": "Közzétett oldal eltávolítása"
+  },
+  "opt_bm_export_view_remove_confirm": {
+    "message": "Eltávolítja a közzétett írásvédett oldalt a tárolóeszközről? A könyvjelzői nem érintettek."
+  },
+  "opt_export_uploaded": {
+    "message": "Mentve és feltöltve"
+  },
+  "opt_export_view_removed": {
+    "message": "A közzétett oldal eltávolítva."
+  },
+  "opt_doctor_section": {
+    "message": "Szinkron-diagnosztika"
+  },
+  "opt_doctor_section_sub": {
+    "message": "Ellenőrzi a böngésző beállításait, és egy biztonságosan megosztható csomagot készít."
+  },
+  "opt_doctor_run_label": {
+    "message": "Böngésző ellenőrzése"
+  },
+  "opt_doctor_run_desc": {
+    "message": "Csak helyi ellenőrzéseket futtat; adat nem hagyja el az eszközt."
+  },
+  "opt_doctor_run": {
+    "message": "Ellenőrzések indítása"
+  },
+  "opt_doctor_copy_desc": {
+    "message": "A másolt csomag verziókat, beállításokat és az utolsó hibát tartalmazza. A jelszófázisok, tokenek, jelszavak és teljes tárolási címek eltávolításra kerülnek."
+  },
+  "opt_doctor_copy": {
+    "message": "Diagnosztika másolása"
+  },
+  "omnibox_default": {
+    "message": "Kesonode könyvjelzők, előzmények és olvasnivalók keresése"
+  },
+  "opt_cleanup_host_needed": {
+    "message": "A hivatkozások ellenőrzéséhez hozzáférés kell a könyvjelzők webhelyeihez. A duplikátumokat így is átvizsgáltuk."
   }
 }

@@ -25,5 +25,10 @@ export default defineConfig({
     // of red: four timed-out crypto tests that look like a broken encryption change and are
     // nothing of the sort. Generous on purpose, and it never fires when things are working.
     testTimeout: 30_000,
+    // service-worker.test.ts resets the module registry and re-imports the worker in every
+    // beforeEach. The default 10s hook budget is enough on a local disk but not when the
+    // checkout lives on a network volume and the whole suite is transforming in parallel:
+    // the import itself is what runs long, and it failed as a timeout rather than a test.
+    hookTimeout: 30_000,
   },
 });

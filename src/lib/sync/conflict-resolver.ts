@@ -1,8 +1,9 @@
 import type {
   ConflictItem,
   ConflictStrategy,
-  SyncPacket,
   DataType,
+  SyncSettings,
+  SyncPacket,
 } from "@/lib/types";
 import { logger } from "@/lib/utils/logger";
 import { browser } from "@/lib/utils/ext";
@@ -33,6 +34,24 @@ export function packetTime(timestamp: string | undefined): number {
 }
 
 // ─── Conflict Resolver ────────────────────────────────────────────────────
+
+/**
+ * The strategy that applies to one data type: its override, else the global setting.
+ *
+ * Kept as a pure helper rather than a method so the engine, the UI and the tests all
+ * answer the question the same way. An override whose value is not a known strategy is
+ * ignored rather than trusted, which is what an imported settings file cannot be.
+ */
+export function strategyFor(
+  settings: Pick<SyncSettings, "conflict_strategy" | "conflict_strategies">,
+  dataType: DataType,
+): ConflictStrategy {
+  const override = settings.conflict_strategies?.[dataType];
+  if (override && ["lww", "prefer-local", "prefer-remote", "manual"].includes(override)) {
+    return override;
+  }
+  return settings.conflict_strategy;
+}
 
 export class ConflictResolver {
   constructor(private strategy: ConflictStrategy) {}

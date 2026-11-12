@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import type { SyncState, SyncSettings, DataType, SyncExtension, RemoteSessionEntry } from "@/lib/types";
+import type { SyncState, SyncSettings, DataType, SyncExtension, RemoteSessionEntry, SearchHit, ReadingListItem } from "@/lib/types";
 import { providerFromConfig, providerById, providerLabel } from "@/lib/storage-providers";
 import { sendMessage, request } from "@/lib/utils/messaging";
 import { browser, currentStore } from "@/lib/utils/ext";
@@ -14,10 +14,12 @@ import { groupConflictsByDevice } from "@/popup/conflict-groups";
 import { t, plural, catalogueLocale } from "@/lib/utils/i18n";
 import { relativeTime } from "@/lib/device-activity";
 import { dataTypeApiPresent, hasPermission } from "@/lib/utils/capabilities";
+import { isSafeBookmarkUrl } from "@/lib/utils/url";
 import {
   RefreshCw, Settings, Bookmark, Clock, Globe,
   AlertCircle, Loader2, ChevronRight,
   Wifi, Puzzle, ExternalLink, GitMerge, RotateCcw, Star,
+  Search, X, BookmarkPlus, Check, Undo2,
 } from "lucide-react";
 
 // ─── Constants ────────────────────────────────────────────────────────────
@@ -43,6 +45,14 @@ const DATA_TYPE_META: Record<DataType, { icon: typeof Bookmark }> = {
   history:    { icon: Clock    },
   sessions:   { icon: Globe    },
   extensions: { icon: Puzzle   },
+};
+
+// Literal keys on purpose: the i18n catalogue test only sees a message that is asked for
+// by name, so building `popup_source_${source}` here would hide three real strings from it.
+const SOURCE_LABEL: Record<"bookmark" | "history" | "reading", string> = {
+  bookmark: "popup_source_bookmark",
+  history:  "popup_source_history",
+  reading:  "popup_source_reading",
 };
 
 const STATUS_CONFIG = {
@@ -103,6 +113,34 @@ export default function PopupApp() {
   // banner has been dismissed. Persisted in storage; the banner still shows the short
   // "publishing paused" line even after this is true.
   const [guardWarned, setGuardWarnedState] = useState(false);
+
+  // ── Search (P1) ──
+  const [searchQuery, setSearchQuery] = useState("");
+  // null = nothing typed yet; [] = typed but nothing found (distinct from "still looking").
+  const [searchResults, setSearchResults] = useState<SearchHit[] | null>(null);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const searchSeq = useRef(0);
+
+  // ── Reading list (P1) ──
+  const [readingList, setReadingList] = useState<ReadingListItem[]>([]);
+  const [readingLoaded, setReadingLoaded] = useState(false);
+  const [readingError, setReadingError] = useState<string | null>(null);
+  const [readingBusy, setReadingBusy] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Last-sync receipt / undo (P0) ──
+  // Two steps because a restore replaces the whole local tree.
+  const [confirmUndo, setConfirmUndo] = useState(false);
+  const [undoing, setUndoing] = useState(false);
+  const [undoDone, setUndoDone] = useState(false);
+  // A new receipt carries a new snapshot, so a confirmation armed for the previous one
+  // (or a completed restore) must not carry over into it.
+  const receiptKey = state?.sync_report?.at ?? null;
+  useEffect(() => {
+    setConfirmUndo(false);
+    setUndoDone(false);
+  }, [receiptKey]);
 
   // Track animation state separately from sync state
   const animTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -221,14 +259,48 @@ export default function PopupApp() {
     }
   }, [loadOpenTabs]);
 
+  const loadReadingList = useCallback(async () => {
+    const r = await request({ type: "READING_LIST_LIST" });
+    if (r.ok && r.res.type === "READING_LIST") {
+      setReadingList(r.res.payload);
+      setReadingError(null);
+    } else {
+      // A failed load must not look like an empty list: say so, with the reason.
+      setReadingError(r.ok ? "Unexpected reply from Kesonode." : r.error);
+    }
+    setReadingLoaded(true);
+  }, []);
+
   useEffect(() => {
     load();
     void loadPeerCaches();
+    void loadReadingList();
 
     return () => {
       if (animTimerRef.current) clearInterval(animTimerRef.current);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     };
-  }, [load, loadPeerCaches]);
+  }, [load, loadPeerCaches, loadReadingList]);
+
+  // Runs as the query changes, debounced. A sequence number makes a slow answer for an
+  // older query unable to overwrite the results of a newer one.
+  useEffect(() => {
+    const q = searchQuery.trim();
+    const seq = ++searchSeq.current;
+    if (!q) {
+      setSearchResults(null);
+      setSearchBusy(false);
+      return;
+    }
+    setSearchBusy(true);
+    const timer = setTimeout(async () => {
+      const r = await request({ type: "SEARCH", payload: { query: q, limit: 8 } });
+      if (seq !== searchSeq.current) return;
+      setSearchResults(r.ok && r.res.type === "SEARCH_RESULTS" ? r.res.payload : []);
+      setSearchBusy(false);
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // React to state changes — drive animation from status
   useEffect(() => {
@@ -307,6 +379,69 @@ export default function PopupApp() {
       // browser's store (a peer's CWS id can't resolve on Firefox and vice-versa).
       browser.tabs.create({ url: installOrSearchUrl(ext, here), active: false });
     });
+  };
+
+  const openUrl = (url: string) => {
+    if (isSafeBookmarkUrl(url)) void browser.tabs.create({ url });
+  };
+
+  /**
+   * The pre-apply restore point is one click away, but restoring replaces the local tree,
+   * so the first click only arms the button. `undoDone` keeps a successful restore from
+   * being offered again for the same receipt.
+   */
+  const undoSync = async () => {
+    const snapshot = state?.sync_report?.snapshot;
+    if (!snapshot || undoing || undoDone) return;
+    if (!confirmUndo) {
+      setConfirmUndo(true);
+      return;
+    }
+    setConfirmUndo(false);
+    setUndoing(true);
+    setActionError(null);
+    const r = await request({ type: "RESTORE_SNAPSHOT", payload: { name: snapshot } });
+    if (!r.ok) setActionError(r.error);
+    else setUndoDone(true);
+    setUndoing(false);
+  };
+
+  const saveCurrentTab = async () => {
+    if (readingBusy) return;
+    setReadingBusy(true);
+    setActionError(null);
+    try {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.url) {
+        setActionError(t("popup_reading_no_tab"));
+        return;
+      }
+      const r = await request({
+        type: "READING_LIST_ADD",
+        payload: { url: tab.url, title: tab.title },
+      });
+      if (!r.ok) {
+        setActionError(r.error);
+        return;
+      }
+      await loadReadingList();
+      setJustSaved(true);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setJustSaved(false), 1600);
+    } catch {
+      setActionError(t("popup_reading_no_tab"));
+    } finally {
+      setReadingBusy(false);
+    }
+  };
+
+  const removeReading = async (id: string) => {
+    const r = await request({ type: "READING_LIST_REMOVE", payload: { id } });
+    if (!r.ok) {
+      setActionError(r.error);
+      return;
+    }
+    if (r.res.type === "READING_LIST") setReadingList(r.res.payload);
   };
 
   /**
@@ -391,6 +526,11 @@ export default function PopupApp() {
   // list uses ("3 hours ago"), so one phrase means one thing across the extension. It ages
   // with the STATE_UPDATE the status line already follows; the exact moment is a hover away.
   const lastSync = state?.last_sync ? relativeTime(state.last_sync, Date.now(), catalogueLocale()) : null;
+  // What the last completed cycle actually changed here (P0 #1). Kept even after a later
+  // cycle with no changes, so the line answers "what did the last sync do" rather than
+  // disappearing the moment there was nothing to report.
+  const syncReport = state?.sync_report ?? null;
+  const receiptAge = syncReport ? relativeTime(syncReport.at, Date.now(), catalogueLocale()) : null;
   // Show the chosen provider's name (e.g. "Koofr"), not the raw backend type
   // ("webdav") — several providers map to the WebDAV backend.
   const backendLabel = (() => {
@@ -714,6 +854,133 @@ export default function PopupApp() {
             );
           })}
         </div>
+      </section>
+
+      {/* ── Last sync receipt, with the pre-apply restore point one click away (P0) ── */}
+      {syncReport && (
+        <section
+          className={`mt-4 flex items-center gap-2 rounded-box border px-3 py-2 ${
+            syncReport.dangerous ? "border-sk-warn" : "border-sk-hairline"
+          } bg-sk-raised`}
+        >
+          <span className={`min-w-0 flex-1 text-[12px] ${syncReport.dangerous ? "text-sk-warn" : "text-sk-muted"}`}>
+            {syncReport.dangerous
+              ? t("popup_receipt_danger", String(syncReport.removed))
+              : t("popup_receipt_line", [String(syncReport.added), String(syncReport.removed)])}
+            {receiptAge && <span className="text-sk-subtle"> · {receiptAge}</span>}
+          </span>
+          {syncReport.snapshot && !undoDone && (
+            <button
+              onClick={undoSync}
+              disabled={undoing}
+              className="flex shrink-0 items-center gap-1.5 rounded-box border border-sk-hairline bg-sk-surface px-2 py-1 text-[12px] text-sk-muted transition-colors hover:text-sk-text disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {undoing ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />}
+              {confirmUndo ? t("popup_receipt_undo_confirm") : t("popup_receipt_undo")}
+            </button>
+          )}
+          {undoDone && <span className="shrink-0 text-[12px] text-sk-signal">{t("popup_receipt_undone")}</span>}
+        </section>
+      )}
+
+      {/* ── Search across bookmarks, history and the reading list (P1) ── */}
+      <section className="mt-4">
+        <div className="flex items-center gap-2 rounded-box border border-sk-hairline bg-sk-raised px-2.5 py-1.5 focus-within:border-sk-subtle">
+          <Search size={14} className="shrink-0 text-sk-subtle" />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t("popup_search_placeholder")}
+            aria-label={t("popup_search_placeholder")}
+            className="min-w-0 flex-1 bg-transparent text-[13px] text-sk-text placeholder:text-sk-subtle focus:outline-none"
+          />
+          {searchBusy && <Loader2 size={12} className="shrink-0 animate-spin text-sk-subtle" />}
+          {!searchBusy && searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              aria-label={t("popup_search_clear")}
+              className="shrink-0 rounded-icon p-0.5 text-sk-subtle transition-colors hover:text-sk-text"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+        {searchResults !== null && (
+          <div className="mt-1.5 space-y-0.5">
+            {searchResults.length === 0 ? (
+              <p className="px-1 py-1 text-[12px] text-sk-subtle">{t("popup_search_empty")}</p>
+            ) : (
+              searchResults.map((hit) => (
+                <button
+                  key={`${hit.source}:${hit.id ?? ""}:${hit.url}`}
+                  onClick={() => openUrl(hit.url)}
+                  title={hit.url}
+                  className="flex w-full items-start gap-2 rounded-box px-1 py-1 text-left transition-colors hover:bg-sk-raised"
+                >
+                  <span className="mt-0.5 shrink-0 rounded-sm border border-sk-hairline px-1 font-mono text-[10px] uppercase text-sk-subtle">
+                    {t(SOURCE_LABEL[hit.source])}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] text-sk-text">{hit.title || hit.url}</span>
+                    {hit.folder && (
+                      <span className="block truncate text-[11px] text-sk-subtle">{hit.folder}</span>
+                    )}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ── Reading list (P1) ── */}
+      <section className="mt-4">
+        <div className="flex items-center justify-between">
+          <h2 className="pl-0.5 font-mono text-[12px] font-medium uppercase tracking-[0.08em] text-sk-subtle">
+            {t("popup_reading_head")}
+            {readingList.length > 0 && ` · ${readingList.length}`}
+          </h2>
+          <button
+            onClick={saveCurrentTab}
+            disabled={readingBusy}
+            className="flex items-center gap-1.5 rounded-box border border-sk-hairline bg-sk-raised px-2 py-1 text-[12px] text-sk-muted transition-colors hover:text-sk-text disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {readingBusy ? <Loader2 size={12} className="animate-spin" />
+              : justSaved ? <Check size={12} className="text-sk-signal" />
+              : <BookmarkPlus size={12} />}
+            {justSaved ? t("popup_reading_saved") : t("popup_reading_save")}
+          </button>
+        </div>
+        {readingError ? (
+          <p className="mt-1 flex items-start gap-1.5 px-1 text-[12px] text-sk-danger">
+            <AlertCircle size={12} className="mt-0.5 shrink-0" />
+            <span>{t("popup_reading_error", readingError)}</span>
+          </p>
+        ) : readingLoaded && readingList.length === 0 ? (
+          <p className="mt-1 px-1 text-[12px] text-sk-subtle">{t("popup_reading_empty")}</p>
+        ) : readingList.length > 0 ? (
+          <div className="mt-1 max-h-[132px] space-y-0.5 overflow-y-auto">
+            {readingList.map((item) => (
+              <div key={item.id} className="flex items-center gap-1.5">
+                <button
+                  onClick={() => openUrl(item.url)}
+                  title={item.url}
+                  className="min-w-0 flex-1 truncate rounded-box px-1 py-1 text-left text-[13px] text-sk-text transition-colors hover:bg-sk-raised hover:underline hover:underline-offset-2"
+                >
+                  {item.title || item.url}
+                </button>
+                <button
+                  onClick={() => void removeReading(item.id)}
+                  aria-label={t("popup_reading_remove")}
+                  title={t("popup_reading_remove")}
+                  className="shrink-0 rounded-icon p-1 text-sk-subtle transition-colors hover:text-sk-danger"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       {/* ── Missing extensions ── */}
