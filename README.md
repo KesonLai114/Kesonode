@@ -219,11 +219,20 @@ npm run package:source:pinned  # → web-ext-artifacts/source/ 下两个带固�
 如果这个软件对你有用，欢迎赞助作者一点心意，用于本软件的后续维护与功能迭代。赞助纯属自愿，
 无论是否赞助，软件的全部功能都不受影响。
 
-<p align="center">
-  <img src="docs/sponsors/wechat.png" alt="微信赞赏码" width="220">
-  &nbsp;&nbsp;&nbsp;
-  <img src="docs/sponsors/alipay.png" alt="支付宝收款码" width="220">
-</p>
+两张收款码分别为微信支付和支付宝，请按需扫码：
+
+<table align="center">
+  <tr>
+    <td align="center">
+      <img src="docs/sponsors/wechat.png" alt="微信赞赏码" width="220"><br>
+      <strong>微信支付</strong> <sub>WeChat Pay</sub>
+    </td>
+    <td align="center">
+      <img src="docs/sponsors/alipay.png" alt="支付宝收款码" width="220"><br>
+      <strong>支付宝</strong> <sub>Alipay</sub>
+    </td>
+  </tr>
+</table>
 
 ## 许可
 

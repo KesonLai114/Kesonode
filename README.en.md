@@ -318,11 +318,20 @@ If this software is useful to you, consider sponsoring the author to support ong
 maintenance and development. Sponsorship is entirely voluntary and does not affect any
 feature.
 
-<p align="center">
-  <img src="docs/sponsors/wechat.png" alt="WeChat QR code" width="220">
-  &nbsp;&nbsp;&nbsp;
-  <img src="docs/sponsors/alipay.png" alt="Alipay QR code" width="220">
-</p>
+Scan the code for the platform you prefer:
+
+<table align="center">
+  <tr>
+    <td align="center">
+      <img src="docs/sponsors/wechat.png" alt="WeChat QR code" width="220"><br>
+      <strong>WeChat Pay</strong>
+    </td>
+    <td align="center">
+      <img src="docs/sponsors/alipay.png" alt="Alipay QR code" width="220"><br>
+      <strong>Alipay</strong>
+    </td>
+  </tr>
+</table>
 
 ## License
 
