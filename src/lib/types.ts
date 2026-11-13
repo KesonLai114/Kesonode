@@ -464,6 +464,20 @@ export interface SyncSettings {
    * reorganize big folders can raise it. Optional: older builds have none → default.
    */
   guard_cap?: number;
+  /**
+   * Optional, bring-your-own-key AI helper for bookmarks. All four are OPTIONAL so a
+   * settings blob written by an older build reads as "AI off" without a migration.
+   *
+   * The feature is off by default and nothing is sent anywhere until the user turns it
+   * on AND asks a question. The request goes only to `ai_base_url`, which the user typed;
+   * Kesonode has no server and never sees the key, the question or the answer.
+   * `ai_api_key` is device-local only: never uploaded, never synced, and deliberately
+   * stripped from settings backups in utils/storage.ts.
+   */
+  ai_enabled?: boolean;
+  ai_base_url?: string;
+  ai_api_key?: string;
+  ai_model?: string;
 }
 
 /**

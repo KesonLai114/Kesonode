@@ -124,7 +124,8 @@ you had in mind. Picking one system for bookmarks is the simple answer.
 ## Privacy & security
 
 - **No Kesonode servers exist.** Your data goes only to the backend you configure, and
-  none of it is ever sent to us or to any third party.
+  none of it is ever sent to us or to any third party. The one exception is the optional,
+  **off-by-default** AI assistant described below, whose data goes to a provider *you* pick.
 - **Optional E2EE** (AES-256-GCM, PBKDF2-SHA256, 600k iterations): encrypt every
   payload before it leaves your browser. It's an explicit choice you make during
   onboarding. Default off, never silently enabled or disabled. Honest threat model:
@@ -141,6 +142,21 @@ you had in mind. Picking one system for bookmarks is the simple answer.
 - **Least privilege.** `history`, `tabs`, and `management` are requested only when you
   turn those data types on. The extension-list permission is read-only: Kesonode never
   installs or removes anything.
+- **Optional AI assistant (off by default).** After entering your own API address, key
+  and model in Settings → AI assistant, you can search bookmarks in natural language,
+  get organisation suggestions, and have sync receipts or conflicts explained. A
+  question sends only a **reduced bookmark list** — title, hostname and folder path
+  (at most 400 entries). Full URLs, history, tabs, your sync storage and your credentials
+  are never sent; explaining a sync receipt or conflicts sends only counts, data-type names
+  and flags, never titles or URL samples. Requests go only to the address you entered;
+  Kesonode has no server and
+  never sees the key or the answer. The key stays on this device, is not synced, and is
+  **not included in a settings export**. Organisation suggestions are a list only:
+  nothing is written until you tick rows and a pinned restore point has been taken.
+  See [PRIVACY.md](PRIVACY.md#optional-ai-assistant).
+
+> With the AI assistant off, the "never sent to any third party" promise above has no
+> exceptions. With it on, the only new recipient is the model provider you chose and pay.
 
 ## Browser support
 

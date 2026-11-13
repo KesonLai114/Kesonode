@@ -74,9 +74,12 @@ manifest.browser_specific_settings = {
   gecko: {
     id: GECKO_ID,
     strict_min_version: STRICT_MIN_VERSION,
-    // Kesonode has no server and no telemetry — nothing is collected by us or
-    // Mozilla; all data goes to storage the user owns. Declare that explicitly
-    // (Mozilla's data-consent key; clears the AMO/web-ext "missing" notice).
+    // Default state: Kesonode has no server and no telemetry — nothing is collected by
+    // us or Mozilla; all data goes to storage the user owns. The optional AI assistant
+    // (off by default, BYOK) sends a reduced bookmark list to a provider the USER
+    // configures, never to us or Mozilla, so required collection stays "none".
+    // Re-check this declaration before any AMO submission: a user-directed transfer
+    // to a third-party model service may need to be listed under the policy then.
     data_collection_permissions: { required: ["none"] },
   },
 };

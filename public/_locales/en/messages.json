@@ -2816,5 +2816,104 @@
   },
   "opt_update_steps": {
     "message": "1. Double-click the upgrade script. It unpacks the zip into a brand-new folder (never over the old one) and copies that folder's path.\n2. Open chrome://extensions (Edge: edge://extensions; Firefox: about:debugging), then remove the old Kesonode.\n3. Choose \"Load unpacked\" and paste the copied path. Your settings are kept because the extension ID is pinned."
+  },
+  "ai_nav": {
+    "message": "AI assistant"
+  },
+  "ai_head": {
+    "message": "Connection settings"
+  },
+  "ai_privacy_notice": {
+    "message": "Off by default, with your own API key. When you ask a question, only bookmark titles, hostnames and folder paths (at most 400 entries) are sent to the address you enter. Full URLs, history, tabs and your sync storage are never sent. Kesonode has no server and never receives this data."
+  },
+  "ai_enable": {
+    "message": "Enable AI assistant"
+  },
+  "ai_enable_desc": {
+    "message": "While on, asking a question sends a reduced bookmark list to the provider configured below."
+  },
+  "ai_base_url": {
+    "message": "API base URL (OpenAI compatible)"
+  },
+  "ai_base_url_desc": {
+    "message": "For example https://api.deepseek.com/v1. Requests go to /chat/completions on that host."
+  },
+  "ai_api_key": {
+    "message": "API key"
+  },
+  "ai_api_key_desc": {
+    "message": "Stored on this device only. Never synced, never included in a settings export."
+  },
+  "ai_model": {
+    "message": "Model name"
+  },
+  "ai_model_desc": {
+    "message": "For example deepseek-chat."
+  },
+  "ai_save_test": {
+    "message": "Test connection"
+  },
+  "ai_status_ok": {
+    "message": "Connection works. Remember to save the settings at the bottom of the page."
+  },
+  "ai_err_config": {
+    "message": "Fill in the API address, key and model name first."
+  },
+  "ai_err_permission": {
+    "message": "Access to that address was not granted, so no request was sent."
+  },
+  "ai_err_request": {
+    "message": "The model service did not answer. Check the address, key, model name and network."
+  },
+  "ai_err_format": {
+    "message": "The model returned an unusable answer. Try again or use another model."
+  },
+  "ai_err_snapshot": {
+    "message": "A restore point could not be created, so no bookmarks were changed. Configure a storage backend first."
+  },
+  "ai_organize_section": {
+    "message": "Bookmark organisation suggestions"
+  },
+  "ai_organize_desc": {
+    "message": "The model suggests folders and possible duplicates. This only produces a list: you tick the rows, a pinned restore point is taken, and only then are bookmarks moved or removed."
+  },
+  "ai_organize_run": {
+    "message": "Generate suggestions"
+  },
+  "ai_organize_empty": {
+    "message": "No suggestions this time."
+  },
+  "ai_organize_moves": {
+    "message": "Suggested folders"
+  },
+  "ai_organize_duplicates": {
+    "message": "Possible duplicates (the first one is kept)"
+  },
+  "ai_organize_apply": {
+    "message": "Apply selected"
+  },
+  "ai_organize_applied": {
+    "message": "Applied. A restore point was taken first; these edits sync like any other bookmark change."
+  },
+  "ai_popup_off": {
+    "message": "AI assistant is off. Enable it in Settings → AI assistant."
+  },
+  "ai_popup_placeholder": {
+    "message": "Describe the bookmark you are looking for"
+  },
+  "ai_popup_ask": {
+    "message": "Ask"
+  },
+  "ai_popup_empty": {
+    "message": "No matching bookmarks."
+  },
+  "ai_popup_explain": {
+    "message": "Explain last sync"
+  },
+  "ai_popup_conflict": {
+    "message": "Explain conflicts"
+  },
+  "ai_popup_no_report": {
+    "message": "There is no sync record to explain yet."
   }
 }

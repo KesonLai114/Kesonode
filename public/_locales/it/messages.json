@@ -2581,5 +2581,104 @@
   },
   "opt_update_steps": {
     "message": "1. Fai doppio clic sullo script di aggiornamento: estrae lo ZIP in una cartella nuova (mai sopra la vecchia) e copia il percorso.\n2. Apri chrome://extensions (Edge: edge://extensions; Firefox: about:debugging) e rimuovi il vecchio Kesonode.\n3. Scegli «Carica estensione non pacchettizzata» e incolla il percorso copiato. Le impostazioni restano perché l'ID dell'estensione è fissato."
+  },
+  "ai_nav": {
+    "message": "Assistente AI"
+  },
+  "ai_head": {
+    "message": "Impostazioni di connessione"
+  },
+  "ai_privacy_notice": {
+    "message": "Disattivato per impostazione predefinita, con la tua chiave API. Quando fai una domanda vengono inviati all'indirizzo che inserisci solo titoli dei preferiti, nomi host e percorsi delle cartelle (al massimo 400 voci). URL completi, cronologia, schede e archivio di sincronizzazione non vengono mai inviati. Kesonode non ha server e non riceve questi dati."
+  },
+  "ai_enable": {
+    "message": "Attiva assistente AI"
+  },
+  "ai_enable_desc": {
+    "message": "Quando attivo, una domanda invia un elenco ridotto di preferiti al provider configurato qui sotto."
+  },
+  "ai_base_url": {
+    "message": "URL base API (compatibile OpenAI)"
+  },
+  "ai_base_url_desc": {
+    "message": "Per esempio https://api.deepseek.com/v1. Le richieste vanno a /chat/completions su quell'host."
+  },
+  "ai_api_key": {
+    "message": "Chiave API"
+  },
+  "ai_api_key_desc": {
+    "message": "Salvata solo su questo dispositivo. Mai sincronizzata, mai inclusa in un'esportazione delle impostazioni."
+  },
+  "ai_model": {
+    "message": "Nome del modello"
+  },
+  "ai_model_desc": {
+    "message": "Per esempio deepseek-chat."
+  },
+  "ai_save_test": {
+    "message": "Prova connessione"
+  },
+  "ai_status_ok": {
+    "message": "La connessione funziona. Ricorda di salvare le impostazioni in fondo alla pagina."
+  },
+  "ai_err_config": {
+    "message": "Inserisci prima indirizzo API, chiave e nome del modello."
+  },
+  "ai_err_permission": {
+    "message": "L'accesso a quell'indirizzo non è stato concesso, quindi non è stata inviata alcuna richiesta."
+  },
+  "ai_err_request": {
+    "message": "Il servizio del modello non ha risposto. Controlla indirizzo, chiave, modello e rete."
+  },
+  "ai_err_format": {
+    "message": "Il modello ha restituito una risposta inutilizzabile. Riprova o usa un altro modello."
+  },
+  "ai_err_snapshot": {
+    "message": "Non è stato possibile creare un punto di ripristino, quindi nessun preferito è stato modificato. Configura prima un backend di archiviazione."
+  },
+  "ai_organize_section": {
+    "message": "Suggerimenti per organizzare i preferiti"
+  },
+  "ai_organize_desc": {
+    "message": "Il modello suggerisce cartelle e possibili duplicati. Produce solo un elenco: selezioni le righe, viene creato un punto di ripristino bloccato e solo allora i preferiti vengono spostati o rimossi."
+  },
+  "ai_organize_run": {
+    "message": "Genera suggerimenti"
+  },
+  "ai_organize_empty": {
+    "message": "Nessun suggerimento questa volta."
+  },
+  "ai_organize_moves": {
+    "message": "Cartelle suggerite"
+  },
+  "ai_organize_duplicates": {
+    "message": "Possibili duplicati (si conserva il primo)"
+  },
+  "ai_organize_apply": {
+    "message": "Applica selezionati"
+  },
+  "ai_organize_applied": {
+    "message": "Applicato. Prima è stato creato un punto di ripristino; queste modifiche si sincronizzano come qualsiasi altra modifica ai preferiti."
+  },
+  "ai_popup_off": {
+    "message": "L'assistente AI è disattivato. Attivalo in Impostazioni → Assistente AI."
+  },
+  "ai_popup_placeholder": {
+    "message": "Descrivi il preferito che cerchi"
+  },
+  "ai_popup_ask": {
+    "message": "Chiedi"
+  },
+  "ai_popup_empty": {
+    "message": "Nessun preferito corrispondente."
+  },
+  "ai_popup_explain": {
+    "message": "Spiega l'ultima sincronizzazione"
+  },
+  "ai_popup_conflict": {
+    "message": "Spiega i conflitti"
+  },
+  "ai_popup_no_report": {
+    "message": "Non c'è ancora alcun record di sincronizzazione da spiegare."
   }
 }

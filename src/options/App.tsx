@@ -60,6 +60,7 @@ import {
 import { BookmarkExclusionTree } from "@/lib/ui/bookmark-exclusion-tree";
 import { BookmarkList } from "@/lib/ui/bookmark-list";
 import { ConflictsSection } from "@/options/conflicts-section";
+import { AiSection } from "@/options/ai-section";
 // Shown in the About section. The manifest is the single source of truth for the
 // version — bump `package.json` and the build stamps it into the manifest.
 const APP_VERSION = browser.runtime.getManifest().version;
@@ -276,10 +277,10 @@ const IMPORT_FOLDER_NAME = "Kesonode Import";
 
 // ─── Nav ──────────────────────────────────────────────────────────────────
 
-type NavSection = "backend" | "data" | "device" | "activity" | "advanced";
+type NavSection = "backend" | "data" | "device" | "ai" | "activity" | "advanced";
 
 /** Tabs with settings to save. Statistics and Activity have none, so no bar there. */
-const SAVEABLE_TABS = new Set<NavSection>(["backend", "data", "device", "advanced"]);
+const SAVEABLE_TABS = new Set<NavSection>(["backend", "data", "device", "ai", "advanced"]);
 
 // Text only. The tab icons were noise: six glyphs competing with six words that
 // already said the same thing, in the one strip that has to stay legible when the
@@ -288,6 +289,7 @@ const NAV: { id: NavSection; labelKey: string }[] = [
   { id: "backend",  labelKey: "opt_nav_backend" },
   { id: "data",     labelKey: "opt_nav_data" },
   { id: "device",   labelKey: "opt_nav_device" },
+  { id: "ai",       labelKey: "ai_nav" },
   { id: "advanced", labelKey: "opt_nav_advanced" },
   { id: "activity", labelKey: "opt_nav_activity" },
 ];
@@ -4069,6 +4071,14 @@ export default function OptionsApp() {
               </div>
             );
           })()}
+
+          {/* ── AI ASSISTANT (opt-in, bring your own key) ── */}
+          {activeNav === "ai" && (
+            <div className="section-wrap">
+              <h1 className="page-title">{t("ai_nav")}</h1>
+              {settings ? <AiSection settings={settings} onChange={update} /> : null}
+            </div>
+          )}
 
           {/* ── ADVANCED ── */}
           {activeNav === "advanced" && (

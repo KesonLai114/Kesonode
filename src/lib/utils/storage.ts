@@ -211,6 +211,12 @@ export const DEFAULT_SETTINGS: SyncSettings = {
   // 30%-of-tree check; both are overridable in Settings → Advanced.
   guard_enabled: true,
   guard_cap: 20,
+  // AI helper: OFF until the user opts in. No default endpoint and no default key, so a
+  // fresh install cannot send a request even if a button is pressed before setup.
+  ai_enabled: false,
+  ai_base_url: "",
+  ai_api_key: "",
+  ai_model: "",
 };
 
 export const DEFAULT_STATE: SyncState = {
@@ -662,6 +668,13 @@ export const SETTINGS_BACKUP_SCHEMA: Record<keyof SyncSettings, BackupField> = {
   // Capped so a typo can't disable the guard entirely: a cap of 0 would hold every cycle,
   // so the lower bound is 1; the upper bound keeps it from swallowing a whole large tree.
   guard_cap: { validate: (v) => isPositiveNumber(v) && v <= 1000 },
+  // The AI key is validated here only so it can be restored from an (encrypted) backup
+  // that explicitly carries it. exportSettingsBackup removes it from EVERY exported file;
+  // see the delete below. The base URL is validated on use by aiEndpoint() instead.
+  ai_enabled: { validate: isBoolean },
+  ai_base_url: { validate: isString },
+  ai_api_key: { validate: isString },
+  ai_model: { validate: isString },
 };
 
 export const BACKUP_SETTINGS_FIELDS = Object.keys(SETTINGS_BACKUP_SCHEMA) as (keyof SyncSettings)[];
@@ -710,6 +723,11 @@ export async function exportSettingsBackup(
     const value = current[field];
     if (value !== undefined) portable[field] = value;
   }
+  // The AI key is NOT a Kesonode credential and is never portable, not even in the
+  // encrypted "include credentials" file. A settings export is a file people move
+  // between machines and sometimes paste into an issue; an LLM API key must not travel
+  // with it. On import the absent field means "keep what this install has".
+  delete portable.ai_api_key;
 
   if (!options.includeCredentials) {
     // Missing, not empty: the importer's rule for an absent field is "keep what this

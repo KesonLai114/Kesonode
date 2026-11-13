@@ -1,6 +1,6 @@
 # Kesonode Privacy Policy
 
-_Last updated: November 4, 2026_
+_Last updated: November 13, 2026_
 
 ## The short version
 
@@ -11,6 +11,11 @@ storage backend **you** choose and sign in to (Google Drive, GitHub, or a WebDAV
 server). We don't track you, show ads, or use analytics.
 
 In plain terms: **your data stays yours.** Kesonode is the pipe, not the destination.
+
+**One opt-in exception.** The optional AI assistant is OFF unless you enable it and enter
+your own API address, key and model. When you ask it a question, a reduced bookmark list
+is sent to that address — to a service **you** chose and pay for, never to us. See
+[Optional AI assistant](#optional-ai-assistant) for exactly what leaves the device.
 
 ## Who this policy covers
 
@@ -39,8 +44,10 @@ choices, Kesonode may read:
   device"). Kesonode reads this list only; it **cannot install, remove, enable, or disable**
   any extension.
 
-Kesonode reads this data **only to sync it to the storage backend you selected.** It
-is not used for any other purpose.
+Kesonode reads this data **only to sync it to the storage backend you selected.** With the
+AI assistant off — the default — it is not used for any other purpose. With it on, only the
+reduced bookmark list described in [Optional AI assistant](#optional-ai-assistant) is
+used for the question you explicitly asked.
 
 The browser permissions for the more sensitive types (**history**, **open tabs**,
 and the **extension list**) are **requested when you turn that type on**, not at
@@ -48,6 +55,48 @@ install time. If you never enable them, Kesonode never holds those permissions a
 never reads that data. Open tabs asks for the **tab groups** permission in the same
 request, where your browser has it, so group names and colours can travel; you can
 switch that part off in Settings and keep syncing the tabs.
+
+## Optional AI assistant
+
+Kesonode ships an optional natural-language helper for bookmarks. It is **off by default**,
+has **no built-in endpoint or key**, and does nothing at all until all three of these are
+true: you turned it on in Settings → AI assistant, you entered an API base URL, an API key
+and a model name yourself, and you pressed a button that asks a question. There is no
+background call, no automatic classification and no telemetry.
+
+**What is sent, and where.** A single non-streaming HTTPS request goes to the address you
+entered, using an OpenAI-compatible `/chat/completions` shape. The request body contains
+your question and a **reduced bookmark list**: each entry's title, hostname and folder
+path, at most 400 entries. Before the list is built, bookmarks excluded from sync are
+removed, non-web URL schemes are dropped, and URLs carrying a token or key in the query
+or fragment are skipped. **Never sent:** full URLs (including query strings and fragments),
+browsing history, open tabs, extension lists, your storage backend address, sync files,
+device identifiers, or any credential other than the API key in the request's
+Authorization header. Explaining a sync receipt or pending conflicts sends **only counts,
+data-type names and boolean flags** — the receipt's bookmark samples and the parked
+conflict payloads (which contain titles and URLs) stay on the device. The endpoint's host
+permission is requested only when you first use the feature, and is not requested at
+install time.
+
+**Who receives it.** Only the provider whose address you entered. Kesonode operates no
+server, proxy or relay, so the maintainer never receives the question, the bookmark list,
+the key or the answer. That provider's own privacy policy and retention rules then apply;
+choosing the provider is entirely yours, including self-hosted/local endpoints.
+
+**What is stored.** The API base URL, key and model name live in `storage.local` on this
+device only, in the same unencrypted-at-rest local store as the other credentials. The
+key is never synced to your backend and is deliberately **stripped from every settings
+export**, including the encrypted "include credentials" one — a backup you move between
+machines must not carry an LLM key. Turning the feature off, or clearing the fields,
+stops all further requests immediately; previously sent data is governed by your
+provider's policy, not ours.
+
+**What it can change.** Searching and explanations are read-only. The organisation
+suggestions are a *plan*: nothing is written to your bookmarks until you tick individual
+rows and press Apply, and Apply takes a pinned restore point **before** the first edit.
+Moves and removals are ordinary bookmark edits, so they travel through the normal sync
+like any edit you make yourself. Model output is treated as untrusted: returned bookmark
+ids are checked against the ids actually sent, and text is rendered as text only.
 
 ## Where your data goes
 
@@ -165,7 +214,9 @@ do not use it for advertising or any purpose other than providing the sync featu
 - We do **not** run servers or databases that hold your data.
 - We do **not** collect analytics, usage statistics, or telemetry.
 - We do **not** use tracking, advertising, or fingerprinting.
-- We do **not** sell, rent, or share your data with anyone.
+- We do **not** sell, rent, or share your data with anyone. The opt-in AI assistant sends
+  a reduced bookmark list to the provider **you** configured; we never receive it (see
+  [Optional AI assistant](#optional-ai-assistant)).
 
 ## Data retention and deletion
 
@@ -208,7 +259,8 @@ version with the source tree and the release folders under `插件版本/`.
 
 Kesonode is distributed locally and has no issue tracker, support address or store
 listing of its own. Nothing in this extension sends data to a maintainer: credentials
-stay on your device and sync data goes only to the backend you configured.
+stay on your device, sync data goes only to the backend you configured, and the optional
+AI assistant's requests go only to the endpoint you configured — never to us.
 
 _This policy ships with the source tree and applies to every build of Kesonode, including
 the packages under `插件版本/` and builds you make yourself from source._

@@ -2581,5 +2581,104 @@
   },
   "opt_update_steps": {
     "message": "1. 双击升级脚本，它会把压缩包解压到一个全新文件夹（绝不覆盖旧目录）并把路径复制到剪贴板。\n2. 打开 chrome://extensions（Edge：edge://extensions；Firefox：about:debugging），移除旧的 Kesonode。\n3. 点「加载已解压的扩展程序」并粘贴刚才复制的路径。扩展 ID 已固定，配置会自动保留。"
+  },
+  "ai_nav": {
+    "message": "AI 助手"
+  },
+  "ai_head": {
+    "message": "连接设置"
+  },
+  "ai_privacy_notice": {
+    "message": "此功能默认关闭，使用你自己的 API 密钥。提问时只会把书签标题、域名和文件夹路径（最多 400 条）发送到你填写的接口地址；完整网址、历史记录、标签页和同步存储都不会发送。Kesonode 没有服务器，也不会收到这些数据。"
+  },
+  "ai_enable": {
+    "message": "启用 AI 助手"
+  },
+  "ai_enable_desc": {
+    "message": "开启后，提问时会把精简后的书签清单发送到下方配置的服务商。"
+  },
+  "ai_base_url": {
+    "message": "接口地址（OpenAI 兼容）"
+  },
+  "ai_base_url_desc": {
+    "message": "例如 https://api.deepseek.com/v1，请求会发往该地址的 /chat/completions。"
+  },
+  "ai_api_key": {
+    "message": "API Key"
+  },
+  "ai_api_key_desc": {
+    "message": "仅保存在本机，不参与同步，也不会随设置导出。"
+  },
+  "ai_model": {
+    "message": "模型名称"
+  },
+  "ai_model_desc": {
+    "message": "例如 deepseek-chat。"
+  },
+  "ai_save_test": {
+    "message": "测试连接"
+  },
+  "ai_status_ok": {
+    "message": "连接成功。请记得在页面底部保存设置。"
+  },
+  "ai_err_config": {
+    "message": "请先填写接口地址、API Key 和模型名称。"
+  },
+  "ai_err_permission": {
+    "message": "未获得该地址的访问权限，未发送任何请求。"
+  },
+  "ai_err_request": {
+    "message": "模型服务没有响应，请检查地址、密钥、模型名称与网络。"
+  },
+  "ai_err_format": {
+    "message": "模型返回了无法使用的结果，请重试或更换模型。"
+  },
+  "ai_err_snapshot": {
+    "message": "无法建立还原点，因此没有改动任何书签。请先配置存储后端。"
+  },
+  "ai_organize_section": {
+    "message": "书签整理建议"
+  },
+  "ai_organize_desc": {
+    "message": "由模型建议归档位置和疑似重复项。这里只生成清单：你逐项勾选后，会先建立固定还原点，再移动或删除书签。"
+  },
+  "ai_organize_run": {
+    "message": "生成建议"
+  },
+  "ai_organize_empty": {
+    "message": "这次没有可整理的建议。"
+  },
+  "ai_organize_moves": {
+    "message": "归档建议"
+  },
+  "ai_organize_duplicates": {
+    "message": "疑似重复（保留第一条）"
+  },
+  "ai_organize_apply": {
+    "message": "应用所选"
+  },
+  "ai_organize_applied": {
+    "message": "已应用。操作前已建立还原点；这些改动会像普通书签编辑一样参与同步。"
+  },
+  "ai_popup_off": {
+    "message": "AI 助手未启用，请到「设置 → AI 助手」开启。"
+  },
+  "ai_popup_placeholder": {
+    "message": "用一句话描述你要找的书签"
+  },
+  "ai_popup_ask": {
+    "message": "提问"
+  },
+  "ai_popup_empty": {
+    "message": "没有找到匹配的书签。"
+  },
+  "ai_popup_explain": {
+    "message": "解释上次同步"
+  },
+  "ai_popup_conflict": {
+    "message": "解释当前冲突"
+  },
+  "ai_popup_no_report": {
+    "message": "暂时没有可解释的同步记录。"
   }
 }

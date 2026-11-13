@@ -2581,5 +2581,104 @@
   },
   "opt_update_steps": {
     "message": "1. Indítsd el a frissítő szkriptet dupla kattintással: a ZIP-et új mappába bontja ki (soha nem a régi fölé), és másolja az utat.\n2. Nyisd meg a chrome://extensions oldalt (Edge: edge://extensions; Firefox: about:debugging), és távolítsd el a régi Kesonode-ot.\n3. Válaszd a „Kicsomagolt bővítmény betöltése” lehetőséget, és illeszd be a másolt útvonalat. A beállítások megmaradnak, mert a bővítmény azonosítója rögzített."
+  },
+  "ai_nav": {
+    "message": "AI-asszisztens"
+  },
+  "ai_head": {
+    "message": "Kapcsolat beállításai"
+  },
+  "ai_privacy_notice": {
+    "message": "Alapértelmezés szerint ki van kapcsolva, és a saját API-kulcsodat használja. Kérdés esetén csak a könyvjelzők címe, a gazdagépnevek és a mappák elérési útja (legfeljebb 400 tétel) kerül a megadott címre. Teljes URL-ek, előzmények, lapok és a szinkrontároló soha nem kerülnek elküldésre. A Kesonode-nak nincs szervere, és nem kapja meg ezeket az adatokat."
+  },
+  "ai_enable": {
+    "message": "AI-asszisztens bekapcsolása"
+  },
+  "ai_enable_desc": {
+    "message": "Bekapcsolva egy kérdés a lent beállított szolgáltatónak küldi a csökkentett könyvjelzőlistát."
+  },
+  "ai_base_url": {
+    "message": "API alap URL (OpenAI-kompatibilis)"
+  },
+  "ai_base_url_desc": {
+    "message": "Például https://api.deepseek.com/v1. A kérések a gazdagép /chat/completions útvonalára mennek."
+  },
+  "ai_api_key": {
+    "message": "API-kulcs"
+  },
+  "ai_api_key_desc": {
+    "message": "Csak ezen az eszközön tárolódik. Nem szinkronizálódik, és nem kerül be a beállítások exportjába."
+  },
+  "ai_model": {
+    "message": "Modell neve"
+  },
+  "ai_model_desc": {
+    "message": "Például deepseek-chat."
+  },
+  "ai_save_test": {
+    "message": "Kapcsolat tesztelése"
+  },
+  "ai_status_ok": {
+    "message": "A kapcsolat működik. Ne felejtsd el menteni a beállításokat az oldal alján."
+  },
+  "ai_err_config": {
+    "message": "Először add meg az API-címet, a kulcsot és a modell nevét."
+  },
+  "ai_err_permission": {
+    "message": "A címhez nem kaptunk hozzáférést, ezért nem küldtünk kérést."
+  },
+  "ai_err_request": {
+    "message": "A modellszolgáltatás nem válaszolt. Ellenőrizd a címet, a kulcsot, a modellt és a hálózatot."
+  },
+  "ai_err_format": {
+    "message": "A modell használhatatlan választ adott. Próbáld újra, vagy válassz másik modellt."
+  },
+  "ai_err_snapshot": {
+    "message": "Nem sikerült visszaállítási pontot létrehozni, ezért egy könyvjelző sem változott. Először állíts be egy tároló backendet."
+  },
+  "ai_organize_section": {
+    "message": "Könyvjelző-rendezési javaslatok"
+  },
+  "ai_organize_desc": {
+    "message": "A modell mappákat és lehetséges duplikátumokat javasol. Ez csak egy listát készít: kipipálod a sorokat, rögzített visszaállítási pont készül, és csak ezután mozgatunk vagy törlünk könyvjelzőket."
+  },
+  "ai_organize_run": {
+    "message": "Javaslatok készítése"
+  },
+  "ai_organize_empty": {
+    "message": "Most nincs javaslat."
+  },
+  "ai_organize_moves": {
+    "message": "Javasolt mappák"
+  },
+  "ai_organize_duplicates": {
+    "message": "Lehetséges duplikátumok (az első megmarad)"
+  },
+  "ai_organize_apply": {
+    "message": "Kijelöltek alkalmazása"
+  },
+  "ai_organize_applied": {
+    "message": "Alkalmazva. Előtte visszaállítási pont készült; ezek a módosítások ugyanúgy szinkronizálódnak, mint bármely más könyvjelző-szerkesztés."
+  },
+  "ai_popup_off": {
+    "message": "Az AI-asszisztens ki van kapcsolva. Kapcsold be: Beállítások → AI-asszisztens."
+  },
+  "ai_popup_placeholder": {
+    "message": "Írd le, melyik könyvjelzőt keresed"
+  },
+  "ai_popup_ask": {
+    "message": "Kérdezés"
+  },
+  "ai_popup_empty": {
+    "message": "Nincs egyező könyvjelző."
+  },
+  "ai_popup_explain": {
+    "message": "Utolsó szinkron magyarázata"
+  },
+  "ai_popup_conflict": {
+    "message": "Ütközések magyarázata"
+  },
+  "ai_popup_no_report": {
+    "message": "Még nincs megmagyarázható szinkronizálási jegyzőkönyv."
   }
 }

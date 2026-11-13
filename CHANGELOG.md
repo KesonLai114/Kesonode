@@ -10,6 +10,22 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **An optional AI assistant for bookmarks — off by default, bring your own key.** Settings →
+  AI assistant takes an OpenAI-compatible base URL, a key and a model name; nothing leaves
+  the device until the feature is enabled AND a question is asked. One non-streaming
+  `/chat/completions` request carries only a reduced bookmark list — title, hostname and
+  folder path, capped at 400 entries — after sync exclusions, unsafe schemes and URLs
+  carrying tokens have been removed. The endpoint's host permission is requested on first
+  use, not at install. Three things share that one channel: natural-language bookmark
+  search in the popup, organisation suggestions in Settings (a plan only — tick rows, take
+  a pinned restore point, then apply), and one-tap explanations of the last sync receipt or
+  pending conflicts. Model output is untrusted: every returned id is checked against the
+  ids actually sent, and answers are rendered as text. The key stays in `storage.local`,
+  is never synced, and is stripped from every settings export including the encrypted one.
+  README.md, README.en.md and PRIVACY.md now spell out the single new data recipient.
+
 ## [1.5.18] - 2026-11-12
 
 ### Added

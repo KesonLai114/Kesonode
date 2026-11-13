@@ -2581,5 +2581,104 @@
   },
   "opt_update_steps": {
     "message": "1. 雙擊升級指令稿，它會把壓縮包解壓縮到全新資料夾（絕不覆蓋舊目錄）並把路徑複製到剪貼簿。\n2. 開啟 chrome://extensions（Edge：edge://extensions；Firefox：about:debugging），移除舊的 Kesonode。\n3. 點「載入未封裝項目」並貼上剛才複製的路徑。擴充功能 ID 已固定，設定會自動保留。"
+  },
+  "ai_nav": {
+    "message": "AI 助理"
+  },
+  "ai_head": {
+    "message": "連線設定"
+  },
+  "ai_privacy_notice": {
+    "message": "此功能預設關閉，使用你自己的 API 金鑰。提問時只會把書籤標題、網域名稱和資料夾路徑（最多 400 筆）傳送到你填寫的介面位址；完整網址、瀏覽記錄、分頁和同步儲存空間都不會傳送。Kesonode 沒有伺服器，也不會收到這些資料。"
+  },
+  "ai_enable": {
+    "message": "啟用 AI 助理"
+  },
+  "ai_enable_desc": {
+    "message": "開啟後，提問時會把精簡後的書籤清單傳送到下方設定的服務商。"
+  },
+  "ai_base_url": {
+    "message": "介面位址（相容 OpenAI）"
+  },
+  "ai_base_url_desc": {
+    "message": "例如 https://api.deepseek.com/v1，請求會送往該位址的 /chat/completions。"
+  },
+  "ai_api_key": {
+    "message": "API 金鑰"
+  },
+  "ai_api_key_desc": {
+    "message": "只儲存在本機，不參與同步，也不會隨設定匯出。"
+  },
+  "ai_model": {
+    "message": "模型名稱"
+  },
+  "ai_model_desc": {
+    "message": "例如 deepseek-chat。"
+  },
+  "ai_save_test": {
+    "message": "測試連線"
+  },
+  "ai_status_ok": {
+    "message": "連線成功。請記得在頁面底部儲存設定。"
+  },
+  "ai_err_config": {
+    "message": "請先填寫介面位址、API 金鑰與模型名稱。"
+  },
+  "ai_err_permission": {
+    "message": "未取得該位址的存取權限，因此沒有傳送任何請求。"
+  },
+  "ai_err_request": {
+    "message": "模型服務沒有回應，請檢查位址、金鑰、模型名稱與網路。"
+  },
+  "ai_err_format": {
+    "message": "模型回傳了無法使用的結果，請重試或更換模型。"
+  },
+  "ai_err_snapshot": {
+    "message": "無法建立還原點，因此沒有變動任何書籤。請先設定儲存後端。"
+  },
+  "ai_organize_section": {
+    "message": "書籤整理建議"
+  },
+  "ai_organize_desc": {
+    "message": "由模型建議歸檔位置與疑似重複項目。這裡只產生清單：你逐項勾選後，會先建立固定還原點，再移動或刪除書籤。"
+  },
+  "ai_organize_run": {
+    "message": "產生建議"
+  },
+  "ai_organize_empty": {
+    "message": "這次沒有可整理的建議。"
+  },
+  "ai_organize_moves": {
+    "message": "歸檔建議"
+  },
+  "ai_organize_duplicates": {
+    "message": "疑似重複（保留第一筆）"
+  },
+  "ai_organize_apply": {
+    "message": "套用所選"
+  },
+  "ai_organize_applied": {
+    "message": "已套用。操作前已建立還原點；這些變動會像一般書籤編輯一樣參與同步。"
+  },
+  "ai_popup_off": {
+    "message": "AI 助理未啟用，請到「設定 → AI 助理」開啟。"
+  },
+  "ai_popup_placeholder": {
+    "message": "用一句話描述你要找的書籤"
+  },
+  "ai_popup_ask": {
+    "message": "提問"
+  },
+  "ai_popup_empty": {
+    "message": "找不到符合的書籤。"
+  },
+  "ai_popup_explain": {
+    "message": "解釋上次同步"
+  },
+  "ai_popup_conflict": {
+    "message": "解釋目前的衝突"
+  },
+  "ai_popup_no_report": {
+    "message": "目前沒有可解釋的同步記錄。"
   }
 }

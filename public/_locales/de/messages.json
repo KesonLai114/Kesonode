@@ -2581,5 +2581,104 @@
   },
   "opt_update_steps": {
     "message": "1. Doppelklicke auf das Upgrade-Skript. Es entpackt das ZIP in einen neuen Ordner (niemals über den alten) und kopiert den Pfad.\n2. Öffne chrome://extensions (Edge: edge://extensions; Firefox: about:debugging) und entferne das alte Kesonode.\n3. Wähle „Entpackte Erweiterung laden“ und füge den kopierten Pfad ein. Die Einstellungen bleiben erhalten, weil die Erweiterungs-ID festgelegt ist."
+  },
+  "ai_nav": {
+    "message": "KI-Assistent"
+  },
+  "ai_head": {
+    "message": "Verbindungseinstellungen"
+  },
+  "ai_privacy_notice": {
+    "message": "Standardmäßig aus, mit deinem eigenen API-Schlüssel. Bei einer Frage werden nur Lesezeichen-Titel, Hostnamen und Ordnerpfade (höchstens 400 Einträge) an die von dir eingegebene Adresse gesendet. Vollständige URLs, Verlauf, Tabs und dein Sync-Speicher werden nie gesendet. Kesonode hat keinen Server und erhält diese Daten nicht."
+  },
+  "ai_enable": {
+    "message": "KI-Assistent aktivieren"
+  },
+  "ai_enable_desc": {
+    "message": "Wenn aktiv, sendet eine Frage eine reduzierte Lesezeichenliste an den unten konfigurierten Anbieter."
+  },
+  "ai_base_url": {
+    "message": "API-Basis-URL (OpenAI-kompatibel)"
+  },
+  "ai_base_url_desc": {
+    "message": "Zum Beispiel https://api.deepseek.com/v1. Anfragen gehen an /chat/completions auf diesem Host."
+  },
+  "ai_api_key": {
+    "message": "API-Schlüssel"
+  },
+  "ai_api_key_desc": {
+    "message": "Nur auf diesem Gerät gespeichert. Nie synchronisiert, nie in einem Einstellungs-Export enthalten."
+  },
+  "ai_model": {
+    "message": "Modellname"
+  },
+  "ai_model_desc": {
+    "message": "Zum Beispiel deepseek-chat."
+  },
+  "ai_save_test": {
+    "message": "Verbindung testen"
+  },
+  "ai_status_ok": {
+    "message": "Verbindung funktioniert. Speichere die Einstellungen unten auf der Seite."
+  },
+  "ai_err_config": {
+    "message": "Bitte zuerst API-Adresse, Schlüssel und Modellnamen eingeben."
+  },
+  "ai_err_permission": {
+    "message": "Zugriff auf diese Adresse wurde nicht erteilt, daher wurde keine Anfrage gesendet."
+  },
+  "ai_err_request": {
+    "message": "Der Modelldienst hat nicht geantwortet. Prüfe Adresse, Schlüssel, Modellname und Netzwerk."
+  },
+  "ai_err_format": {
+    "message": "Das Modell hat eine unbrauchbare Antwort geliefert. Versuche es erneut oder wähle ein anderes Modell."
+  },
+  "ai_err_snapshot": {
+    "message": "Es konnte kein Wiederherstellungspunkt erstellt werden, daher wurden keine Lesezeichen geändert. Konfiguriere zuerst einen Speicher-Backend."
+  },
+  "ai_organize_section": {
+    "message": "Vorschläge zur Lesezeichen-Ordnung"
+  },
+  "ai_organize_desc": {
+    "message": "Das Modell schlägt Ordner und mögliche Duplikate vor. Es entsteht nur eine Liste: Du wählst Zeilen aus, ein angehefteter Wiederherstellungspunkt wird erstellt, und erst danach werden Lesezeichen verschoben oder entfernt."
+  },
+  "ai_organize_run": {
+    "message": "Vorschläge erzeugen"
+  },
+  "ai_organize_empty": {
+    "message": "Diesmal keine Vorschläge."
+  },
+  "ai_organize_moves": {
+    "message": "Vorgeschlagene Ordner"
+  },
+  "ai_organize_duplicates": {
+    "message": "Mögliche Duplikate (das erste bleibt)"
+  },
+  "ai_organize_apply": {
+    "message": "Auswahl anwenden"
+  },
+  "ai_organize_applied": {
+    "message": "Angewendet. Zuvor wurde ein Wiederherstellungspunkt erstellt; diese Änderungen werden wie jede andere Lesezeichen-Änderung synchronisiert."
+  },
+  "ai_popup_off": {
+    "message": "KI-Assistent ist aus. Aktiviere ihn unter Einstellungen → KI-Assistent."
+  },
+  "ai_popup_placeholder": {
+    "message": "Beschreibe das gesuchte Lesezeichen"
+  },
+  "ai_popup_ask": {
+    "message": "Fragen"
+  },
+  "ai_popup_empty": {
+    "message": "Keine passenden Lesezeichen."
+  },
+  "ai_popup_explain": {
+    "message": "Letzte Synchronisierung erklären"
+  },
+  "ai_popup_conflict": {
+    "message": "Konflikte erklären"
+  },
+  "ai_popup_no_report": {
+    "message": "Es gibt noch keinen Sync-Bericht zum Erklären."
   }
 }

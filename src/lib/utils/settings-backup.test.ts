@@ -446,7 +446,19 @@ describe("settings backup compatibility matrix", () => {
     );
     const exported = Object.keys(keysOf(included).settings as unknown as Record<string, unknown>);
     expect(exported.every((k) => (BACKUP_SETTINGS_FIELDS as string[]).includes(k))).toBe(true);
-    for (const key of Object.keys(DEFAULT_SETTINGS)) expect(exported).toContain(key);
+    // Every setting travels except the AI key. It is deliberately stripped from BOTH
+    // export forms in exportSettingsBackup(): a settings backup is a file people move
+    // between machines, and a bring-your-own-key LLM credential must not travel with it.
+    const neverExported = ["ai_api_key"];
+    for (const key of Object.keys(DEFAULT_SETTINGS)) {
+      if (neverExported.includes(key)) continue;
+      expect(exported).toContain(key);
+    }
+    for (const key of neverExported) {
+      expect(exported).not.toContain(key);
+      expect(Object.keys(keysOf(redacted).settings as unknown as Record<string, unknown>))
+        .not.toContain(key);
+    }
   });
 
   it("the schema covers every setting, including the optional ones", () => {

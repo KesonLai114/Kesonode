@@ -11,6 +11,7 @@ import { reviewPageFor } from "@/lib/store-review";
 import { STATE_UPDATE } from "@/lib/constants";
 import { streamState, streamInputFor, streamColor, streamLabelKey } from "@/popup/stream-state";
 import { groupConflictsByDevice } from "@/popup/conflict-groups";
+import { AiPanel } from "@/popup/ai-panel";
 import { t, plural, catalogueLocale } from "@/lib/utils/i18n";
 import { relativeTime } from "@/lib/device-activity";
 import { dataTypeApiPresent, hasPermission } from "@/lib/utils/capabilities";
@@ -932,6 +933,9 @@ export default function PopupApp() {
           </div>
         )}
       </section>
+
+      {/* ── Optional AI panel (off unless enabled in Settings → AI assistant) ── */}
+      {settings ? <AiPanel settings={settings} state={state} onOpen={openUrl} /> : null}
 
       {/* ── Reading list (P1) ── */}
       <section className="mt-4">

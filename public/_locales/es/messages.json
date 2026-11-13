@@ -2581,5 +2581,104 @@
   },
   "opt_update_steps": {
     "message": "1. Haz doble clic en el script de actualización: descomprime el ZIP en una carpeta nueva (nunca sobre la antigua) y copia la ruta.\n2. Abre chrome://extensions (Edge: edge://extensions; Firefox: about:debugging) y elimina el Kesonode antiguo.\n3. Elige «Cargar extensión sin empaquetar» y pega la ruta copiada. La configuración se conserva porque el ID de la extensión está fijado."
+  },
+  "ai_nav": {
+    "message": "Asistente de IA"
+  },
+  "ai_head": {
+    "message": "Configuración de conexión"
+  },
+  "ai_privacy_notice": {
+    "message": "Desactivado por defecto y con tu propia clave API. Al preguntar solo se envían a la dirección que indiques los títulos de marcadores, nombres de host y rutas de carpetas (400 entradas como máximo). Nunca se envían URL completas, historial, pestañas ni tu almacenamiento de sincronización. Kesonode no tiene servidor y nunca recibe estos datos."
+  },
+  "ai_enable": {
+    "message": "Activar asistente de IA"
+  },
+  "ai_enable_desc": {
+    "message": "Mientras esté activo, una pregunta envía una lista reducida de marcadores al proveedor configurado abajo."
+  },
+  "ai_base_url": {
+    "message": "URL base de la API (compatible con OpenAI)"
+  },
+  "ai_base_url_desc": {
+    "message": "Por ejemplo https://api.deepseek.com/v1. Las peticiones van a /chat/completions en ese host."
+  },
+  "ai_api_key": {
+    "message": "Clave API"
+  },
+  "ai_api_key_desc": {
+    "message": "Se guarda solo en este dispositivo. Nunca se sincroniza ni se incluye en una exportación de ajustes."
+  },
+  "ai_model": {
+    "message": "Nombre del modelo"
+  },
+  "ai_model_desc": {
+    "message": "Por ejemplo deepseek-chat."
+  },
+  "ai_save_test": {
+    "message": "Probar conexión"
+  },
+  "ai_status_ok": {
+    "message": "La conexión funciona. Recuerda guardar los ajustes al final de la página."
+  },
+  "ai_err_config": {
+    "message": "Introduce primero la dirección de la API, la clave y el nombre del modelo."
+  },
+  "ai_err_permission": {
+    "message": "No se concedió acceso a esa dirección, por lo que no se envió ninguna petición."
+  },
+  "ai_err_request": {
+    "message": "El servicio de modelos no respondió. Comprueba la dirección, la clave, el modelo y la red."
+  },
+  "ai_err_format": {
+    "message": "El modelo devolvió una respuesta no utilizable. Reinténtalo o usa otro modelo."
+  },
+  "ai_err_snapshot": {
+    "message": "No se pudo crear un punto de restauración, por lo que no se cambió ningún marcador. Configura primero un backend de almacenamiento."
+  },
+  "ai_organize_section": {
+    "message": "Sugerencias para organizar marcadores"
+  },
+  "ai_organize_desc": {
+    "message": "El modelo sugiere carpetas y posibles duplicados. Solo produce una lista: marcas las filas, se crea un punto de restauración fijado y solo entonces se mueven o eliminan marcadores."
+  },
+  "ai_organize_run": {
+    "message": "Generar sugerencias"
+  },
+  "ai_organize_empty": {
+    "message": "Esta vez no hay sugerencias."
+  },
+  "ai_organize_moves": {
+    "message": "Carpetas sugeridas"
+  },
+  "ai_organize_duplicates": {
+    "message": "Posibles duplicados (se conserva el primero)"
+  },
+  "ai_organize_apply": {
+    "message": "Aplicar selección"
+  },
+  "ai_organize_applied": {
+    "message": "Aplicado. Antes se creó un punto de restauración; estos cambios se sincronizan como cualquier otra edición de marcadores."
+  },
+  "ai_popup_off": {
+    "message": "El asistente de IA está desactivado. Actívalo en Ajustes → Asistente de IA."
+  },
+  "ai_popup_placeholder": {
+    "message": "Describe el marcador que buscas"
+  },
+  "ai_popup_ask": {
+    "message": "Preguntar"
+  },
+  "ai_popup_empty": {
+    "message": "No hay marcadores coincidentes."
+  },
+  "ai_popup_explain": {
+    "message": "Explicar la última sincronización"
+  },
+  "ai_popup_conflict": {
+    "message": "Explicar los conflictos"
+  },
+  "ai_popup_no_report": {
+    "message": "Todavía no hay ningún registro de sincronización que explicar."
   }
 }
