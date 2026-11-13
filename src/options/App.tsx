@@ -20,6 +20,7 @@ import { duplicateRemovalPlan } from "@/lib/cleanup";
 import {
   buildDataBackup, readDataBackup, type DataBackupBookmarkNode,
 } from "@/lib/utils/data-backup";
+import { UpdateSection } from "@/options/update-section";
 
 /**
  * The device row used to print the internal ids ("bookmarks, sessions") in the middle
@@ -4511,6 +4512,8 @@ export default function OptionsApp() {
                   <span className="mono-value">{folderPathFor(settings.compat_mode)}</span>
                 </div>
               </div>
+
+              <UpdateSection />
 
               <div className="settings-section">
                 <div className="settings-card-head">{t("opt_about_section")}</div>

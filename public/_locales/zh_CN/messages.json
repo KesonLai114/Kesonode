@@ -2498,5 +2498,88 @@
   },
   "opt_cleanup_host_needed": {
     "message": "检查死链需要访问书签中网站的权限。重复书签仍已完成扫描。"
+  },
+  "opt_update_section": {
+    "message": "软件更新"
+  },
+  "opt_update_section_sub": {
+    "message": "本地加载的扩展无法替换自己的代码。升级助手会先校验新安装包并解压，最后一步仍需由浏览器确认。"
+  },
+  "opt_update_check_label": {
+    "message": "检查更新"
+  },
+  "opt_update_check_desc": {
+    "message": "仅在你点击按钮时向 GitHub 查询一次版本号；不会发送任何设置、设备信息或同步数据。"
+  },
+  "opt_update_check": {
+    "message": "立即检查"
+  },
+  "opt_update_checking": {
+    "message": "检查中…"
+  },
+  "opt_update_up_to_date": {
+    "message": "当前已是最新版本 $VERSION$。",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_available": {
+    "message": "发现新版本 $VERSION$。",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_download": {
+    "message": "下载安装包"
+  },
+  "opt_update_failed": {
+    "message": "操作未能完成。可以重试，也可以自行解压安装包并按下方步骤加载。"
+  },
+  "opt_update_package_label": {
+    "message": "导入压缩包"
+  },
+  "opt_update_package_desc": {
+    "message": "选择下载好的 zip，校验版本、适用浏览器和包内容。不会安装或改动扩展。"
+  },
+  "opt_update_package_pick": {
+    "message": "选择 zip"
+  },
+  "opt_update_package_ok": {
+    "message": "校验通过：$VERSION$（$TARGET$ 版，共 $COUNT$ 个文件）。接下来运行下方的升级脚本。",
+    "placeholders": {
+      "version": { "content": "$1" },
+      "target": { "content": "$2" },
+      "count": { "content": "$3" }
+    }
+  },
+  "opt_update_package_bad": {
+    "message": "这个压缩包无法使用：$REASON$",
+    "placeholders": {
+      "reason": { "content": "$1" }
+    }
+  },
+  "opt_update_bad_zip": {
+    "message": "不是完整的 Kesonode 安装包，或文件已损坏"
+  },
+  "opt_update_bad_unsafe": {
+    "message": "包含不安全的路径，可能被篡改过"
+  },
+  "opt_update_bad_browser": {
+    "message": "这是另一个浏览器的安装包"
+  },
+  "opt_update_bad_version": {
+    "message": "版本不比当前已安装的版本新"
+  },
+  "opt_update_script_label": {
+    "message": "一键升级脚本"
+  },
+  "opt_update_script_desc": {
+    "message": "下载后双击运行：自动找到安装包、解压到全新文件夹并复制路径。若双击无反应，可在终端用 sh 运行。"
+  },
+  "opt_update_script_download": {
+    "message": "下载脚本"
+  },
+  "opt_update_steps": {
+    "message": "1. 双击升级脚本，它会把压缩包解压到一个全新文件夹（绝不覆盖旧目录）并把路径复制到剪贴板。\n2. 打开 chrome://extensions（Edge：edge://extensions；Firefox：about:debugging），移除旧的 Kesonode。\n3. 点「加载已解压的扩展程序」并粘贴刚才复制的路径。扩展 ID 已固定，配置会自动保留。"
   }
 }

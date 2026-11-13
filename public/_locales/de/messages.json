@@ -2498,5 +2498,88 @@
   },
   "opt_cleanup_host_needed": {
     "message": "Die Prüfung toter Links benötigt Zugriff auf die Websites in Ihren Lesezeichen. Duplikate wurden trotzdem geprüft."
+  },
+  "opt_update_section": {
+    "message": "Software-Update"
+  },
+  "opt_update_section_sub": {
+    "message": "Eine lokal geladene Erweiterung kann ihren eigenen Code nicht ersetzen. Dieser Assistent prüft und entpackt das neue Paket; der letzte Schritt bleibt dem Browser vorbehalten."
+  },
+  "opt_update_check_label": {
+    "message": "Nach Updates suchen"
+  },
+  "opt_update_check_desc": {
+    "message": "Fragt GitHub nur ab, wenn du die Schaltfläche drückst. Es werden keine Einstellungen, Gerätedaten oder Syncdaten gesendet."
+  },
+  "opt_update_check": {
+    "message": "Jetzt prüfen"
+  },
+  "opt_update_checking": {
+    "message": "Wird geprüft…"
+  },
+  "opt_update_up_to_date": {
+    "message": "Du nutzt bereits die neueste Version $VERSION$.",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_available": {
+    "message": "Version $VERSION$ ist verfügbar.",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_download": {
+    "message": "Paket herunterladen"
+  },
+  "opt_update_failed": {
+    "message": "Das hat nicht funktioniert. Versuche es erneut oder entpacke das ZIP selbst und folge den Schritten unten."
+  },
+  "opt_update_package_label": {
+    "message": "Paket importieren"
+  },
+  "opt_update_package_desc": {
+    "message": "Wähle die heruntergeladene ZIP-Datei, um Version, Browser und Inhalt zu prüfen. Es wird nichts installiert oder geändert."
+  },
+  "opt_update_package_pick": {
+    "message": "ZIP auswählen"
+  },
+  "opt_update_package_ok": {
+    "message": "Geprüft: $VERSION$ für $TARGET$ ($COUNT$ Dateien). Führe anschließend das Upgrade-Skript aus.",
+    "placeholders": {
+      "version": { "content": "$1" },
+      "target": { "content": "$2" },
+      "count": { "content": "$3" }
+    }
+  },
+  "opt_update_package_bad": {
+    "message": "Dieses Paket kann nicht verwendet werden: $REASON$",
+    "placeholders": {
+      "reason": { "content": "$1" }
+    }
+  },
+  "opt_update_bad_zip": {
+    "message": "es ist kein vollständiges Kesonode-Paket oder die Datei ist beschädigt"
+  },
+  "opt_update_bad_unsafe": {
+    "message": "es enthält unsichere Pfade und wurde möglicherweise manipuliert"
+  },
+  "opt_update_bad_browser": {
+    "message": "es wurde für einen anderen Browser erstellt"
+  },
+  "opt_update_bad_version": {
+    "message": "es ist nicht neuer als die installierte Version"
+  },
+  "opt_update_script_label": {
+    "message": "Upgrade-Skript mit einem Klick"
+  },
+  "opt_update_script_desc": {
+    "message": "Nach dem Herunterladen doppelklicken: Es findet das ZIP, entpackt es in einen neuen Ordner und kopiert dessen Pfad. Falls nichts passiert, im Terminal mit sh ausführen."
+  },
+  "opt_update_script_download": {
+    "message": "Skript herunterladen"
+  },
+  "opt_update_steps": {
+    "message": "1. Doppelklicke auf das Upgrade-Skript. Es entpackt das ZIP in einen neuen Ordner (niemals über den alten) und kopiert den Pfad.\n2. Öffne chrome://extensions (Edge: edge://extensions; Firefox: about:debugging) und entferne das alte Kesonode.\n3. Wähle „Entpackte Erweiterung laden“ und füge den kopierten Pfad ein. Die Einstellungen bleiben erhalten, weil die Erweiterungs-ID festgelegt ist."
   }
 }

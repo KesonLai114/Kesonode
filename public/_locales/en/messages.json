@@ -2733,5 +2733,88 @@
   },
   "opt_cleanup_host_needed": {
     "message": "Checking links needs permission to contact the sites in your bookmarks. Duplicates were still scanned."
+  },
+  "opt_update_section": {
+    "message": "Software update"
+  },
+  "opt_update_section_sub": {
+    "message": "A locally loaded extension cannot replace its own code. This assistant validates the new package and unpacks it; the browser makes the final switch."
+  },
+  "opt_update_check_label": {
+    "message": "Check for updates"
+  },
+  "opt_update_check_desc": {
+    "message": "Checks GitHub only when you press the button. No settings, device info or sync data is sent."
+  },
+  "opt_update_check": {
+    "message": "Check now"
+  },
+  "opt_update_checking": {
+    "message": "Checking…"
+  },
+  "opt_update_up_to_date": {
+    "message": "You are on the latest version, $VERSION$.",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_available": {
+    "message": "Version $VERSION$ is available.",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_download": {
+    "message": "Download package"
+  },
+  "opt_update_failed": {
+    "message": "That did not work. Retry, or unpack the zip yourself and follow the steps below."
+  },
+  "opt_update_package_label": {
+    "message": "Import a package"
+  },
+  "opt_update_package_desc": {
+    "message": "Select the zip you downloaded to verify its version, browser and contents. Nothing is installed or changed."
+  },
+  "opt_update_package_pick": {
+    "message": "Select zip"
+  },
+  "opt_update_package_ok": {
+    "message": "Verified: $VERSION$ for $TARGET$ ($COUNT$ files). Run the upgrade script below.",
+    "placeholders": {
+      "version": { "content": "$1" },
+      "target": { "content": "$2" },
+      "count": { "content": "$3" }
+    }
+  },
+  "opt_update_package_bad": {
+    "message": "This package cannot be used: $REASON$",
+    "placeholders": {
+      "reason": { "content": "$1" }
+    }
+  },
+  "opt_update_bad_zip": {
+    "message": "it is not a complete Kesonode package, or the file is damaged"
+  },
+  "opt_update_bad_unsafe": {
+    "message": "it contains unsafe paths and may have been tampered with"
+  },
+  "opt_update_bad_browser": {
+    "message": "it was built for a different browser"
+  },
+  "opt_update_bad_version": {
+    "message": "it is not newer than the installed version"
+  },
+  "opt_update_script_label": {
+    "message": "One-click upgrade script"
+  },
+  "opt_update_script_desc": {
+    "message": "Double-click it after downloading: it finds the zip, unpacks it into a fresh folder and copies that path. If double-clicking does nothing, run it with sh from a terminal."
+  },
+  "opt_update_script_download": {
+    "message": "Download script"
+  },
+  "opt_update_steps": {
+    "message": "1. Double-click the upgrade script. It unpacks the zip into a brand-new folder (never over the old one) and copies that folder's path.\n2. Open chrome://extensions (Edge: edge://extensions; Firefox: about:debugging), then remove the old Kesonode.\n3. Choose \"Load unpacked\" and paste the copied path. Your settings are kept because the extension ID is pinned."
   }
 }

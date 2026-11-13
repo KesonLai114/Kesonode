@@ -131,6 +131,10 @@ function goodBundle(): Record<string, string> {
     "popup.js": "console.log('ui');",
     "chunks/puzzle-abc123.js": "export const puzzle = 1;",
     "index.css": "body{}",
+    // The Settings → Advanced → Software update section downloads these at runtime.
+    // A build made before they existed must not be allowed to produce a zip.
+    "upgrade/upgrade.sh": "#!/bin/sh\n",
+    "upgrade/upgrade.bat": "@echo off\n",
     "popup.html":
       '<script type="module" src="/popup.js"></script>' +
       '<link rel="modulepreload" href="/chunks/puzzle-abc123.js">' +
@@ -159,5 +163,12 @@ describe("bundleProblems — HTML and chunks must come from one build", () => {
     const files = goodBundle();
     files["manifest.json"] = JSON.stringify({ background: { service_worker: "background.js" } });
     expect(bundleProblems(built(files)).problems.join("\n")).toContain('need "module"');
+  });
+
+  it("refuses a stale build that would ship the update section without its scripts", () => {
+    const files = goodBundle();
+    delete files["upgrade/upgrade.bat"];
+    expect(bundleProblems(built(files)).problems.join("\n"))
+      .toContain("upgrade/upgrade.bat is missing from the build");
   });
 });

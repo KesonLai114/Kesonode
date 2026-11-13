@@ -2498,5 +2498,88 @@
   },
   "opt_cleanup_host_needed": {
     "message": "Il controllo dei link richiede l'accesso ai siti dei tuoi segnalibri. I duplicati sono stati comunque analizzati."
+  },
+  "opt_update_section": {
+    "message": "Aggiornamento software"
+  },
+  "opt_update_section_sub": {
+    "message": "Un'estensione caricata localmente non può sostituire il proprio codice. Questa procedura convalida il nuovo pacchetto e lo estrae; il passaggio finale resta al browser."
+  },
+  "opt_update_check_label": {
+    "message": "Controlla aggiornamenti"
+  },
+  "opt_update_check_desc": {
+    "message": "Interroga GitHub solo quando premi il pulsante. Non vengono inviate impostazioni, dati del dispositivo o dati di sincronizzazione."
+  },
+  "opt_update_check": {
+    "message": "Controlla ora"
+  },
+  "opt_update_checking": {
+    "message": "Controllo in corso…"
+  },
+  "opt_update_up_to_date": {
+    "message": "Stai già usando la versione più recente, $VERSION$.",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_available": {
+    "message": "È disponibile la versione $VERSION$.",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_download": {
+    "message": "Scarica pacchetto"
+  },
+  "opt_update_failed": {
+    "message": "Operazione non riuscita. Riprova oppure estrai lo ZIP manualmente e segui i passaggi qui sotto."
+  },
+  "opt_update_package_label": {
+    "message": "Importa un pacchetto"
+  },
+  "opt_update_package_desc": {
+    "message": "Seleziona lo ZIP scaricato per verificarne versione, browser e contenuto. Non viene installato o modificato nulla."
+  },
+  "opt_update_package_pick": {
+    "message": "Seleziona ZIP"
+  },
+  "opt_update_package_ok": {
+    "message": "Verificato: $VERSION$ per $TARGET$ ($COUNT$ file). Ora esegui lo script di aggiornamento.",
+    "placeholders": {
+      "version": { "content": "$1" },
+      "target": { "content": "$2" },
+      "count": { "content": "$3" }
+    }
+  },
+  "opt_update_package_bad": {
+    "message": "Questo pacchetto non può essere usato: $REASON$",
+    "placeholders": {
+      "reason": { "content": "$1" }
+    }
+  },
+  "opt_update_bad_zip": {
+    "message": "non è un pacchetto Kesonode completo oppure il file è danneggiato"
+  },
+  "opt_update_bad_unsafe": {
+    "message": "contiene percorsi non sicuri e potrebbe essere stato manomesso"
+  },
+  "opt_update_bad_browser": {
+    "message": "è stato creato per un altro browser"
+  },
+  "opt_update_bad_version": {
+    "message": "non è più recente della versione installata"
+  },
+  "opt_update_script_label": {
+    "message": "Script di aggiornamento con un clic"
+  },
+  "opt_update_script_desc": {
+    "message": "Dopo il download fai doppio clic: trova lo ZIP, lo estrae in una nuova cartella e ne copia il percorso. Se non succede nulla, eseguilo con sh da terminale."
+  },
+  "opt_update_script_download": {
+    "message": "Scarica script"
+  },
+  "opt_update_steps": {
+    "message": "1. Fai doppio clic sullo script di aggiornamento: estrae lo ZIP in una cartella nuova (mai sopra la vecchia) e copia il percorso.\n2. Apri chrome://extensions (Edge: edge://extensions; Firefox: about:debugging) e rimuovi il vecchio Kesonode.\n3. Scegli «Carica estensione non pacchettizzata» e incolla il percorso copiato. Le impostazioni restano perché l'ID dell'estensione è fissato."
   }
 }

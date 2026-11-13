@@ -2498,5 +2498,88 @@
   },
   "opt_cleanup_host_needed": {
     "message": "A hivatkozások ellenőrzéséhez hozzáférés kell a könyvjelzők webhelyeihez. A duplikátumokat így is átvizsgáltuk."
+  },
+  "opt_update_section": {
+    "message": "Szoftverfrissítés"
+  },
+  "opt_update_section_sub": {
+    "message": "A helyben betöltött bővítmény nem tudja lecserélni a saját kódját. Ez a segéd ellenőrzi és kicsomagolja az új csomagot; az utolsó lépést a böngésző végzi."
+  },
+  "opt_update_check_label": {
+    "message": "Frissítések keresése"
+  },
+  "opt_update_check_desc": {
+    "message": "Csak a gomb megnyomásakor kérdezi le a GitHubot. Beállításokat, eszközadatokat és szinkronadatokat nem küld."
+  },
+  "opt_update_check": {
+    "message": "Ellenőrzés most"
+  },
+  "opt_update_checking": {
+    "message": "Ellenőrzés…"
+  },
+  "opt_update_up_to_date": {
+    "message": "Már a legújabb, $VERSION$ verziót használod.",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_available": {
+    "message": "Elérhető a(z) $VERSION$ verzió.",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_download": {
+    "message": "Csomag letöltése"
+  },
+  "opt_update_failed": {
+    "message": "Nem sikerült. Próbáld újra, vagy csomagold ki magad a ZIP-et, és kövesd az alábbi lépéseket."
+  },
+  "opt_update_package_label": {
+    "message": "Csomag importálása"
+  },
+  "opt_update_package_desc": {
+    "message": "Válaszd ki a letöltött ZIP-et a verzió, a böngésző és a tartalom ellenőrzéséhez. Semmit nem telepít és nem módosít."
+  },
+  "opt_update_package_pick": {
+    "message": "ZIP kiválasztása"
+  },
+  "opt_update_package_ok": {
+    "message": "Ellenőrizve: $VERSION$, $TARGET$ ($COUNT$ fájl). Ezután futtasd az alábbi frissítő szkriptet.",
+    "placeholders": {
+      "version": { "content": "$1" },
+      "target": { "content": "$2" },
+      "count": { "content": "$3" }
+    }
+  },
+  "opt_update_package_bad": {
+    "message": "Ez a csomag nem használható: $REASON$",
+    "placeholders": {
+      "reason": { "content": "$1" }
+    }
+  },
+  "opt_update_bad_zip": {
+    "message": "nem teljes Kesonode-csomag, vagy a fájl sérült"
+  },
+  "opt_update_bad_unsafe": {
+    "message": "nem biztonságos elérési utakat tartalmaz, ezért módosíthatták"
+  },
+  "opt_update_bad_browser": {
+    "message": "másik böngészőhöz készült"
+  },
+  "opt_update_bad_version": {
+    "message": "nem újabb a telepített verziónál"
+  },
+  "opt_update_script_label": {
+    "message": "Egykattintásos frissítő szkript"
+  },
+  "opt_update_script_desc": {
+    "message": "Letöltés után dupla kattintással indítsd: megkeresi a ZIP-et, új mappába csomagolja ki, és másolja az elérési utat. Ha nem történik semmi, terminálból futtasd sh-vel."
+  },
+  "opt_update_script_download": {
+    "message": "Szkript letöltése"
+  },
+  "opt_update_steps": {
+    "message": "1. Indítsd el a frissítő szkriptet dupla kattintással: a ZIP-et új mappába bontja ki (soha nem a régi fölé), és másolja az utat.\n2. Nyisd meg a chrome://extensions oldalt (Edge: edge://extensions; Firefox: about:debugging), és távolítsd el a régi Kesonode-ot.\n3. Válaszd a „Kicsomagolt bővítmény betöltése” lehetőséget, és illeszd be a másolt útvonalat. A beállítások megmaradnak, mert a bővítmény azonosítója rögzített."
   }
 }

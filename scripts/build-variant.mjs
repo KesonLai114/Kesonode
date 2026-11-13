@@ -145,6 +145,16 @@ export function bundleProblems(distDir) {
       problems.push(`manifest.json: background script ${worker} is missing from the build.`);
     }
   }
+
+  // Settings → Advanced → Software update downloads these with
+  // runtime.getURL("upgrade/..."). Vite copies public/ into the build on its own, so a
+  // stale dist/ built before the scripts existed still passes every check above and would
+  // ship a button pointing at a file that isn't in the zip. Gate the package on it.
+  for (const script of ["upgrade/upgrade.sh", "upgrade/upgrade.bat"]) {
+    if (!existsSync(join(distDir, script))) {
+      problems.push(`${script} is missing from the build — the update section would link to a file the zip doesn't contain. Rebuild this target.`);
+    }
+  }
   return { problems, htmlFiles };
 }
 

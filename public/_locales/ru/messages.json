@@ -2498,5 +2498,88 @@
   },
   "opt_cleanup_host_needed": {
     "message": "Для проверки ссылок нужен доступ к сайтам из ваших закладок. Дубликаты всё равно проверены."
+  },
+  "opt_update_section": {
+    "message": "Обновление"
+  },
+  "opt_update_section_sub": {
+    "message": "Расширение, загруженное с диска, не может заменить собственный код. Помощник проверит новый пакет и распакует его; последний шаг остаётся за браузером."
+  },
+  "opt_update_check_label": {
+    "message": "Проверить обновления"
+  },
+  "opt_update_check_desc": {
+    "message": "Запрос к GitHub выполняется только при нажатии кнопки. Настройки, данные об устройстве и данные синхронизации не отправляются."
+  },
+  "opt_update_check": {
+    "message": "Проверить"
+  },
+  "opt_update_checking": {
+    "message": "Проверка…"
+  },
+  "opt_update_up_to_date": {
+    "message": "У вас уже последняя версия $VERSION$.",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_available": {
+    "message": "Доступна версия $VERSION$.",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_download": {
+    "message": "Скачать пакет"
+  },
+  "opt_update_failed": {
+    "message": "Не удалось выполнить действие. Повторите попытку или распакуйте ZIP вручную и следуйте шагам ниже."
+  },
+  "opt_update_package_label": {
+    "message": "Импорт пакета"
+  },
+  "opt_update_package_desc": {
+    "message": "Выберите скачанный ZIP, чтобы проверить версию, браузер и содержимое. Ничего не устанавливается и не изменяется."
+  },
+  "opt_update_package_pick": {
+    "message": "Выбрать ZIP"
+  },
+  "opt_update_package_ok": {
+    "message": "Проверено: $VERSION$ для $TARGET$ ($COUNT$ файлов). Теперь запустите скрипт обновления ниже.",
+    "placeholders": {
+      "version": { "content": "$1" },
+      "target": { "content": "$2" },
+      "count": { "content": "$3" }
+    }
+  },
+  "opt_update_package_bad": {
+    "message": "Этот пакет нельзя использовать: $REASON$",
+    "placeholders": {
+      "reason": { "content": "$1" }
+    }
+  },
+  "opt_update_bad_zip": {
+    "message": "это не полный пакет Kesonode либо файл повреждён"
+  },
+  "opt_update_bad_unsafe": {
+    "message": "он содержит небезопасные пути и мог быть изменён"
+  },
+  "opt_update_bad_browser": {
+    "message": "он собран для другого браузера"
+  },
+  "opt_update_bad_version": {
+    "message": "он не новее установленной версии"
+  },
+  "opt_update_script_label": {
+    "message": "Скрипт обновления в один клик"
+  },
+  "opt_update_script_desc": {
+    "message": "После скачивания запустите двойным щелчком: он найдёт ZIP, распакует в новую папку и скопирует путь. Если ничего не произошло, запустите файл через sh в терминале."
+  },
+  "opt_update_script_download": {
+    "message": "Скачать скрипт"
+  },
+  "opt_update_steps": {
+    "message": "1. Запустите скрипт обновления двойным щелчком: он распакует ZIP в новую папку (никогда поверх старой) и скопирует путь.\n2. Откройте chrome://extensions (Edge: edge://extensions; Firefox: about:debugging) и удалите старый Kesonode.\n3. Выберите «Загрузить распакованное расширение» и вставьте скопированный путь. Настройки сохранятся, поскольку ID расширения закреплён."
   }
 }

@@ -2498,5 +2498,88 @@
   },
   "opt_cleanup_host_needed": {
     "message": "檢查失效連結需要存取書籤中網站的權限。重複書籤仍已完成掃描。"
+  },
+  "opt_update_section": {
+    "message": "軟體更新"
+  },
+  "opt_update_section_sub": {
+    "message": "本機載入的擴充功能無法替換自己的程式碼。升級助手會先驗證新安裝包並解壓縮，最後一步仍須由瀏覽器確認。"
+  },
+  "opt_update_check_label": {
+    "message": "檢查更新"
+  },
+  "opt_update_check_desc": {
+    "message": "只在您按下按鈕時向 GitHub 查詢一次版本號；不會傳送任何設定、裝置資訊或同步資料。"
+  },
+  "opt_update_check": {
+    "message": "立即檢查"
+  },
+  "opt_update_checking": {
+    "message": "檢查中…"
+  },
+  "opt_update_up_to_date": {
+    "message": "目前已是最新版本 $VERSION$。",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_available": {
+    "message": "發現新版本 $VERSION$。",
+    "placeholders": {
+      "version": { "content": "$1" }
+    }
+  },
+  "opt_update_download": {
+    "message": "下載安裝包"
+  },
+  "opt_update_failed": {
+    "message": "操作未能完成。可以重試，也可以自行解壓縮安裝包並依照下方步驟載入。"
+  },
+  "opt_update_package_label": {
+    "message": "匯入壓縮包"
+  },
+  "opt_update_package_desc": {
+    "message": "選取下載好的 zip，驗證版本、適用瀏覽器與包內容。不會安裝或變更擴充功能。"
+  },
+  "opt_update_package_pick": {
+    "message": "選取 zip"
+  },
+  "opt_update_package_ok": {
+    "message": "驗證通過：$VERSION$（$TARGET$ 版，共 $COUNT$ 個檔案）。接著執行下方的升級指令稿。",
+    "placeholders": {
+      "version": { "content": "$1" },
+      "target": { "content": "$2" },
+      "count": { "content": "$3" }
+    }
+  },
+  "opt_update_package_bad": {
+    "message": "這個壓縮包無法使用：$REASON$",
+    "placeholders": {
+      "reason": { "content": "$1" }
+    }
+  },
+  "opt_update_bad_zip": {
+    "message": "不是完整的 Kesonode 安裝包，或檔案已損壞"
+  },
+  "opt_update_bad_unsafe": {
+    "message": "包含不安全的路徑，可能遭到竄改"
+  },
+  "opt_update_bad_browser": {
+    "message": "這是另一個瀏覽器的安裝包"
+  },
+  "opt_update_bad_version": {
+    "message": "版本未比目前安裝的版本新"
+  },
+  "opt_update_script_label": {
+    "message": "一鍵升級指令稿"
+  },
+  "opt_update_script_desc": {
+    "message": "下載後雙擊執行：自動找到安裝包、解壓縮到全新資料夾並複製路徑。若雙擊沒有反應，可在終端機用 sh 執行。"
+  },
+  "opt_update_script_download": {
+    "message": "下載指令稿"
+  },
+  "opt_update_steps": {
+    "message": "1. 雙擊升級指令稿，它會把壓縮包解壓縮到全新資料夾（絕不覆蓋舊目錄）並把路徑複製到剪貼簿。\n2. 開啟 chrome://extensions（Edge：edge://extensions；Firefox：about:debugging），移除舊的 Kesonode。\n3. 點「載入未封裝項目」並貼上剛才複製的路徑。擴充功能 ID 已固定，設定會自動保留。"
   }
 }
