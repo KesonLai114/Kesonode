@@ -74,13 +74,22 @@ manifest.browser_specific_settings = {
   gecko: {
     id: GECKO_ID,
     strict_min_version: STRICT_MIN_VERSION,
-    // Default state: Kesonode has no server and no telemetry — nothing is collected by
-    // us or Mozilla; all data goes to storage the user owns. The optional AI assistant
-    // (off by default, BYOK) sends a reduced bookmark list to a provider the USER
-    // configures, never to us or Mozilla, so required collection stays "none".
-    // Re-check this declaration before any AMO submission: a user-directed transfer
-    // to a third-party model service may need to be listed under the policy then.
-    data_collection_permissions: { required: ["none"] },
+    // Kesonode has no server and no telemetry — nothing is collected by us or by
+    // Mozilla, and nothing is transmitted unless the user asks for it. That is what
+    // `required: ["none"]` states.
+    //
+    // The optional AI assistant (off by default, bring your own key) is the one place
+    // data can leave the device: the user names a provider, and a reduced bookmark list
+    // — titles, hostnames, folder paths — goes to that provider and nowhere else.
+    // Mozilla's taxonomy has a category for exactly that, `bookmarksInfo`
+    // ("bookmark names, websites and folder names"), so it is declared here rather
+    // than hidden: `required: ["none"]` may sit beside an optional list, and the
+    // user can switch the feature off in Settings → AI assistant, which is the same
+    // consent in substance.
+    data_collection_permissions: {
+      required: ["none"],
+      optional: ["bookmarksInfo"],
+    },
   },
 };
 

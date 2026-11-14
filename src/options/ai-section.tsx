@@ -197,6 +197,11 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
 
       <div className="config-hint">
         <Info size={14} />
+        <div>{t("ai_save_notice")}</div>
+      </div>
+
+      <div className="config-hint">
+        <Info size={14} />
         <div>{t("ai_privacy_notice")}</div>
       </div>
 

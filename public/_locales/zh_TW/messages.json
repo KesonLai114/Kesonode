@@ -2701,9 +2701,6 @@
   "ai_organize_applied": {
     "message": "已套用。操作前已建立還原點；這些變動會像一般書籤編輯一樣參與同步。"
   },
-  "ai_popup_off": {
-    "message": "AI 助理未啟用，請到「設定 → AI 助理」開啟。"
-  },
   "ai_popup_placeholder": {
     "message": "用一句話描述你要找的書籤"
   },
@@ -2721,5 +2718,14 @@
   },
   "ai_popup_no_report": {
     "message": "目前沒有可解釋的同步記錄。"
+  },
+  "ai_save_notice": {
+    "message": "下方的開關與輸入框，需要在頁面底部點擊「儲存」後才會生效。"
+  },
+  "ai_err_endpoint_scheme": {
+    "message": "該介面位址無法使用：必須是 https，或僅限本機的 http（例如 http://localhost:11434/v1）。"
+  },
+  "ai_err_endpoint_credentials": {
+    "message": "不要在位址裡寫使用者名稱或密碼，請改用 API 金鑰輸入框。"
   }
 }

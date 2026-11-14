@@ -2701,9 +2701,6 @@
   "ai_organize_applied": {
     "message": "Alkalmazva. Előtte visszaállítási pont készült; ezek a módosítások ugyanúgy szinkronizálódnak, mint bármely más könyvjelző-szerkesztés."
   },
-  "ai_popup_off": {
-    "message": "Az AI-asszisztens ki van kapcsolva. Kapcsold be: Beállítások → AI-asszisztens."
-  },
   "ai_popup_placeholder": {
     "message": "Írd le, melyik könyvjelzőt keresed"
   },
@@ -2721,5 +2718,14 @@
   },
   "ai_popup_no_report": {
     "message": "Még nincs megmagyarázható szinkronizálási jegyzőkönyv."
+  },
+  "ai_save_notice": {
+    "message": "A kapcsoló és az alábbi mezők csak akkor lépnek életbe, ha a beállításokat az oldal alján elmented."
+  },
+  "ai_err_endpoint_scheme": {
+    "message": "Ez a cím nem használható. https legyen, vagy http csak ezen a gépen (például http://localhost:11434/v1)."
+  },
+  "ai_err_endpoint_credentials": {
+    "message": "Ne tegyél felhasználónevet vagy jelszót a címbe; használd az API-kulcs mezőt."
   }
 }

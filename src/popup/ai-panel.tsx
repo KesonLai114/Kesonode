@@ -63,11 +63,10 @@ export function AiPanel({ settings, state, onOpen }: AiPanelProps) {
   const abortRef = useRef<AbortController | null>(null);
 
   if (settings.ai_enabled !== true) {
-    return (
-      <section className="mt-3">
-        <p className="px-1 text-[12px] text-sk-subtle">{t("ai_popup_off")}</p>
-      </section>
-    );
+    // Nothing at all: the feature is off by default, and a line of text in every popup
+    // for every user is noise, not information. Settings → AI assistant is where it
+    // belongs, and the popup grows the panel the moment the switch is on.
+    return null;
   }
 
   const run = async (kind: "ask" | "receipt" | "conflict") => {

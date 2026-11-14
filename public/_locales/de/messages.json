@@ -2701,9 +2701,6 @@
   "ai_organize_applied": {
     "message": "Angewendet. Zuvor wurde ein Wiederherstellungspunkt erstellt; diese Änderungen werden wie jede andere Lesezeichen-Änderung synchronisiert."
   },
-  "ai_popup_off": {
-    "message": "KI-Assistent ist aus. Aktiviere ihn unter Einstellungen → KI-Assistent."
-  },
   "ai_popup_placeholder": {
     "message": "Beschreibe das gesuchte Lesezeichen"
   },
@@ -2721,5 +2718,14 @@
   },
   "ai_popup_no_report": {
     "message": "Es gibt noch keinen Sync-Bericht zum Erklären."
+  },
+  "ai_save_notice": {
+    "message": "Der Schalter und die Felder unten werden erst aktiv, wenn du die Einstellungen am Seitenende speicherst."
+  },
+  "ai_err_endpoint_scheme": {
+    "message": "Diese Adresse kann nicht verwendet werden. Sie muss https sein, oder http nur für diesen Rechner (zum Beispiel http://localhost:11434/v1)."
+  },
+  "ai_err_endpoint_credentials": {
+    "message": "Schreibe keinen Benutzernamen und kein Passwort in die Adresse — nimm dafür das API-Schlüssel-Feld."
   }
 }

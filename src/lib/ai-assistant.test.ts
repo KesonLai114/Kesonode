@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AiError,
   aiEndpoint,
+  aiEndpointProblem,
   aiOrigin,
   askBookmarks,
   callModel,
@@ -394,5 +395,62 @@ describe("asking in batches", () => {
     const fetchImpl = vi.fn(async () => chat('{"ids":["not-in-the-list"],"explanation":"sure"}'));
     const answer = await askBookmarks(CONFIG, "something", many, { fetchImpl });
     expect(answer.ids).toEqual([]);
+  });
+});
+
+describe("the endpoint address", () => {
+  it("says why an address cannot be used", () => {
+    expect(aiEndpointProblem("")).toBe("empty");
+    expect(aiEndpointProblem("not a url")).toBe("malformed");
+    expect(aiEndpointProblem("ftp://api.example.com/v1")).toBe("scheme");
+    // Plain http away from this machine would carry the key in clear text.
+    expect(aiEndpointProblem("http://192.168.1.10:11434/v1")).toBe("insecure");
+    expect(aiEndpointProblem("https://user:pass@api.example.com/v1")).toBe("credentials");
+    expect(aiEndpointProblem("https://api.example.com/v1")).toBeNull();
+    expect(aiEndpointProblem("http://localhost:11434/v1")).toBeNull();
+  });
+
+  it("reports a wrong address as wrong, not as a missing one", async () => {
+    const wrong = await callModel(
+      { ...CONFIG, baseUrl: "http://192.168.1.10:11434/v1" },
+      [],
+      { fetchImpl: async () => chat("x") },
+    ).catch((e: unknown) => e);
+    expect(wrong).toMatchObject({ code: "endpoint_scheme" });
+
+    const withCredentials = await callModel(
+      { ...CONFIG, baseUrl: "https://user:pass@api.example.com/v1" },
+      [],
+      { fetchImpl: async () => chat("x") },
+    ).catch((e: unknown) => e);
+    expect(withCredentials).toMatchObject({ code: "endpoint_credentials" });
+
+    const empty = await callModel({ ...CONFIG, baseUrl: "" }, [], { fetchImpl: async () => chat("x") })
+      .catch((e: unknown) => e);
+    expect(empty).toMatchObject({ code: "config" });
+  });
+});
+
+describe("the organisation plan", () => {
+  it("drops a repeated bookmark and one that already sits in the folder it names", async () => {
+    const fetchImpl = vi.fn(async () => chat(JSON.stringify({
+      moves: [
+        { id: "a", folder: "Work", reason: "one" },
+        { id: "a", folder: "Work", reason: "again" },
+        { id: "b", folder: "Personal", reason: "already there" },
+        { id: "c", folder: "Work", reason: "real" },
+      ],
+      duplicates: [],
+    })));
+    const items: AiBookmark[] = [
+      { id: "a", title: "A", host: "a.example", folder: "Bookmarks bar" },
+      { id: "b", title: "B", host: "b.example", folder: "Bookmarks bar / Personal" },
+      { id: "c", title: "C", host: "c.example", folder: "Bookmarks bar" },
+    ];
+    const plan = await suggestOrganization(CONFIG, items, ["Work", "Personal"], { fetchImpl });
+    expect(plan.moves).toEqual([
+      { id: "a", folder: "Work", reason: "one" },
+      { id: "c", folder: "Work", reason: "real" },
+    ]);
   });
 });

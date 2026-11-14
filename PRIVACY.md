@@ -98,6 +98,14 @@ Moves and removals are ordinary bookmark edits, so they travel through the norma
 like any edit you make yourself. Model output is treated as untrusted: returned bookmark
 ids are checked against the ids actually sent, and text is rendered as text only.
 
+**How the Firefox build declares this.** The Firefox package states it in the manifest
+rather than leaving you to infer it: `data_collection_permissions` is `required: ["none"]`
+— nothing is collected at all, by us or by Mozilla — with `optional: ["bookmarksInfo"]`,
+Mozilla's category for bookmark names, websites and folder names, which is precisely
+what a question sends. The switch in Settings → AI assistant is the consent in
+substance: the feature is off until you turn it on, and turning it off stops every
+further request immediately.
+
 ## Where your data goes
 
 When you set up Kesonode, you choose **one** storage backend and sign in to it with

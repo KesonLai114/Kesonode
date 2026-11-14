@@ -10,6 +10,31 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The popup says nothing at all when the AI assistant is off.** It used to print a line
+  in every popup, for every user, telling them a feature they had not turned on was
+  turned off. The panel appears the moment the switch is on; Settings → AI assistant is
+  where the feature lives.
+- **A wrong interface address now says what is wrong with it.** "Fill in the API address"
+  is useless advice to someone who already filled it in. The address is checked for the
+  reason it fails — not https, plain http away from this machine, a username or password
+  embedded in the URL, or no address at all — and each has its own sentence. Plain http is
+  still refused off this machine, because the key travels in the Authorization header;
+  `http://localhost:11434/v1` for a local model server keeps working.
+- **The organisation plan drops the rows that would change nothing.** A bookmark the model
+  listed twice is one suggestion, not two to tick, and a bookmark it wants to file in the
+  folder it is already in is not work. A bookmark sitting directly in a root is never
+  treated as already filed.
+- **Settings → AI assistant says that changes need saving.** The switch and the fields
+  take effect after the save at the bottom of the page; saying so beats a user turning
+  everything on and wondering why the popup is unchanged.
+- **The Firefox package declares the optional bookmark transfer.** The manifest now states
+  `required: ["none"]` — nothing is collected, by us or by Mozilla — with
+  `optional: ["bookmarksInfo"]`, Mozilla's own category for bookmark names, websites and
+  folder names, which is exactly what a question sends. The switch in Settings is the
+  consent in substance. `web-ext lint` accepts it.
+
 ## [1.5.19] - 2026-11-14
 
 ### Added

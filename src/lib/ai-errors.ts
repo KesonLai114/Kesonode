@@ -13,6 +13,8 @@ import { t } from "@/lib/utils/i18n";
 const AI_ERROR_KEYS: Record<AiErrorCode, string> = {
   disabled: "ai_err_config",
   config: "ai_err_config",
+  endpoint_scheme: "ai_err_endpoint_scheme",
+  endpoint_credentials: "ai_err_endpoint_credentials",
   permission: "ai_err_permission",
   network: "ai_err_request",
   http: "ai_err_request",

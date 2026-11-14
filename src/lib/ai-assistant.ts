@@ -65,6 +65,8 @@ const PLAN_MAX_TOKENS = 2000;
 export type AiErrorCode =
   | "disabled"
   | "config"
+  | "endpoint_scheme"
+  | "endpoint_credentials"
   | "permission"
   | "network"
   | "http"
@@ -121,21 +123,42 @@ export function clipAiText(text: string, max = MAX_TEXT): string {
 }
 
 /**
+ * Why a base URL cannot be used, or null when it can.
+ *
+ * The distinction matters to the person filling the form in: "fill in the address" is
+ * useless advice when they HAVE filled it in, and a self-hosted model on a LAN address
+ * is a real case they will hit. Plain http is refused away from this machine because
+ * the key travels in the Authorization header.
+ */
+export type AiEndpointProblem = "empty" | "malformed" | "scheme" | "insecure" | "credentials";
+
+function isLoopback(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+export function aiEndpointProblem(baseUrl: string): AiEndpointProblem | null {
+  const raw = baseUrl.trim();
+  if (!raw) return "empty";
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return "malformed";
+  }
+  if (u.username || u.password) return "credentials";
+  if (u.protocol !== "https:" && u.protocol !== "http:") return "scheme";
+  if (u.protocol === "http:" && !isLoopback(u.hostname)) return "insecure";
+  return null;
+}
+
+/**
  * Normalise a user-supplied base URL into a chat-completions endpoint.
  * Accepts `https://host/v1`, `https://host/v1/`, or the full `.../chat/completions`.
- * Rejects anything that is not http(s), because the key travels in the Authorization
- * header and must never be sent over an unencrypted connection off loopback.
  */
 export function aiEndpoint(baseUrl: string): string | null {
-  const raw = baseUrl.trim();
-  if (!raw) return null;
+  if (aiEndpointProblem(baseUrl)) return null;
   try {
-    const u = new URL(raw);
-    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
-    const loopback = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
-    if (u.protocol === "http:" && !loopback) return null;
-    // Reject credentials embedded in the URL: they would end up in error messages/logs.
-    if (u.username || u.password) return null;
+    const u = new URL(baseUrl.trim());
     const path = u.pathname.replace(/\/+$/, "");
     if (path.endsWith("/chat/completions")) {
       u.pathname = path;
@@ -290,6 +313,12 @@ export function renderAiBookmarkList(items: AiBookmark[]): string {
 
 function assertConfig(config: AiConfig): string {
   if (!config.enabled) throw new AiError("disabled");
+  const problem = aiEndpointProblem(config.baseUrl);
+  // An empty address is "fill the form in"; a wrong one is a different sentence, and
+  // saying "fill in the address" to someone who already did is how people lose an hour.
+  if (problem === "empty") throw new AiError("config");
+  if (problem === "credentials") throw new AiError("endpoint_credentials");
+  if (problem) throw new AiError("endpoint_scheme");
   const endpoint = aiEndpoint(config.baseUrl);
   if (!endpoint || !config.apiKey.trim() || !config.model.trim()) throw new AiError("config");
   return endpoint;
@@ -555,7 +584,15 @@ export async function suggestOrganization(
   // The model only ever saw the clipped folder names, so validation must compare against
   // the same form — a raw name longer than the cap could never match its own echo.
   const folderSet = new Set(folders.map((f) => clipAiText(f)));
+  // Where each bookmark sits now, so a suggestion to file it where it already is can be
+  // dropped instead of shown as work. A bookmark directly in a root has no folder of its
+  // own — only a path with more than the root in it has a parent folder to compare with.
+  const currentFolder = new Map(bookmarks.map((b) => {
+    const parts = b.folder.split(" / ");
+    return [b.id, parts.length > 1 ? parts[parts.length - 1] : ""] as const;
+  }));
   const moves: AiMoveSuggestion[] = [];
+  const seenMoves = new Set<string>();
   if (Array.isArray(parsed.moves)) {
     for (const m of parsed.moves) {
       if (moves.length >= MAX_SUGGESTIONS) break;
@@ -564,6 +601,11 @@ export async function suggestOrganization(
       const id = typeof row.id === "string" ? row.id : "";
       const folder = asString(row.folder);
       if (!allowed.has(id) || !folderSet.has(folder)) continue;
+      // The same bookmark twice is one suggestion, not two rows to tick.
+      if (seenMoves.has(id)) continue;
+      // And a bookmark that is already in that folder has nothing to do.
+      if (currentFolder.get(id) === folder) continue;
+      seenMoves.add(id);
       moves.push({ id, folder, reason: asString(row.reason) });
     }
   }

@@ -2701,9 +2701,6 @@
   "ai_organize_applied": {
     "message": "Applicato. Prima è stato creato un punto di ripristino; queste modifiche si sincronizzano come qualsiasi altra modifica ai preferiti."
   },
-  "ai_popup_off": {
-    "message": "L'assistente AI è disattivato. Attivalo in Impostazioni → Assistente AI."
-  },
   "ai_popup_placeholder": {
     "message": "Descrivi il preferito che cerchi"
   },
@@ -2721,5 +2718,14 @@
   },
   "ai_popup_no_report": {
     "message": "Non c'è ancora alcun record di sincronizzazione da spiegare."
+  },
+  "ai_save_notice": {
+    "message": "L'interruttore e i campi qui sotto hanno effetto dopo aver salvato le impostazioni in fondo alla pagina."
+  },
+  "ai_err_endpoint_scheme": {
+    "message": "Questo indirizzo non può essere usato. Deve essere https, oppure http solo su questa macchina (ad esempio http://localhost:11434/v1)."
+  },
+  "ai_err_endpoint_credentials": {
+    "message": "Non mettere nome utente o password nell'indirizzo: usa il campo chiave API."
   }
 }

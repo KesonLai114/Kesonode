@@ -2936,9 +2936,6 @@
   "ai_organize_applied": {
     "message": "Applied. A restore point was taken first; these edits sync like any other bookmark change."
   },
-  "ai_popup_off": {
-    "message": "AI assistant is off. Enable it in Settings → AI assistant."
-  },
   "ai_popup_placeholder": {
     "message": "Describe the bookmark you are looking for"
   },
@@ -2956,5 +2953,14 @@
   },
   "ai_popup_no_report": {
     "message": "There is no sync record to explain yet."
+  },
+  "ai_save_notice": {
+    "message": "The switch and the fields below take effect after you save the settings at the bottom of this page."
+  },
+  "ai_err_endpoint_scheme": {
+    "message": "That address cannot be used. It must be https, or http for this machine only (for example http://localhost:11434/v1)."
+  },
+  "ai_err_endpoint_credentials": {
+    "message": "Do not put a username or password in the address — use the API key field instead."
   }
 }

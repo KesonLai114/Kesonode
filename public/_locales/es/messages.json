@@ -2701,9 +2701,6 @@
   "ai_organize_applied": {
     "message": "Aplicado. Antes se creó un punto de restauración; estos cambios se sincronizan como cualquier otra edición de marcadores."
   },
-  "ai_popup_off": {
-    "message": "El asistente de IA está desactivado. Actívalo en Ajustes → Asistente de IA."
-  },
   "ai_popup_placeholder": {
     "message": "Describe el marcador que buscas"
   },
@@ -2721,5 +2718,14 @@
   },
   "ai_popup_no_report": {
     "message": "Todavía no hay ningún registro de sincronización que explicar."
+  },
+  "ai_save_notice": {
+    "message": "El interruptor y los campos de abajo se activan después de guardar los ajustes al final de la página."
+  },
+  "ai_err_endpoint_scheme": {
+    "message": "Esa dirección no se puede usar. Debe ser https, o http solo para este equipo (por ejemplo http://localhost:11434/v1)."
+  },
+  "ai_err_endpoint_credentials": {
+    "message": "No pongas usuario ni contraseña en la dirección; usa el campo de clave API."
   }
 }

@@ -2701,9 +2701,6 @@
   "ai_organize_applied": {
     "message": "已应用。操作前已建立还原点；这些改动会像普通书签编辑一样参与同步。"
   },
-  "ai_popup_off": {
-    "message": "AI 助手未启用，请到「设置 → AI 助手」开启。"
-  },
   "ai_popup_placeholder": {
     "message": "用一句话描述你要找的书签"
   },
@@ -2721,5 +2718,14 @@
   },
   "ai_popup_no_report": {
     "message": "暂时没有可解释的同步记录。"
+  },
+  "ai_save_notice": {
+    "message": "下面的开关与输入框，需要在页面底部点击「保存」后才会生效。"
+  },
+  "ai_err_endpoint_scheme": {
+    "message": "该接口地址无法使用：必须是 https，或仅限本机的 http（例如 http://localhost:11434/v1）。"
+  },
+  "ai_err_endpoint_credentials": {
+    "message": "不要在地址里写用户名或密码，请改用 API Key 输入框。"
   }
 }
