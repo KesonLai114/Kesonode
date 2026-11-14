@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   compareVersions,
+  extractPackage,
   inspectUpgradePackage,
   type PackageFile,
 } from "@/lib/utils/upgrade-package";
@@ -237,5 +238,83 @@ describe("inspectUpgradePackage", () => {
       arrayBuffer: async () => { throw new Error("must not be read"); },
     };
     expect(await inspectUpgradePackage(huge, CHROMIUM)).toEqual({ ok: false, reason: "zip" });
+  });
+});
+
+describe("extractPackage", () => {
+  it("reads a flat package, the layout the Chrome Web Store requires", async () => {
+    const result = await extractPackage(asFile(releaseZip("1.5.19")), CHROMIUM);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.package.version).toBe("1.5.19");
+    expect(result.package.target).toBe("chromium");
+    // The store package pins no key, so the ID would follow the folder name.
+    expect(result.package.manifestKey).toBe(null);
+    // The folder entry carries no data and is not part of the package.
+    expect(result.package.entries.map((e) => e.path).sort()).toEqual([
+      "chunks/index-abc.js",
+      "manifest.json",
+      "popup.html",
+    ]);
+  });
+
+  it("reads the source layout, where everything sits inside one folder", async () => {
+    const bytes = buildZip([
+      { name: "Kesonode/manifest.json", data: enc.encode(chromiumManifest("1.5.19")) },
+      { name: "Kesonode/popup.html", data: enc.encode("<html></html>") },
+      { name: "Kesonode/chunks/app.js", data: enc.encode("// chunk") },
+    ]);
+    const result = await extractPackage(asFile(bytes), CHROMIUM);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The folder name is packaging, not content: what is written goes where it belongs.
+    expect(result.package.entries.map((e) => e.path).sort()).toEqual([
+      "chunks/app.js",
+      "manifest.json",
+      "popup.html",
+    ]);
+  });
+
+  it("carries the manifest key, because the key decides the extension ID", async () => {
+    const manifest = JSON.stringify({
+      manifest_version: 3,
+      version: "1.5.19",
+      key: "the-pinned-key",
+      background: { service_worker: "background.js" },
+    });
+    const bytes = buildZip([
+      { name: "manifest.json", data: enc.encode(manifest) },
+      { name: "popup.html", data: enc.encode("<html></html>") },
+    ]);
+    const result = await extractPackage(asFile(bytes), CHROMIUM);
+    expect(result.ok && result.package.manifestKey).toBe("the-pinned-key");
+  });
+
+  it("refuses exactly what the inspector refuses", async () => {
+    expect(await extractPackage(asFile(releaseZip("1.5.18")), CHROMIUM)).toEqual({
+      ok: false,
+      reason: "version",
+    });
+    expect(await extractPackage(asFile(releaseZip("1.5.19", firefoxManifest("1.5.19"))), CHROMIUM)).toEqual({
+      ok: false,
+      reason: "browser",
+    });
+  });
+
+  it("refuses a package whose paths try to leave the folder", async () => {
+    const bytes = buildZip([
+      { name: "manifest.json", data: enc.encode(chromiumManifest("1.5.19")) },
+      { name: "popup.html", data: enc.encode("<html></html>") },
+      { name: "../evil.js", data: enc.encode("bad") },
+    ]);
+    expect(await extractPackage(asFile(bytes), CHROMIUM)).toEqual({ ok: false, reason: "unsafe" });
+  });
+
+  it("refuses a folder layout with no manifest in it", async () => {
+    const bytes = buildZip([
+      { name: "Kesonode/popup.html", data: enc.encode("<html></html>") },
+      { name: "Kesonode/chunks/app.js", data: enc.encode("// chunk") },
+    ]);
+    expect(await extractPackage(asFile(bytes), CHROMIUM)).toEqual({ ok: false, reason: "zip" });
   });
 });

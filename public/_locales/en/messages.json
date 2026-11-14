@@ -2753,7 +2753,7 @@
     "message": "Software update"
   },
   "opt_update_section_sub": {
-    "message": "A locally loaded extension cannot replace its own code. This assistant validates the new package and unpacks it; the browser makes the final switch."
+    "message": "The upgrade writes the new version into the folder Kesonode was loaded from and restarts the extension. Browsers that do not allow that get the unpacked package instead."
   },
   "opt_update_check_label": {
     "message": "Check for updates"
@@ -2836,13 +2836,13 @@
     "message": "One-click upgrade script"
   },
   "opt_update_script_desc": {
-    "message": "Double-click it after downloading: it finds the zip, unpacks it into a fresh folder and copies that path. If double-clicking does nothing, run it with sh from a terminal."
+    "message": "Run it after downloading: it finds the zip, installs it into the folder named Kesonode and copies that path. If double-clicking does nothing, run it with sh from a terminal."
   },
   "opt_update_script_download": {
     "message": "Download script"
   },
   "opt_update_steps": {
-    "message": "1. Double-click the upgrade script. It unpacks the zip into a brand-new folder (never over the old one) and copies that folder's path.\n2. Open chrome://extensions (Edge: edge://extensions; Firefox: about:debugging), then remove the old Kesonode.\n3. Choose \"Load unpacked\" and paste the copied path. Your settings are kept because the extension ID is pinned."
+    "message": "Chromium: bind the folder Kesonode was loaded from, then import the new package and press \"Upgrade now\" — the new version is written into that folder and the extension restarts.\nFirefox: run the upgrade script. It installs the package into the same folder every time, so the extension ID and your settings are kept."
   },
   "ai_nav": {
     "message": "AI assistant"
@@ -3001,5 +3001,78 @@
         "example": "5"
       }
     }
+  },
+  "opt_update_dir_label": {
+    "message": "Install folder"
+  },
+  "opt_update_dir_none": {
+    "message": "No folder bound yet. Choose the folder Kesonode was loaded from."
+  },
+  "opt_update_dir_bound": {
+    "message": "Bound to “$NAME$”. Upgrades are written into this folder.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_dir_pick": {
+    "message": "Choose folder"
+  },
+  "opt_update_dir_rebind": {
+    "message": "Change folder"
+  },
+  "opt_update_dir_unbind": {
+    "message": "Unbind"
+  },
+  "opt_update_dir_picking": {
+    "message": "Waiting for you to pick a folder…"
+  },
+  "opt_update_dir_unsupported": {
+    "message": "This browser does not let an extension write to a local folder (Firefox has no such API), so use the upgrade script below instead."
+  },
+  "opt_update_install_label": {
+    "message": "One-click upgrade"
+  },
+  "opt_update_install_desc": {
+    "message": "The new version is written into the bound folder and the extension restarts."
+  },
+  "opt_update_install_go": {
+    "message": "Upgrade now"
+  },
+  "opt_update_install_busy": {
+    "message": "Upgrading…"
+  },
+  "opt_update_install_done": {
+    "message": "Version $VERSION$ is installed. The extension is restarting.",
+    "placeholders": {
+      "version": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_install_need_pkg": {
+    "message": "Import the new package first."
+  },
+  "opt_update_install_need_dir": {
+    "message": "Bind the install folder first."
+  },
+  "opt_update_err_no_folder": {
+    "message": "No install folder is bound."
+  },
+  "opt_update_err_no_permission": {
+    "message": "The browser no longer allows writing to that folder. Choose it again."
+  },
+  "opt_update_err_not_installed": {
+    "message": "That folder has no manifest.json, so it is not a Kesonode install folder."
+  },
+  "opt_update_err_key_mismatch": {
+    "message": "This package would change the extension ID, so your settings would be lost. Install it as a new extension instead."
+  },
+  "opt_update_err_read": {
+    "message": "The installed manifest could not be read."
+  },
+  "opt_update_err_write": {
+    "message": "Writing the new version failed. The folder still holds the old version; run the upgrade again."
   }
 }

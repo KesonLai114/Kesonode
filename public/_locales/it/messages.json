@@ -2515,7 +2515,7 @@
     "message": "Aggiornamento software"
   },
   "opt_update_section_sub": {
-    "message": "Un'estensione caricata localmente non può sostituire il proprio codice. Questa procedura convalida il nuovo pacchetto e lo estrae; il passaggio finale resta al browser."
+    "message": "L'aggiornamento scrive la nuova versione nella cartella da cui Kesonode è stato caricato e riavvia l'estensione. I browser che non lo permettono ricevono il pacchetto estratto."
   },
   "opt_update_check_label": {
     "message": "Controlla aggiornamenti"
@@ -2598,13 +2598,13 @@
     "message": "Script di aggiornamento con un clic"
   },
   "opt_update_script_desc": {
-    "message": "Dopo il download fai doppio clic: trova lo ZIP, lo estrae in una nuova cartella e ne copia il percorso. Se non succede nulla, eseguilo con sh da terminale."
+    "message": "Esegui lo script dopo aver scaricato: trova lo zip, lo installa nella cartella Kesonode e ne copia il percorso. Se il doppio clic non fa nulla, avvialo con sh da un terminale."
   },
   "opt_update_script_download": {
     "message": "Scarica script"
   },
   "opt_update_steps": {
-    "message": "1. Fai doppio clic sullo script di aggiornamento: estrae lo ZIP in una cartella nuova (mai sopra la vecchia) e copia il percorso.\n2. Apri chrome://extensions (Edge: edge://extensions; Firefox: about:debugging) e rimuovi il vecchio Kesonode.\n3. Scegli «Carica estensione non pacchettizzata» e incolla il percorso copiato. Le impostazioni restano perché l'ID dell'estensione è fissato."
+    "message": "Chromium: collega la cartella da cui Kesonode è stato caricato, importa il nuovo pacchetto e premi «Aggiorna ora»: la nuova versione viene scritta in quella cartella e l'estensione si riavvia.\nFirefox: esegui lo script di aggiornamento. Installa il pacchetto sempre nella stessa cartella, così l'ID dell'estensione e le tue impostazioni restano."
   },
   "ai_nav": {
     "message": "Assistente AI"
@@ -2763,5 +2763,78 @@
         "example": "5"
       }
     }
+  },
+  "opt_update_dir_label": {
+    "message": "Cartella di installazione"
+  },
+  "opt_update_dir_none": {
+    "message": "Nessuna cartella ancora collegata. Scegli la cartella da cui Kesonode è stato caricato."
+  },
+  "opt_update_dir_bound": {
+    "message": "Collegata a «$NAME$». Gli aggiornamenti vengono scritti in questa cartella.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_dir_pick": {
+    "message": "Scegli cartella"
+  },
+  "opt_update_dir_rebind": {
+    "message": "Cambia cartella"
+  },
+  "opt_update_dir_unbind": {
+    "message": "Scollega"
+  },
+  "opt_update_dir_picking": {
+    "message": "In attesa che tu scelga una cartella…"
+  },
+  "opt_update_dir_unsupported": {
+    "message": "Questo browser non permette a un'estensione di scrivere in una cartella locale (Firefox non ha questa API), quindi usa lo script di aggiornamento qui sotto."
+  },
+  "opt_update_install_label": {
+    "message": "Aggiornamento con un clic"
+  },
+  "opt_update_install_desc": {
+    "message": "La nuova versione viene scritta nella cartella collegata e l'estensione si riavvia."
+  },
+  "opt_update_install_go": {
+    "message": "Aggiorna ora"
+  },
+  "opt_update_install_busy": {
+    "message": "Aggiornamento…"
+  },
+  "opt_update_install_done": {
+    "message": "La versione $VERSION$ è installata. L'estensione si sta riavviando.",
+    "placeholders": {
+      "version": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_install_need_pkg": {
+    "message": "Importa prima il nuovo pacchetto."
+  },
+  "opt_update_install_need_dir": {
+    "message": "Prima collega la cartella di installazione."
+  },
+  "opt_update_err_no_folder": {
+    "message": "Nessuna cartella di installazione collegata."
+  },
+  "opt_update_err_no_permission": {
+    "message": "Il browser non permette più di scrivere in quella cartella. Sceglila di nuovo."
+  },
+  "opt_update_err_not_installed": {
+    "message": "Quella cartella non ha manifest.json, quindi non è una cartella di installazione di Kesonode."
+  },
+  "opt_update_err_key_mismatch": {
+    "message": "Questo pacchetto cambierebbe l'ID dell'estensione e le tue impostazioni andrebbero perse. Installalo come nuova estensione."
+  },
+  "opt_update_err_read": {
+    "message": "Non è stato possibile leggere il manifest.json installato."
+  },
+  "opt_update_err_write": {
+    "message": "La scrittura della nuova versione è fallita. La cartella contiene ancora la versione precedente; ripeti l'aggiornamento."
   }
 }

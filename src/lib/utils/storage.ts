@@ -339,6 +339,12 @@ export const KEYS = {
   // Device-local ring of recent open-tab sessions (lib/session-autosave.ts). Never part of
   // a SyncPacket; the synced sessions file is a separate, explicitly enabled thing.
   SESSION_AUTOSAVE: "konode_session_autosave",
+  // Set by the settings page just before the extension replaces its own files and
+  // restarts. The page that started the upgrade is gone when the new version comes up,
+  // so the service worker reads this and opens the settings page again — otherwise the
+  // upgrade ends with the user's screen empty and no sign it worked. Device-local, and
+  // cleared as soon as it has been read.
+  UPGRADE_PENDING: "konode_upgrade_pending",
 } as const;
 
 // ─── Generic Helpers ───────────────────────────────────────────────────────

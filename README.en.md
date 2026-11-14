@@ -203,10 +203,18 @@ untranslated string falls back to English, which is safe.
 Kesonode is distributed as a local package, not through any extension store. Pick a
 version folder under [`插件版本/`](插件版本/) or download a
 [release](https://github.com/KesonLai114/Kesonode/releases), unzip it, and follow the
-[Chinese installation guide](插件版本/安装说明.md): load the folder that directly contains
-`manifest.json` in Chromium, or `manifest.json` itself in Firefox. If you already have
-Kesonode installed from an earlier package, keep that install — a second install joins
-the sync group as a new device.
+[Chinese installation guide](插件版本/安装说明.md): the package unpacks into one folder
+named `Kesonode` (no version number in the name), so load that folder in Chromium, or its
+`manifest.json` in Firefox. If you already have Kesonode installed from an earlier
+package, keep that install — a second install joins the sync group as a new device.
+
+**Upgrading.** In Chromium, Settings → Advanced → Software update: bind the folder you
+loaded Kesonode from once (the browser asks permission to write to it a single time),
+then each upgrade is import the new zip, press "Upgrade now". Kesonode writes the new
+version into that folder, removes the leftovers of the old one and restarts itself; the
+previous version is kept in `.kesonode-backup/`. Firefox has no such API — browsers do
+not let an extension write to a local folder there — so use the upgrade script from the
+same page, which installs the new version into the same `Kesonode` folder.
 
 New to Kesonode? The **[Getting Started guide](GETTING_STARTED.md)** walks through setup
 and connecting each backend.

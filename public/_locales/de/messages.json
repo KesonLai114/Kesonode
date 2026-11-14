@@ -2515,7 +2515,7 @@
     "message": "Software-Update"
   },
   "opt_update_section_sub": {
-    "message": "Eine lokal geladene Erweiterung kann ihren eigenen Code nicht ersetzen. Dieser Assistent prüft und entpackt das neue Paket; der letzte Schritt bleibt dem Browser vorbehalten."
+    "message": "Das Upgrade schreibt die neue Version in den Ordner, aus dem Kesonode geladen wurde, und startet die Erweiterung neu. Browser, die das nicht erlauben, bekommen stattdessen das entpackte Paket."
   },
   "opt_update_check_label": {
     "message": "Nach Updates suchen"
@@ -2598,13 +2598,13 @@
     "message": "Upgrade-Skript mit einem Klick"
   },
   "opt_update_script_desc": {
-    "message": "Nach dem Herunterladen doppelklicken: Es findet das ZIP, entpackt es in einen neuen Ordner und kopiert dessen Pfad. Falls nichts passiert, im Terminal mit sh ausführen."
+    "message": "Nach dem Download ausführen: es findet die zip-Datei, installiert sie in den Ordner Kesonode und kopiert den Pfad. Wenn ein Doppelklick nichts tut, starte es mit sh in einem Terminal."
   },
   "opt_update_script_download": {
     "message": "Skript herunterladen"
   },
   "opt_update_steps": {
-    "message": "1. Doppelklicke auf das Upgrade-Skript. Es entpackt das ZIP in einen neuen Ordner (niemals über den alten) und kopiert den Pfad.\n2. Öffne chrome://extensions (Edge: edge://extensions; Firefox: about:debugging) und entferne das alte Kesonode.\n3. Wähle „Entpackte Erweiterung laden“ und füge den kopierten Pfad ein. Die Einstellungen bleiben erhalten, weil die Erweiterungs-ID festgelegt ist."
+    "message": "Chromium: Wähle den Ordner, aus dem Kesonode geladen wurde, importiere dann das neue Paket und klicke auf „Jetzt aktualisieren“ — die neue Version wird in diesen Ordner geschrieben und die Erweiterung startet neu.\nFirefox: Führe das Upgrade-Skript aus. Es installiert das Paket jedes Mal in denselben Ordner, damit Erweiterungs-ID und Einstellungen erhalten bleiben."
   },
   "ai_nav": {
     "message": "KI-Assistent"
@@ -2763,5 +2763,78 @@
         "example": "5"
       }
     }
+  },
+  "opt_update_dir_label": {
+    "message": "Installationsordner"
+  },
+  "opt_update_dir_none": {
+    "message": "Noch kein Ordner festgelegt. Wähle den Ordner, aus dem Kesonode geladen wurde."
+  },
+  "opt_update_dir_bound": {
+    "message": "Festgelegt auf „$NAME$“. Updates werden in diesen Ordner geschrieben.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_dir_pick": {
+    "message": "Ordner wählen"
+  },
+  "opt_update_dir_rebind": {
+    "message": "Ordner ändern"
+  },
+  "opt_update_dir_unbind": {
+    "message": "Lösen"
+  },
+  "opt_update_dir_picking": {
+    "message": "Warte darauf, dass du einen Ordner auswählst …"
+  },
+  "opt_update_dir_unsupported": {
+    "message": "Dieser Browser erlaubt Erweiterungen nicht, in einen lokalen Ordner zu schreiben (Firefox hat keine solche Schnittstelle). Nutze stattdessen das Upgrade-Skript unten."
+  },
+  "opt_update_install_label": {
+    "message": "Upgrade mit einem Klick"
+  },
+  "opt_update_install_desc": {
+    "message": "Die neue Version wird in den festgelegten Ordner geschrieben und die Erweiterung startet neu."
+  },
+  "opt_update_install_go": {
+    "message": "Jetzt aktualisieren"
+  },
+  "opt_update_install_busy": {
+    "message": "Wird aktualisiert …"
+  },
+  "opt_update_install_done": {
+    "message": "Version $VERSION$ ist installiert. Die Erweiterung startet neu.",
+    "placeholders": {
+      "version": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_install_need_pkg": {
+    "message": "Importiere zuerst das neue Paket."
+  },
+  "opt_update_install_need_dir": {
+    "message": "Lege zuerst den Installationsordner fest."
+  },
+  "opt_update_err_no_folder": {
+    "message": "Es ist kein Installationsordner festgelegt."
+  },
+  "opt_update_err_no_permission": {
+    "message": "Der Browser erlaubt das Schreiben in diesen Ordner nicht mehr. Wähle ihn erneut."
+  },
+  "opt_update_err_not_installed": {
+    "message": "In diesem Ordner liegt keine manifest.json – das ist kein Installationsordner von Kesonode."
+  },
+  "opt_update_err_key_mismatch": {
+    "message": "Dieses Paket würde die Erweiterungs-ID ändern, deine Einstellungen gingen verloren. Installiere es stattdessen als neue Erweiterung."
+  },
+  "opt_update_err_read": {
+    "message": "Die installierte manifest.json konnte nicht gelesen werden."
+  },
+  "opt_update_err_write": {
+    "message": "Das Schreiben der neuen Version ist fehlgeschlagen. Der Ordner enthält noch die alte Version; wiederhole das Upgrade."
   }
 }

@@ -10,6 +10,36 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **A one-click upgrade in Chromium.** Settings → Advanced → Software update now lets you
+  bind the folder Kesonode was loaded from — the browser asks permission to write to it
+  once, and remembers it — and "Upgrade now" writes a downloaded package into that
+  folder, removes the files the new version does not have, and restarts the extension.
+  The version being replaced is kept in `.kesonode-backup/<version>/` inside the folder,
+  so a release that misbehaves can be put back by hand. The package's manifest `key` is
+  compared with the installed one before a single file is written: an upgrade that would
+  change the extension ID — and with it every setting, every login and every snapshot —
+  is refused with an explanation instead of quietly renaming the extension. Firefox has
+  no such API, and says so; the upgrade script stays the way in there.
+- **The settings page says what the upgrade does.** The section explains that the new
+  version is written into the folder Kesonode was loaded from and that the extension
+  restarts, instead of claiming that a locally loaded extension cannot replace its own
+  code — which was true of what the section did, and no longer is.
+
+### Changed
+
+- **A release package unpacks into one folder named `Kesonode`.** The name has no
+  version in it and never changes, which is what makes an upgrade an upgrade: the new
+  files replace the old ones in the folder the browser already loads from, the extension
+  ID stays the same and the settings stay where they are. The Chrome Web Store package
+  is unchanged — the store requires the manifest at the archive root — and both layouts
+  are understood by the upgrade.
+- **The upgrade script installs into that same folder.** It used to unpack into a fresh
+  `Kesonode-v<version>` directory, so every upgrade left another directory behind and
+  the user had to choose which one to load. It now installs into `~/Downloads/Kesonode`
+  and renames the previous one to `Kesonode.old-<timestamp>` rather than deleting it.
+
 ## [1.5.20] - 2026-11-14
 
 ### Added

@@ -1,23 +1,35 @@
 /**
- * Inspect a downloaded Kesonode release zip — read-only, and without running any of it.
+ * Inspect and unpack a downloaded Kesonode release zip — read-only, and without running
+ * any of it.
  *
- * A browser extension cannot replace its own code (the package directory is read-only and
- * MV3 forbids executing code that isn't part of the package). This module therefore does
- * NOT install anything: it parses the zip's central directory, reads the root
- * `manifest.json`, and answers whether the file the user picked is a genuine, newer
- * Kesonode package for the browser they are running. The actual unpacking is done by the
- * companion `upgrade.sh` / `upgrade.bat` script outside the browser.
+ * A browser extension cannot replace its own code on its own (the package directory is
+ * read-only and MV3 forbids executing code that isn't part of the package), so this
+ * module never installs anything by itself. It does two things: it answers whether the
+ * file the user picked is a genuine, newer Kesonode package for the browser they are
+ * running, and it hands back the package's files so the caller can put them somewhere.
  *
  * Deliberately dependency-free. Only the one file we need is inflated, through the
  * platform's `DecompressionStream("deflate-raw")`; with a stored (method 0) manifest —
  * which is what the tests use — no stream API is involved at all. ZIP64 is refused: a
- * release package is ~400 KB and has no reason to need it, and refusing keeps the parser
+ * release package is ~1.5 MB and has no reason to need it, and refusing keeps the parser
  * small enough to audit.
+ *
+ * Two archive layouts have to work, because Kesonode ships both:
+ *
+ *  - The Chrome Web Store package puts `manifest.json` at the root of the archive,
+ *    because the store requires it there.
+ *  - The package people download has a single folder at the top (`Kesonode/…`), so that
+ *    unzipping it produces ONE folder with a fixed name instead of a pile of loose
+ *    files. The folder is what the browser loads, and its name never changes between
+ *    versions — which is what makes "upgrade by overwriting the same folder" possible.
+ *
+ * So the parser finds the single top-level folder and treats what is inside it as the
+ * package. Both layouts therefore read the same from here on.
  */
 
 export type PackageTarget = "chromium" | "firefox" | "unknown";
 
-/** Why a selected file must not be handed to the upgrade script. */
+/** Why a selected file must not be handed to the upgrade code. */
 export type BadReason = "unsafe" | "zip" | "browser" | "version";
 
 export type UpgradeInspection =
@@ -33,7 +45,36 @@ export interface InspectOptions {
   inflate?: (data: Uint8Array) => Promise<Uint8Array>;
 }
 
+/** One file of the package, with its bytes. */
+export interface PackageEntry {
+  /** Path inside the package: "/" separators, no leading "./", no top-level folder. */
+  path: string;
+  bytes: Uint8Array;
+}
+
+/** A package that was read and checked, ready to be written somewhere. */
+export interface ExtractedPackage {
+  version: string;
+  target: PackageTarget;
+  /**
+   * The `key` the manifest pins, or null when the manifest carries none.
+   *
+   * The key is what decides the extension's ID. Two installs with the same key are the
+   * same extension wherever they live; an install without one is named after its folder.
+   * A package that would change the key would change the ID, and with it every setting
+   * the user has — so the caller checks this against the INSTALLED manifest before
+   * writing anything.
+   */
+  manifestKey: string | null;
+  entries: PackageEntry[];
+}
+
+export type ExtractResult =
+  | { ok: true; package: ExtractedPackage }
+  | { ok: false; reason: BadReason };
+
 const MAX_BYTES = 32 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const SIG_EOCD = 0x06054b50;
 const SIG_CENTRAL = 0x02014b50;
 const SIG_LOCAL = 0x04034b50;
@@ -134,6 +175,15 @@ function unsafeName(name: string): boolean {
   );
 }
 
+/**
+ * A path that tried to escape the destination.
+ *
+ * This one is worth telling apart from every other failure: a broken archive is the
+ * user's file being damaged, while this is a package trying to write outside its own
+ * folder — worth saying out loud, and worth refusing for that reason alone.
+ */
+class UnsafeArchiveError extends Error {}
+
 async function defaultInflate(data: Uint8Array): Promise<Uint8Array> {
   const copy = new Uint8Array(data.length);
   copy.set(data);
@@ -166,6 +216,7 @@ function readEntry(
 interface PackageManifest {
   manifest_version?: unknown;
   version?: unknown;
+  key?: unknown;
   browser_specific_settings?: { gecko?: unknown } | undefined;
   background?: { service_worker?: unknown; scripts?: unknown } | undefined;
 }
@@ -178,10 +229,74 @@ function detectTarget(manifest: PackageManifest): PackageTarget {
   return "unknown";
 }
 
+/**
+ * The one top-level folder of the archive, if it has one.
+ *
+ * "Kesonode/manifest.json" and "Kesonode/chunks/x.js" share the folder "Kesonode";
+ * a store package has no shared first segment at all — its manifest sits at the root.
+ * The test is therefore "does EVERY entry live inside the same folder": a root file
+ * means the flat layout, and two different first segments mean a layout we do not
+ * recognise, in which case the caller gets "" and the paths simply do not resolve to
+ * a manifest.
+ */
+function topLevelFolder(names: string[]): string {
+  const first = new Set<string>();
+  for (const name of names) {
+    if (!name) continue;
+    const slash = name.indexOf("/");
+    // A file at the root: this is the store layout, not a folder.
+    if (slash < 0) return "";
+    first.add(name.slice(0, slash));
+  }
+  if (first.size !== 1) return "";
+  return [...first][0];
+}
+
 /** A Blob-like object; keeps the module free of DOM `File` in tests. */
 export interface PackageFile {
   size: number;
   arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+interface ReadArchive {
+  view: DataView;
+  bytes: Uint8Array;
+  entries: ZipEntry[];
+  /** The folder inside the archive that holds the package, or "" for a flat archive. */
+  prefix: string;
+}
+
+function readArchive(view: DataView, bytes: Uint8Array): ReadArchive {
+  const entries = readEntries(view, bytes, findEocd(view));
+  if (entries.some((e) => unsafeName(e.name))) throw new UnsafeArchiveError("unsafe path");
+  const prefix = topLevelFolder(entries.map((e) => normaliseName(e.name)));
+  return { view, bytes, entries, prefix };
+}
+
+/** The entry that holds the package's manifest, or null when there is none. */
+function manifestEntry(archive: ReadArchive): ZipEntry | null {
+  const wanted = archive.prefix ? `${archive.prefix}/manifest.json` : "manifest.json";
+  return (
+    archive.entries.find((e) => normaliseName(e.name) === wanted) ??
+    archive.entries.find((e) => normaliseName(e.name) === "manifest.json") ??
+    null
+  );
+}
+
+function parseManifest(raw: Uint8Array): PackageManifest {
+  return JSON.parse(new TextDecoder().decode(raw)) as PackageManifest;
+}
+
+function readManifestInfo(manifest: PackageManifest): {
+  version: string;
+  target: PackageTarget;
+  key: string | null;
+} | null {
+  if (manifest?.manifest_version !== 3 || typeof manifest.version !== "string") return null;
+  const version = manifest.version.trim();
+  if (!/^\d+\.\d+\.\d+$/.test(version)) return null;
+  const key = typeof manifest.key === "string" && manifest.key.length > 0 ? manifest.key : null;
+  return { version, target: detectTarget(manifest), key };
 }
 
 export async function inspectUpgradePackage(
@@ -192,39 +307,103 @@ export async function inspectUpgradePackage(
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const entries = readEntries(view, bytes, findEocd(view));
+    const archive = readArchive(view, bytes);
 
-    if (entries.some((e) => unsafeName(e.name))) return { ok: false, reason: "unsafe" };
-
-    const manifestEntry = entries.find((e) => normaliseName(e.name) === "manifest.json");
+    const entry = manifestEntry(archive);
     // A package without an HTML entry point is a partial download, not an upgrade.
-    if (!manifestEntry || !entries.some((e) => normaliseName(e.name).endsWith(".html"))) {
+    if (!entry || !archive.entries.some((e) => normaliseName(e.name).endsWith(".html"))) {
       return { ok: false, reason: "zip" };
     }
 
-    const raw = await readEntry(view, bytes, manifestEntry, options.inflate ?? defaultInflate);
-    const parsed = JSON.parse(new TextDecoder().decode(raw)) as PackageManifest;
-    if (parsed?.manifest_version !== 3 || typeof parsed.version !== "string") {
-      return { ok: false, reason: "zip" };
-    }
-    const version = parsed.version.trim();
-    if (!/^\d+\.\d+\.\d+$/.test(version)) return { ok: false, reason: "zip" };
+    const raw = await readEntry(view, bytes, entry, options.inflate ?? defaultInflate);
+    const info = readManifestInfo(parseManifest(raw));
+    if (!info) return { ok: false, reason: "zip" };
 
-    const target = detectTarget(parsed);
     if (
       options.currentTarget !== "unknown" &&
-      target !== "unknown" &&
-      target !== options.currentTarget
+      info.target !== "unknown" &&
+      info.target !== options.currentTarget
     ) {
       return { ok: false, reason: "browser" };
     }
-    if (compareVersions(version, options.currentVersion) <= 0) {
+    if (compareVersions(info.version, options.currentVersion) <= 0) {
       return { ok: false, reason: "version" };
     }
-    return { ok: true, version, target, entries: entries.length };
-  } catch {
+    return { ok: true, version: info.version, target: info.target, entries: archive.entries.length };
+  } catch (error) {
     // A truncated zip, a bad deflate stream, invalid JSON — all the same answer to the
     // user: this is not a usable package. Never surface a parser stack trace in the UI.
+    if (error instanceof UnsafeArchiveError) return { ok: false, reason: "unsafe" };
+    return { ok: false, reason: "zip" };
+  }
+}
+
+/**
+ * Read the whole package out of the zip.
+ *
+ * Everything the caller needs to write the package somewhere: the files with their
+ * bytes, the version, the browser it is for, and the `key` that decides the extension
+ * ID. The checks are the same ones `inspectUpgradePackage` makes — this is the "and now
+ * give me the files" half, not a second opinion about whether the package is usable.
+ */
+export async function extractPackage(
+  file: PackageFile,
+  options: InspectOptions
+): Promise<ExtractResult> {
+  if (!file.size || file.size > MAX_BYTES) return { ok: false, reason: "zip" };
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const archive = readArchive(view, bytes);
+    const inflate = options.inflate ?? defaultInflate;
+
+    const entry = manifestEntry(archive);
+    if (!entry || !archive.entries.some((e) => normaliseName(e.name).endsWith(".html"))) {
+      return { ok: false, reason: "zip" };
+    }
+    const raw = await readEntry(view, bytes, entry, inflate);
+    const info = readManifestInfo(parseManifest(raw));
+    if (!info) return { ok: false, reason: "zip" };
+
+    if (
+      options.currentTarget !== "unknown" &&
+      info.target !== "unknown" &&
+      info.target !== options.currentTarget
+    ) {
+      return { ok: false, reason: "browser" };
+    }
+    if (compareVersions(info.version, options.currentVersion) <= 0) {
+      return { ok: false, reason: "version" };
+    }
+
+    const out: PackageEntry[] = [];
+    let total = 0;
+    for (const item of archive.entries) {
+      const name = normaliseName(item.name);
+      // Folder entries carry no data; the writer creates folders as it needs them.
+      if (!name || name.endsWith("/")) continue;
+      const path = archive.prefix && name.startsWith(archive.prefix)
+        ? name.slice(archive.prefix.length).replace(/^\/+/, "")
+        : name;
+      if (!path) continue;
+      const data = await readEntry(view, bytes, item, inflate);
+      total += data.byteLength;
+      if (total > MAX_TOTAL_BYTES) return { ok: false, reason: "zip" };
+      out.push({ path, bytes: data });
+    }
+    if (!out.length) return { ok: false, reason: "zip" };
+
+    return {
+      ok: true,
+      package: {
+        version: info.version,
+        target: info.target,
+        manifestKey: info.key,
+        entries: out,
+      },
+    };
+  } catch (error) {
+    if (error instanceof UnsafeArchiveError) return { ok: false, reason: "unsafe" };
     return { ok: false, reason: "zip" };
   }
 }

@@ -2515,7 +2515,7 @@
     "message": "軟體更新"
   },
   "opt_update_section_sub": {
-    "message": "本機載入的擴充功能無法替換自己的程式碼。升級助手會先驗證新安裝包並解壓縮，最後一步仍須由瀏覽器確認。"
+    "message": "升級會把新版本寫進 Kesonode 被載入的那個資料夾，然後重新啟動擴充功能。不允許這樣做的瀏覽器會改為拿到解壓好的安裝包。"
   },
   "opt_update_check_label": {
     "message": "檢查更新"
@@ -2598,13 +2598,13 @@
     "message": "一鍵升級指令稿"
   },
   "opt_update_script_desc": {
-    "message": "下載後雙擊執行：自動找到安裝包、解壓縮到全新資料夾並複製路徑。若雙擊沒有反應，可在終端機用 sh 執行。"
+    "message": "下載後執行：它會找到安裝包、裝進名為 Kesonode 的資料夾並複製路徑。雙擊沒反應的話，在終端機裡用 sh 執行。"
   },
   "opt_update_script_download": {
     "message": "下載指令稿"
   },
   "opt_update_steps": {
-    "message": "1. 雙擊升級指令稿，它會把壓縮包解壓縮到全新資料夾（絕不覆蓋舊目錄）並把路徑複製到剪貼簿。\n2. 開啟 chrome://extensions（Edge：edge://extensions；Firefox：about:debugging），移除舊的 Kesonode。\n3. 點「載入未封裝項目」並貼上剛才複製的路徑。擴充功能 ID 已固定，設定會自動保留。"
+    "message": "Chromium：綁定你載入 Kesonode 的那個資料夾，匯入新的安裝包，點「立即升級」——新版本會寫進那個資料夾，擴充功能自動重新啟動。\nFirefox：執行升級指令碼。它每次都裝進同一個名為 Kesonode 的資料夾，擴充功能的 ID 與設定都會保留。"
   },
   "ai_nav": {
     "message": "AI 助理"
@@ -2763,5 +2763,78 @@
         "example": "5"
       }
     }
+  },
+  "opt_update_dir_label": {
+    "message": "安裝資料夾"
+  },
+  "opt_update_dir_none": {
+    "message": "還沒有綁定目錄。請選擇 Kesonode 被載入的那個資料夾。"
+  },
+  "opt_update_dir_bound": {
+    "message": "已綁定到「$NAME$」。升級會寫進這個資料夾。",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_dir_pick": {
+    "message": "選擇資料夾"
+  },
+  "opt_update_dir_rebind": {
+    "message": "更換資料夾"
+  },
+  "opt_update_dir_unbind": {
+    "message": "解除綁定"
+  },
+  "opt_update_dir_picking": {
+    "message": "等待你選擇資料夾…"
+  },
+  "opt_update_dir_unsupported": {
+    "message": "目前的瀏覽器不允許擴充功能寫入本機資料夾（Firefox 沒有這個介面），請改用下面的升級指令碼。"
+  },
+  "opt_update_install_label": {
+    "message": "一鍵升級"
+  },
+  "opt_update_install_desc": {
+    "message": "新版本會寫進已綁定的資料夾，然後擴充功能自動重新啟動。"
+  },
+  "opt_update_install_go": {
+    "message": "立即升級"
+  },
+  "opt_update_install_busy": {
+    "message": "正在升級…"
+  },
+  "opt_update_install_done": {
+    "message": "版本 $VERSION$ 已安裝，擴充功能正在重新啟動。",
+    "placeholders": {
+      "version": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_install_need_pkg": {
+    "message": "請先匯入新的安裝包。"
+  },
+  "opt_update_install_need_dir": {
+    "message": "請先綁定安裝目錄。"
+  },
+  "opt_update_err_no_folder": {
+    "message": "還沒有綁定安裝目錄。"
+  },
+  "opt_update_err_no_permission": {
+    "message": "瀏覽器不再允許寫入該資料夾，請重新選擇一次。"
+  },
+  "opt_update_err_not_installed": {
+    "message": "該資料夾裡沒有 manifest.json，不是 Kesonode 的安裝目錄。"
+  },
+  "opt_update_err_key_mismatch": {
+    "message": "該安裝包會改變擴充功能的 ID，設定會遺失。請把它作為新的擴充功能安裝。"
+  },
+  "opt_update_err_read": {
+    "message": "無法讀取已安裝的 manifest.json。"
+  },
+  "opt_update_err_write": {
+    "message": "寫入新版本失敗。資料夾裡仍是舊版本，重新執行升級即可。"
   }
 }

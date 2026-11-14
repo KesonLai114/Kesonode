@@ -2515,7 +2515,7 @@
     "message": "Actualización"
   },
   "opt_update_section_sub": {
-    "message": "Una extensión cargada localmente no puede reemplazar su propio código. Este asistente valida el paquete nuevo y lo descomprime; el navegador realiza el último paso."
+    "message": "La actualización escribe la nueva versión en la carpeta desde la que se cargó Kesonode y reinicia la extensión. Los navegadores que no lo permiten reciben el paquete descomprimido."
   },
   "opt_update_check_label": {
     "message": "Buscar actualizaciones"
@@ -2598,13 +2598,13 @@
     "message": "Script de actualización en un clic"
   },
   "opt_update_script_desc": {
-    "message": "Tras descargarlo, haz doble clic: localiza el ZIP, lo descomprime en una carpeta nueva y copia su ruta. Si no ocurre nada, ejecútalo con sh en una terminal."
+    "message": "Ejecuta el script después de descargar: encuentra el zip, lo instala en la carpeta Kesonode y copia esa ruta. Si hacer doble clic no hace nada, ejecútalo con sh desde una terminal."
   },
   "opt_update_script_download": {
     "message": "Descargar script"
   },
   "opt_update_steps": {
-    "message": "1. Haz doble clic en el script de actualización: descomprime el ZIP en una carpeta nueva (nunca sobre la antigua) y copia la ruta.\n2. Abre chrome://extensions (Edge: edge://extensions; Firefox: about:debugging) y elimina el Kesonode antiguo.\n3. Elige «Cargar extensión sin empaquetar» y pega la ruta copiada. La configuración se conserva porque el ID de la extensión está fijado."
+    "message": "Chromium: vincula la carpeta desde la que se cargó Kesonode, importa el paquete nuevo y pulsa «Actualizar ahora»: la nueva versión se escribe en esa carpeta y la extensión se reinicia.\nFirefox: ejecuta el script de actualización. Instala el paquete siempre en la misma carpeta, de modo que el ID de la extensión y tus ajustes se conservan."
   },
   "ai_nav": {
     "message": "Asistente de IA"
@@ -2763,5 +2763,78 @@
         "example": "5"
       }
     }
+  },
+  "opt_update_dir_label": {
+    "message": "Carpeta de instalación"
+  },
+  "opt_update_dir_none": {
+    "message": "Aún no hay ninguna carpeta vinculada. Elige la carpeta desde la que se cargó Kesonode."
+  },
+  "opt_update_dir_bound": {
+    "message": "Vinculada a «$NAME$». Las actualizaciones se escriben en esta carpeta.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_dir_pick": {
+    "message": "Elegir carpeta"
+  },
+  "opt_update_dir_rebind": {
+    "message": "Cambiar carpeta"
+  },
+  "opt_update_dir_unbind": {
+    "message": "Desvincular"
+  },
+  "opt_update_dir_picking": {
+    "message": "Esperando a que elijas una carpeta…"
+  },
+  "opt_update_dir_unsupported": {
+    "message": "Este navegador no permite que una extensión escriba en una carpeta local (Firefox no tiene esa API), así que usa el script de actualización de abajo."
+  },
+  "opt_update_install_label": {
+    "message": "Actualización con un clic"
+  },
+  "opt_update_install_desc": {
+    "message": "La nueva versión se escribe en la carpeta vinculada y la extensión se reinicia."
+  },
+  "opt_update_install_go": {
+    "message": "Actualizar ahora"
+  },
+  "opt_update_install_busy": {
+    "message": "Actualizando…"
+  },
+  "opt_update_install_done": {
+    "message": "La versión $VERSION$ está instalada. La extensión se está reiniciando.",
+    "placeholders": {
+      "version": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_install_need_pkg": {
+    "message": "Primero importa el paquete nuevo."
+  },
+  "opt_update_install_need_dir": {
+    "message": "Primero vincula la carpeta de instalación."
+  },
+  "opt_update_err_no_folder": {
+    "message": "No hay ninguna carpeta de instalación vinculada."
+  },
+  "opt_update_err_no_permission": {
+    "message": "El navegador ya no permite escribir en esa carpeta. Vuelve a elegirla."
+  },
+  "opt_update_err_not_installed": {
+    "message": "Esa carpeta no tiene manifest.json, así que no es una carpeta de instalación de Kesonode."
+  },
+  "opt_update_err_key_mismatch": {
+    "message": "Este paquete cambiaría el ID de la extensión y perderías tus ajustes. Instálalo como una extensión nueva."
+  },
+  "opt_update_err_read": {
+    "message": "No se ha podido leer el manifest.json instalado."
+  },
+  "opt_update_err_write": {
+    "message": "No se ha podido escribir la nueva versión. La carpeta aún contiene la versión anterior; repite la actualización."
   }
 }

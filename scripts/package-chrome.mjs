@@ -3,6 +3,13 @@
 // Run after `npm run build`. Produces web-ext-artifacts/kesonode-chrome-<version>.zip
 // with manifest.json at the archive root (what the Web Store expects).
 //
+// A SOURCE package — the one attached to a GitHub release — is laid out differently: it
+// carries everything inside one folder named Kesonode. A download has to unpack into ONE
+// folder, and that folder has to be the install: the same name every time, so the next
+// version replaces the files in it instead of leaving a pile of versioned folders. It is
+// also what lets the extension upgrade itself in place (see src/lib/utils/apply-package.ts).
+// The STORE package stays flat, because the Web Store requires the manifest at the root.
+//
 // The manifest `key` pins the extension ID of an unpacked install. It's kept in
 // public/manifest.json (and thus dist/) for `chrome://extensions` dev loading, but the
 // Chrome Web Store rejects a first upload whose manifest contains `key` ("key field not
@@ -29,13 +36,12 @@
 // The variant decides which folder the zip lands in, and it is checked against the built
 // bundle before anything is written. See build-variant.mjs for why that check exists.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, cpSync, readdirSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
-import { tmpdir } from "node:os";
 import { pruneUnshippedLocales } from "./prune-locales.mjs";
 import { variantFromArgv, assertVariant, assertVersion, assertBundleComplete, artifactDir } from "./build-variant.mjs";
+import { withStagedPackage, LAYOUT_FLAT, LAYOUT_FOLDER } from "./zip-build.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -63,54 +69,29 @@ const outPath = resolve(artifactsDir, `kesonode-chrome-${version}.zip`);
 mkdirSync(artifactsDir, { recursive: true });
 rmSync(outPath, { force: true }); // zip appends otherwise
 
-// On Windows, resolve bsdtar by absolute path: a `tar` on PATH there is usually
-// GNU tar from Git for Windows, which can't write zip at all.
-function bsdtar() {
-  return process.platform === "win32"
-    ? join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe")
-    : "tar";
-}
-
 // Stage a copy so we can strip `key` without mutating dist/ (the dev-load dir).
-const staging = mkdtempSync(join(tmpdir(), "kesonode-chrome-"));
-try {
-  cpSync(distDir, staging, { recursive: true });
+// A SOURCE package is zipped as one folder; a STORE package keeps the manifest at the
+// archive root, which is what the Web Store insists on.
+withStagedPackage(
+  {
+    buildDir: distDir,
+    outPath,
+    layout: variant === "store" ? LAYOUT_FLAT : LAYOUT_FOLDER,
+  },
+  (packageDir) => {
+    const manifestPath = join(packageDir, "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    if (!keepKey && "key" in manifest) {
+      delete manifest.key;
+      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+      console.log(`Stripped \`key\` (${variant === "store" ? "store upload" : "migration source"}; kept in dist/ for dev).`);
+    } else if ("key" in manifest) {
+      console.log("Kept `key` — unpacked installs of this package share a stable extension ID.");
+    }
 
-  const manifestPath = join(staging, "manifest.json");
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  if (!keepKey && "key" in manifest) {
-    delete manifest.key;
-    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
-    console.log(`Stripped \`key\` (${variant === "store" ? "store upload" : "migration source"}; kept in dist/ for dev).`);
-  } else if ("key" in manifest) {
-    console.log("Kept `key` — unpacked installs of this package share a stable extension ID.");
+    pruneUnshippedLocales(join(packageDir, "_locales"), manifest.default_locale);
   }
-
-  pruneUnshippedLocales(join(staging, "_locales"), manifest.default_locale);
-
-  // Zip the CONTENTS of the staging dir (cwd: staging) so manifest.json lands at
-  // the archive root. -r recurse, -X strip extra file attributes, exclude junk.
-  try {
-    execFileSync(
-      "zip",
-      ["-r", "-X", outPath, ".", "-x", "*.DS_Store", "-x", "__MACOSX/*"],
-      { cwd: staging, stdio: "inherit" }
-    );
-  } catch (err) {
-    if (err.code !== "ENOENT") throw err;
-    // No Info-ZIP `zip` (the normal case on Windows). bsdtar/libarchive ships with
-    // Windows 10+ and writes zip via `-a`; pass the top-level entries rather than
-    // "." so nothing gets a "./" prefix in the archive.
-    console.log("`zip` not found, falling back to bsdtar.");
-    execFileSync(
-      bsdtar(),
-      ["-a", "-c", "-f", outPath, "--exclude", ".DS_Store", "--exclude", "__MACOSX", ...readdirSync(staging)],
-      { cwd: staging, stdio: "inherit" }
-    );
-  }
-} finally {
-  rmSync(staging, { recursive: true, force: true });
-}
+);
 
 console.log(
   `\n${variant === "store" ? "STORE" : "SOURCE"} package (Chrome) written → ${outPath}`
@@ -119,6 +100,6 @@ console.log(
   variant === "store"
     ? "  ↑ this is the one that goes to the Chrome Web Store."
     : keepKey
-    ? "  ↑ stable extension ID: unpacked upgrades keep their settings."
+    ? "  ↑ stable extension ID, and it unpacks into one Kesonode folder: unpacked upgrades keep their settings."
     : "  ↑ no pinned ID (1.5.2 migration release): load this over the previous folder."
 );

@@ -106,6 +106,33 @@ what a question sends. The switch in Settings → AI assistant is the consent in
 substance: the feature is off until you turn it on, and turning it off stops every
 further request immediately.
 
+## Software update
+
+Settings → Advanced → Software update can look for a newer release and install it. Both
+steps are things you start; neither happens on its own.
+
+**Checking for updates** sends one request to `api.github.com` (GitHub's public API) and
+reads the newest release of this repository. It carries nothing of yours: no bookmarks,
+no browsing history, no open tabs, no extension list, no credentials, no device
+identifier. Nothing is sent at all unless you press "Check for updates", and the button
+is not pressed for you.
+
+**Installing an update** (Chromium only) needs the folder Kesonode is loaded from. You
+pick that folder yourself, in the browser's own folder picker, and the browser asks
+whether Kesonode may write to it. That permission is for that one folder, can be revoked
+at any time, and is used for nothing else. The update writes the new version's files
+into the folder, deletes the files the new version does not have (Vite names its chunks
+after their contents, so a release leaves chunks behind that the next one does not use),
+and keeps the version it replaced in a `.kesonode-backup/` subfolder inside it. **No file
+leaves your device**: the package is the one you picked on your disk, it is read from
+there and written back to disk, and nothing is uploaded. Before anything is written, the
+package's manifest key is compared with the installed one; an update that would change
+the extension ID — and with it every setting — is refused.
+
+**Firefox** gives extensions no way to write to a local folder, so the same page offers
+a small script instead. It runs as an ordinary program on your machine, reads the zip
+you downloaded, and writes it into `~/Downloads/Kesonode`; it sends nothing anywhere.
+
 ## Where your data goes
 
 When you set up Kesonode, you choose **one** storage backend and sign in to it with

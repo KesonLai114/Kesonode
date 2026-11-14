@@ -852,9 +852,28 @@ on("runtime", "onInstalled", () => browser.runtime.onInstalled.addListener(async
   }
   await ensureInit();
   if (details.reason === "update") {
+    // A self-upgrade: the extension has just replaced its own files. The page that
+    // started it was closed by the restart, so open the settings page again — otherwise
+    // the upgrade ends with the user's screen empty and nothing saying it worked.
+    let reopened = false;
+    try {
+      const pending = await browser.storage.local.get(KEYS.UPGRADE_PENDING);
+      if (pending[KEYS.UPGRADE_PENDING]) {
+        await browser.storage.local.remove(KEYS.UPGRADE_PENDING);
+        logger.event("Update", "Self-upgrade finished, reopening the settings page");
+        await browser.runtime.openOptionsPage();
+        reopened = true;
+      }
+    } catch (err) {
+      logger.warn("Update", `Could not reopen the settings page after the upgrade: ${err instanceof Error ? err.message : err}`);
+    }
     // A new version may need an optional permission, or an imported WebDAV config may
     // have brought a host permission nobody granted. Nothing in a worker can ask for it:
     // permissions.request() needs a user gesture, so open a page with one real button.
+    // The settings page is a page with buttons too, but the onboarding page explains
+    // what is missing, so it stays the one that is opened — unless the upgrade just
+    // happened, in which case the user is already looking at the settings.
+    if (reopened) return;
     try {
       const settings = await getSettings();
       const missing = await missingPermissionsFor(settings);

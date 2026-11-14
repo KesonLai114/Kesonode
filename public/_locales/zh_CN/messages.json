@@ -2515,7 +2515,7 @@
     "message": "软件更新"
   },
   "opt_update_section_sub": {
-    "message": "本地加载的扩展无法替换自己的代码。升级助手会先校验新安装包并解压，最后一步仍需由浏览器确认。"
+    "message": "升级会把新版本写进 Kesonode 被加载的那个文件夹，然后重启扩展。不允许这样做的浏览器会改为拿到解压好的安装包。"
   },
   "opt_update_check_label": {
     "message": "检查更新"
@@ -2598,13 +2598,13 @@
     "message": "一键升级脚本"
   },
   "opt_update_script_desc": {
-    "message": "下载后双击运行：自动找到安装包、解压到全新文件夹并复制路径。若双击无反应，可在终端用 sh 运行。"
+    "message": "下载后运行：它会找到安装包、装进名为 Kesonode 的文件夹并复制路径。双击没反应的话，在终端里用 sh 运行。"
   },
   "opt_update_script_download": {
     "message": "下载脚本"
   },
   "opt_update_steps": {
-    "message": "1. 双击升级脚本，它会把压缩包解压到一个全新文件夹（绝不覆盖旧目录）并把路径复制到剪贴板。\n2. 打开 chrome://extensions（Edge：edge://extensions；Firefox：about:debugging），移除旧的 Kesonode。\n3. 点「加载已解压的扩展程序」并粘贴刚才复制的路径。扩展 ID 已固定，配置会自动保留。"
+    "message": "Chromium：绑定你加载 Kesonode 的那个文件夹，导入新安装包，点「立即升级」——新版本会写进那个文件夹，扩展自动重启。\nFirefox：运行升级脚本。它每次都装进同一个名为 Kesonode 的文件夹，扩展 ID 和设置都会保留。"
   },
   "ai_nav": {
     "message": "AI 助手"
@@ -2763,5 +2763,78 @@
         "example": "5"
       }
     }
+  },
+  "opt_update_dir_label": {
+    "message": "安装目录"
+  },
+  "opt_update_dir_none": {
+    "message": "还没有绑定目录。请选择 Kesonode 被加载的那个文件夹。"
+  },
+  "opt_update_dir_bound": {
+    "message": "已绑定到“$NAME$”。升级会写进这个文件夹。",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_dir_pick": {
+    "message": "选择文件夹"
+  },
+  "opt_update_dir_rebind": {
+    "message": "更换文件夹"
+  },
+  "opt_update_dir_unbind": {
+    "message": "解除绑定"
+  },
+  "opt_update_dir_picking": {
+    "message": "等待你选择文件夹…"
+  },
+  "opt_update_dir_unsupported": {
+    "message": "当前浏览器不允许扩展写入本地文件夹（Firefox 没有这个接口），请改用下面的升级脚本。"
+  },
+  "opt_update_install_label": {
+    "message": "一键升级"
+  },
+  "opt_update_install_desc": {
+    "message": "新版本会写进已绑定的文件夹，然后扩展自动重启。"
+  },
+  "opt_update_install_go": {
+    "message": "立即升级"
+  },
+  "opt_update_install_busy": {
+    "message": "正在升级…"
+  },
+  "opt_update_install_done": {
+    "message": "版本 $VERSION$ 已安装，扩展正在重启。",
+    "placeholders": {
+      "version": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_install_need_pkg": {
+    "message": "请先导入新的安装包。"
+  },
+  "opt_update_install_need_dir": {
+    "message": "请先绑定安装目录。"
+  },
+  "opt_update_err_no_folder": {
+    "message": "还没有绑定安装目录。"
+  },
+  "opt_update_err_no_permission": {
+    "message": "浏览器不再允许写入该文件夹，请重新选择一次。"
+  },
+  "opt_update_err_not_installed": {
+    "message": "该文件夹里没有 manifest.json，不是 Kesonode 的安装目录。"
+  },
+  "opt_update_err_key_mismatch": {
+    "message": "该安装包会改变扩展 ID，设置会丢失。请把它作为新扩展安装。"
+  },
+  "opt_update_err_read": {
+    "message": "无法读取已安装的 manifest.json。"
+  },
+  "opt_update_err_write": {
+    "message": "写入新版本失败。文件夹里仍是旧版本，重新执行升级即可。"
   }
 }

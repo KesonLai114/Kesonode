@@ -2515,7 +2515,7 @@
     "message": "Szoftverfrissítés"
   },
   "opt_update_section_sub": {
-    "message": "A helyben betöltött bővítmény nem tudja lecserélni a saját kódját. Ez a segéd ellenőrzi és kicsomagolja az új csomagot; az utolsó lépést a böngésző végzi."
+    "message": "A frissítés az új verziót abba a mappába írja, ahonnan a Kesonode betöltötték, majd újraindítja a kiegészítőt. Azok a böngészők, amelyek ezt nem engedik, a kicsomagolt csomagot kapják."
   },
   "opt_update_check_label": {
     "message": "Frissítések keresése"
@@ -2598,13 +2598,13 @@
     "message": "Egykattintásos frissítő szkript"
   },
   "opt_update_script_desc": {
-    "message": "Letöltés után dupla kattintással indítsd: megkeresi a ZIP-et, új mappába csomagolja ki, és másolja az elérési utat. Ha nem történik semmi, terminálból futtasd sh-vel."
+    "message": "Futtasd letöltés után: megtalálja a zip-et, a Kesonode mappába telepíti, és átmásolja az útvonalat. Ha a dupla kattintás nem csinál semmit, indítsd sh-val egy terminálban."
   },
   "opt_update_script_download": {
     "message": "Szkript letöltése"
   },
   "opt_update_steps": {
-    "message": "1. Indítsd el a frissítő szkriptet dupla kattintással: a ZIP-et új mappába bontja ki (soha nem a régi fölé), és másolja az utat.\n2. Nyisd meg a chrome://extensions oldalt (Edge: edge://extensions; Firefox: about:debugging), és távolítsd el a régi Kesonode-ot.\n3. Válaszd a „Kicsomagolt bővítmény betöltése” lehetőséget, és illeszd be a másolt útvonalat. A beállítások megmaradnak, mert a bővítmény azonosítója rögzített."
+    "message": "Chromium: válaszd ki a mappát, ahonnan a Kesonode betöltötték, importáld az új csomagot, majd kattints a „Frissítés most” gombra — az új verzió ebbe a mappába íródik, a kiegészítő újraindul.\nFirefox: futtasd a frissítő parancsfájlt. Mindig ugyanabba a mappába telepíti a csomagot, így a kiegészítő ID-ja és a beállításaid megmaradnak."
   },
   "ai_nav": {
     "message": "AI-asszisztens"
@@ -2763,5 +2763,78 @@
         "example": "5"
       }
     }
+  },
+  "opt_update_dir_label": {
+    "message": "Telepítési mappa"
+  },
+  "opt_update_dir_none": {
+    "message": "Még nincs megadva mappa. Válaszd ki a mappát, ahonnan a Kesonode betöltötték."
+  },
+  "opt_update_dir_bound": {
+    "message": "Rendelve erre: „$NAME$”. A frissítések ide íródnak.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_dir_pick": {
+    "message": "Mappa kiválasztása"
+  },
+  "opt_update_dir_rebind": {
+    "message": "Mappa módosítása"
+  },
+  "opt_update_dir_unbind": {
+    "message": "Léválasztás"
+  },
+  "opt_update_dir_picking": {
+    "message": "Várunk egy mappa kiválasztására…"
+  },
+  "opt_update_dir_unsupported": {
+    "message": "Ez a böngésző nem engedi, hogy egy kiegészítő helyi mappába írjon (a Firefoxben nincs ilyen API), ezért használd alább a frissítő parancsfájlt."
+  },
+  "opt_update_install_label": {
+    "message": "Frissítés egy kattintással"
+  },
+  "opt_update_install_desc": {
+    "message": "Az új verzió a megadott mappába íródik, és a kiegészítő újraindul."
+  },
+  "opt_update_install_go": {
+    "message": "Frissítés most"
+  },
+  "opt_update_install_busy": {
+    "message": "Frissítés…"
+  },
+  "opt_update_install_done": {
+    "message": "A(z) $VERSION$ verzió telepítve. A kiegészítő újraindul.",
+    "placeholders": {
+      "version": {
+        "content": "$1"
+      }
+    }
+  },
+  "opt_update_install_need_pkg": {
+    "message": "Előbb importáld az új csomagot."
+  },
+  "opt_update_install_need_dir": {
+    "message": "Előbb add meg a telepítési mappát."
+  },
+  "opt_update_err_no_folder": {
+    "message": "Nincs megadva telepítési mappa."
+  },
+  "opt_update_err_no_permission": {
+    "message": "A böngésző már nem engedi az írást ebbe a mappába. Válaszd ki újra."
+  },
+  "opt_update_err_not_installed": {
+    "message": "Ebben a mappában nincs manifest.json, tehát nem Kesonode telepítési mappa."
+  },
+  "opt_update_err_key_mismatch": {
+    "message": "Ez a csomag megváltoztatná a kiegészítő ID-ját, és a beállításaid elvesznének. Telepítsd új kiegészítőként."
+  },
+  "opt_update_err_read": {
+    "message": "A telepített manifest.json nem volt olvasható."
+  },
+  "opt_update_err_write": {
+    "message": "Az új verzió írása nem sikerült. A mappában még a régi verzió van; indítsd el újra a frissítést."
   }
 }

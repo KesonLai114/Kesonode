@@ -1,9 +1,13 @@
 @echo off
 rem Kesonode one-click upgrade helper (Windows 10 or newer).
-rem A browser extension cannot replace its own files. This script only unpacks the
-rem downloaded zip into a BRAND NEW folder and copies that path; the browser still
-rem requires you to remove the old extension and choose "Load unpacked".
+rem A browser extension cannot replace its own files. This script unpacks the downloaded
+rem zip into ONE folder named Kesonode, so the path never changes and the extension ID —
+rem and with it every setting — survives the upgrade. The previous folder is kept as
+rem Kesonode.old-<timestamp> instead of being deleted.
 rem English only on purpose: console output must stay readable under any OEM code page.
+rem
+rem Usage: upgrade.bat [package.zip] [target folder]
+rem   target folder defaults to %USERPROFILE%\Downloads\Kesonode
 setlocal
 title Kesonode upgrade helper
 
@@ -29,40 +33,80 @@ if not defined ZIP (
 )
 echo Package: %ZIP%
 
+set "TARGET=%~2"
+if not defined TARGET set "TARGET=%USERPROFILE%\Downloads\Kesonode"
+
 for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "STAMP=%%T"
 if not defined STAMP set "STAMP=%RANDOM%"
-set "DEST=%USERPROFILE%\Downloads\Kesonode-upgrade-%STAMP%"
-mkdir "%DEST%" 2>nul
+
+set "STAGE=%TEMP%\kesonode-upgrade-%STAMP%"
+mkdir "%STAGE%" 2>nul
 if errorlevel 1 (
-  echo Cannot create %DEST%
+  echo Cannot create the temporary folder %STAGE%
   goto :end
 )
 
-echo Unpacking into a fresh folder ...
-tar -xf "%ZIP%" -C "%DEST%" 2>nul
+echo Unpacking ...
+tar -xf "%ZIP%" -C "%STAGE%" 2>nul
 if errorlevel 1 (
   echo Unpacking failed. Windows 10 or newer is required, or unzip the package manually.
-  goto :end
-)
-if not exist "%DEST%\manifest.json" (
-  echo manifest.json was not found at the root of the unpacked folder.
-  echo Do NOT load this folder. It is probably a zip with an extra folder layer.
-  goto :end
+  goto :clean
 )
 
-<nul set /p "=%DEST%" | clip >nul 2>&1
+rem Two layouts: a release package puts everything inside one Kesonode folder, a store
+rem package has its files at the root. Both have to be recognised.
+set "ROOT="
+if exist "%STAGE%\manifest.json" set "ROOT=%STAGE%"
+if not defined ROOT (
+  for /d %%D in ("%STAGE%\*") do (
+    if exist "%%~fD\manifest.json" if not defined ROOT set "ROOT=%%~fD"
+  )
+)
+if not defined ROOT (
+  echo manifest.json was not found in the unpacked package.
+  echo This does not look like a Kesonode package. Download it again.
+  goto :clean
+)
+
+rem The previous folder is renamed, never deleted: this is the one step that touches the
+rem user's files, and keeping it means a bad release can be undone by hand.
+if exist "%TARGET%" (
+  set "OLD=%TARGET%.old-%STAMP%"
+  move "%TARGET%" "%OLD%" >nul 2>&1
+  if exist "%TARGET%" (
+    echo Cannot move the old folder %TARGET% aside. Nothing was changed.
+    goto :clean
+  )
+  echo Old folder kept as: %OLD%
+)
+
+mkdir "%TARGET%" 2>nul
+xcopy "%ROOT%\*" "%TARGET%\" /E /I /H /Y /Q >nul
+if errorlevel 1 (
+  echo Copying into %TARGET% failed.
+  goto :clean
+)
+if not exist "%TARGET%\manifest.json" (
+  echo manifest.json was not copied. Nothing usable was installed.
+  goto :clean
+)
+
+<nul set /p "=%TARGET%" | clip >nul 2>&1
 
 echo.
-echo Done. New folder ^(copied to clipboard^):
-echo   %DEST%
+echo Done. Folder ^(copied to clipboard^):
+echo   %TARGET%
 echo.
 echo Next steps in the browser:
 echo   1. Open chrome://extensions ^(Edge: edge://extensions; Firefox: about:debugging^)
-echo   2. Remove the old Kesonode
-echo   3. Choose "Load unpacked" and paste the copied path
+echo   2. Press "Reload" on Kesonode; if it is not loaded from this folder, choose
+echo      "Load unpacked" and paste the copied path
 echo.
-echo Settings are kept because the extension ID is pinned. Keep the old folder until
-echo you have confirmed the new version works.
+echo The folder name never changes, so the extension ID and all your settings are kept.
+echo Keep the .old- folder until you have confirmed the new version works.
+
+:clean
+if defined STAGE rmdir /s /q "%STAGE%" >nul 2>&1
 
 :end
 echo.
