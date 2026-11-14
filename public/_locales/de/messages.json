@@ -22,7 +22,7 @@
     "message": "de"
   },
   "extension_name": {
-    "message": "Kesonode | Privater Lesezeichen- und Tab-Sync v1.5.18"
+    "message": "Kesonode | Privater Lesezeichen- und Tab-Sync v1.5.19"
   },
   "extension_description": {
     "message": "Datenschutzfreundliche Browser-Synchronisierung in deinen eigenen Speicher: Google Drive, WebDAV, GitHub."
@@ -2520,13 +2520,17 @@
   "opt_update_up_to_date": {
     "message": "Du nutzt bereits die neueste Version $VERSION$.",
     "placeholders": {
-      "version": { "content": "$1" }
+      "version": {
+        "content": "$1"
+      }
     }
   },
   "opt_update_available": {
     "message": "Version $VERSION$ ist verfügbar.",
     "placeholders": {
-      "version": { "content": "$1" }
+      "version": {
+        "content": "$1"
+      }
     }
   },
   "opt_update_download": {
@@ -2547,15 +2551,23 @@
   "opt_update_package_ok": {
     "message": "Geprüft: $VERSION$ für $TARGET$ ($COUNT$ Dateien). Führe anschließend das Upgrade-Skript aus.",
     "placeholders": {
-      "version": { "content": "$1" },
-      "target": { "content": "$2" },
-      "count": { "content": "$3" }
+      "version": {
+        "content": "$1"
+      },
+      "target": {
+        "content": "$2"
+      },
+      "count": {
+        "content": "$3"
+      }
     }
   },
   "opt_update_package_bad": {
     "message": "Dieses Paket kann nicht verwendet werden: $REASON$",
     "placeholders": {
-      "reason": { "content": "$1" }
+      "reason": {
+        "content": "$1"
+      }
     }
   },
   "opt_update_bad_zip": {
@@ -2589,7 +2601,7 @@
     "message": "Verbindungseinstellungen"
   },
   "ai_privacy_notice": {
-    "message": "Standardmäßig aus, mit deinem eigenen API-Schlüssel. Bei einer Frage werden nur Lesezeichen-Titel, Hostnamen und Ordnerpfade (höchstens 400 Einträge) an die von dir eingegebene Adresse gesendet. Vollständige URLs, Verlauf, Tabs und dein Sync-Speicher werden nie gesendet. Kesonode hat keinen Server und erhält diese Daten nicht."
+    "message": "Standardmäßig aus, mit deinem eigenen API-Schlüssel. Eine Frage sendet nur die auf diesem Gerät ausgewählten Lesezeichen — ein lokaler Texttreffer auf deine Frage plus die zuletzt hinzugefügten, höchstens 120 Einträge, in kleinen Stapeln gesendet. Nur Titel, Hostnamen und Ordnerpfade verlassen das Gerät; vollständige URLs, Verlauf, Tabs und dein Sync-Speicher nie. Der Ordnungsvorschlag betrachtet nur Lesezeichen, die direkt in einem Stammordner liegen, höchstens 400. Kesonode hat keinen Server und erhält diese Daten nie."
   },
   "ai_enable": {
     "message": "KI-Assistent aktivieren"
@@ -2636,6 +2648,21 @@
   "ai_err_snapshot": {
     "message": "Es konnte kein Wiederherstellungspunkt erstellt werden, daher wurden keine Lesezeichen geändert. Konfiguriere zuerst einen Speicher-Backend."
   },
+  "ai_err_auth": {
+    "message": "Der Anbieter hat den API-Schlüssel abgelehnt (401/403). Prüfe den Schlüssel und sein Guthaben."
+  },
+  "ai_err_notfound": {
+    "message": "Endpunkt oder Modellname nicht gefunden (404). Prüfe die Basis-URL und den Modellnamen."
+  },
+  "ai_err_rate": {
+    "message": "Der Anbieter begrenzt die Anfragerate (429). Warte einen Moment und versuche es erneut."
+  },
+  "ai_err_provider": {
+    "message": "Der Modelldienst ist auf seiner Seite fehlgeschlagen (5xx). Versuche es später erneut."
+  },
+  "ai_err_cancelled": {
+    "message": "Abgebrochen."
+  },
   "ai_organize_section": {
     "message": "Vorschläge zur Lesezeichen-Ordnung"
   },
@@ -2645,6 +2672,17 @@
   "ai_organize_run": {
     "message": "Vorschläge erzeugen"
   },
+  "ai_coverage_hint": {
+    "message": "Das Modell sah $SENT$ von $TOTAL$ Lesezeichen; die übrigen wurden auf diesem Gerät herausgefiltert.",
+    "placeholders": {
+      "sent": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
   "ai_organize_empty": {
     "message": "Diesmal keine Vorschläge."
   },
@@ -2652,7 +2690,10 @@
     "message": "Vorgeschlagene Ordner"
   },
   "ai_organize_duplicates": {
-    "message": "Mögliche Duplikate (das erste bleibt)"
+    "message": "Mögliche Duplikate (wähle, welches behalten wird)"
+  },
+  "ai_organize_keep": {
+    "message": "Behalten"
   },
   "ai_organize_apply": {
     "message": "Auswahl anwenden"

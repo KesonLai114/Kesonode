@@ -3,7 +3,7 @@ import {
   importBookmarks, exportBookmarkPayload, registerBookmarkListeners, resetDeletionLog,
   type BulkDeleteBlock,
 } from "@/lib/handlers/bookmarks-handler";
-import { getTombstones, setTombstones, getBulkDeleteApproval, setBulkDeleteApproval, KEYS } from "@/lib/utils/storage";
+import { getTombstones, setTombstones, getMoves, getBulkDeleteApproval, setBulkDeleteApproval, KEYS } from "@/lib/utils/storage";
 import type { BookmarkPayload, SyncBookmark } from "@/lib/types";
 
 // These exercise the real merge/replace logic against the in-memory
@@ -90,6 +90,28 @@ describe("importBookmarks — cross-browser move safety (confidence gate)", () =
   it("still ADDS a genuinely new bookmark from an unmappable peer", async () => {
     await importBookmarks(foreignRootPayload([link("New", "https://new.com")], []), "merge", "lww");
     expect(await localUrls()).toEqual(["https://new.com"]);
+  });
+
+  it("keeps the peer's move RETRYABLE when the gate stopped it", async () => {
+    // The move the gate refused must not be folded into this device's own move log. The
+    // log is the LWW baseline and the comparison is strictly newer-than, so a record
+    // sitting in it reads as "this placement is done" — the move would be lost for good
+    // instead of being retried once the peer's root becomes mappable.
+    await seed("X", "https://x.com", "2");
+    const moves = [{ url: "https://x.com", at: Date.now() }];
+
+    await importBookmarks(foreignRootPayload([link("X", "https://x.com")], moves), "merge", "lww");
+    expect((await chrome.bookmarks.getChildren("2")).map((c) => c.url)).toContain("https://x.com");
+    expect(
+      (await getMoves()).find((r) => r.url === "https://x.com"),
+      "the refused move was folded in as if it had been applied",
+    ).toBeUndefined();
+
+    // The same record from a peer whose root IS mappable: now it is applied, and then
+    // (and only then) it is folded in.
+    await importBookmarks({ ...payload([link("X", "https://x.com")], []), moves }, "merge", "lww");
+    expect((await chrome.bookmarks.getChildren("1")).map((c) => c.url)).toContain("https://x.com");
+    expect((await getMoves()).find((r) => r.url === "https://x.com")).toBeDefined();
   });
 });
 

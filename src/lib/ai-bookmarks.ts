@@ -12,7 +12,7 @@
  * the sync packet or adds a field to the frozen wire format.
  */
 
-import { AiError, type AiOrganizationPlan } from "@/lib/ai-assistant";
+import { AiError, clipAiText, type AiOrganizationPlan } from "@/lib/ai-assistant";
 import type { FlatBookmark } from "@/lib/handlers/reading-list-handler";
 import {
   partitionExcluded,
@@ -87,7 +87,9 @@ export async function collectAiBookmarks(): Promise<AiBookmarkSnapshot> {
           dateAdded: node.dateAdded ?? 0,
         });
       } else {
-        const name = (node.title ?? "").trim();
+        // The same clip the model sees: a folder whose raw name exceeds the prompt's cap
+        // could never be matched back to an id at apply time.
+        const name = clipAiText(node.title ?? "");
         if (name) {
           if (!folderIds.has(name)) {
             folderIds.set(name, node.id);
@@ -115,6 +117,19 @@ export interface AiApplyResult {
   restorePointCreated: boolean;
 }
 
+export interface AiApplyDeps {
+  /**
+   * Take the restore point. Injectable so a test can prove the one ordering that
+   * matters: a failed restore point must leave the bookmark tree exactly as it was.
+   */
+  createRestorePoint?: () => Promise<boolean>;
+}
+
+async function defaultRestorePoint(): Promise<boolean> {
+  const restore = await request({ type: "CREATE_SNAPSHOT", payload: { pinned: true } });
+  return restore.ok && restore.res.type === "SNAPSHOTS";
+}
+
 /**
  * Apply a reviewed plan. A restore point is taken BEFORE the first edit; if it cannot be
  * created we refuse to touch the tree, because "undo" is the whole safety story here.
@@ -123,6 +138,7 @@ export async function applyOrganizationPlan(
   plan: AiOrganizationPlan,
   selection: AiApplySelection,
   folderIds: Map<string, string>,
+  deps: AiApplyDeps = {},
 ): Promise<AiApplyResult> {
   const moves = plan.moves.filter((m) => selection.moveIds.includes(m.id));
   const removals = [...new Set(selection.removeIds)];
@@ -132,8 +148,8 @@ export async function applyOrganizationPlan(
 
   // The first await of the whole operation is deliberately here, before any bookmark API
   // call: a failed restore point must leave the tree exactly as it was.
-  const restore = await request({ type: "CREATE_SNAPSHOT", payload: { pinned: true } });
-  if (!restore.ok || restore.res.type !== "SNAPSHOTS") throw new AiError("snapshot");
+  const createRestorePoint = deps.createRestorePoint ?? defaultRestorePoint;
+  if (!(await createRestorePoint())) throw new AiError("snapshot");
 
   let moved = 0;
   for (const move of moves) {

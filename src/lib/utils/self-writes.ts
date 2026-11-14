@@ -1,9 +1,9 @@
 /**
- * The title writes the merge made itself, so the recorder can tell them from the user's.
+ * The writes the merge made itself, so the recorders can tell them from the user's.
  *
  * `importing` is a window in TIME: it is true while a merge runs, and the browser delivers
- * onChanged whenever it gets round to it — often after the merge that caused it has already
- * returned. That window cost us in both directions.
+ * onChanged/onMoved/onRemoved whenever it gets round to it — often after the merge that
+ * caused it has already returned. That window cost us in both directions.
  *
  * Late: an echo of the merge's own rename arrived outside the window, read as a user rename
  * and went out re-stamped with `Date.now()`, outranking every peer's copy of the same
@@ -14,8 +14,17 @@
  * still rode along in the tree, but the operation did not, and the peers — which match
  * folders by title — found no folder of that name and made one beside the user's.
  *
+ * The same window sat in front of MOVES and DELETIONS, where losing the record is worse:
+ * a placement and a removal travel ONLY as those records — a peer never relocates or drops
+ * a bookmark because the tree says so. A user who reorganised bookmarks while a sync was
+ * merging (the sync fires on every change, and the merge covers every peer) had every move
+ * and delete silently discarded: the moved bookmarks stayed in the old folder on every
+ * other device, the deleted ones came back, and the emptied folder could never be pruned.
+ * That was reported from the field as "sync stopped working".
+ *
  * So the merge says what it wrote, and the recorder skips the one event that matches it, by
- * CONTENT rather than by timing. Every other rename is recorded, mid-sync or not.
+ * CONTENT rather than by timing (a move by its target parent, a removal by its node id).
+ * Every other change is recorded, mid-sync or not.
  *
  * Deliberately a leaf module: no chrome, no storage, nothing to import. It is in-memory
  * state in a service worker that can be torn down at any moment, which is fine — a worker
@@ -27,8 +36,9 @@
  *
  * Far beyond any plausible event delay, because the two failure modes are not equal: an
  * entry that expires too early lets an echo through, which is the field loop, while one
- * that lingers can only swallow a rename to the very same title on the very same node,
- * and only if the merge's own event was never delivered at all.
+ * that lingers can only swallow the same write on the same node (a rename to the same
+ * title, a move to the same parent), and only if the merge's own event was never
+ * delivered at all. A removal cannot be swallowed twice: the node is gone.
  */
 const TTL_MS = 30_000;
 
@@ -37,14 +47,32 @@ interface SelfWrite {
   at: number;
 }
 
+interface SelfMove {
+  /** The parent the merge moved the node into; the event must name the same one. */
+  parentId: string | undefined;
+  at: number;
+}
+
 /** node id → the titles the merge wrote to it and has not seen come back yet. */
 const pending = new Map<string, SelfWrite[]>();
+/** node id → the placements the merge made and has not seen come back yet. */
+const pendingMoves = new Map<string, SelfMove[]>();
+/** node id → when the merge removed it. A removed node can't be removed again, so ids suffice. */
+const pendingRemovals = new Map<string, number>();
 
 function prune(now: number): void {
   for (const [id, list] of pending) {
     const live = list.filter((w) => now - w.at < TTL_MS);
     if (live.length) pending.set(id, live);
     else pending.delete(id);
+  }
+  for (const [id, list] of pendingMoves) {
+    const live = list.filter((w) => now - w.at < TTL_MS);
+    if (live.length) pendingMoves.set(id, live);
+    else pendingMoves.delete(id);
+  }
+  for (const [id, at] of pendingRemovals) {
+    if (now - at >= TTL_MS) pendingRemovals.delete(id);
   }
 }
 
@@ -80,6 +108,62 @@ export function takeSelfTitleWrite(id: string, title: string): boolean {
 }
 
 /**
+ * The merge is about to move `id` into `parentId`.
+ *
+ * Called BEFORE the write for the same reason as the titles: an event can be delivered
+ * before the write's promise settles. A move that then fails leaves an entry nobody claims,
+ * which the TTL clears.
+ */
+export function noteSelfMove(id: string, parentId: string | undefined): void {
+  const now = Date.now();
+  prune(now);
+  const list = pendingMoves.get(id) ?? [];
+  list.push({ parentId, at: now });
+  pendingMoves.set(id, list);
+}
+
+/**
+ * Is this onMoved the merge's own move coming back? Claims it. Matched by the TARGET PARENT,
+ * not by id alone: the user dragging the same bookmark somewhere else is still their move
+ * and must be recorded.
+ */
+export function takeSelfMove(id: string, parentId: string | undefined): boolean {
+  const now = Date.now();
+  prune(now);
+  const list = pendingMoves.get(id);
+  if (!list) return false;
+  const i = list.findIndex((w) => w.parentId === parentId);
+  if (i < 0) return false;
+  list.splice(i, 1);
+  if (!list.length) pendingMoves.delete(id);
+  return true;
+}
+
+/** The merge is about to remove the node `id` (a bookmark, or a shell it just pruned). */
+export function noteSelfRemoval(id: string): void {
+  const now = Date.now();
+  prune(now);
+  pendingRemovals.set(id, now);
+}
+
+/**
+ * Is this onRemoved the merge's own removal coming back? Claims it.
+ *
+ * By id, because a node that is gone cannot be removed a second time — there is no user
+ * action this could swallow. Without it, every bookmark the merge deleted to honour a
+ * peer's tombstone was recorded as a deletion of THIS device's own and re-published
+ * re-stamped, and every pruned shell became a folder-delete this device demanded of the
+ * others.
+ */
+export function takeSelfRemoval(id: string): boolean {
+  const now = Date.now();
+  prune(now);
+  if (!pendingRemovals.has(id)) return false;
+  pendingRemovals.delete(id);
+  return true;
+}
+
+/**
  * Test seam: drop what one test's merge wrote, so it cannot answer for the next one's.
  *
  * Wired into the suite's global `beforeEach` rather than each test file's, because the
@@ -88,4 +172,6 @@ export function takeSelfTitleWrite(id: string, title: string): boolean {
  */
 export function resetSelfWrites(): void {
   pending.clear();
+  pendingMoves.clear();
+  pendingRemovals.clear();
 }

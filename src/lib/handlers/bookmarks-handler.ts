@@ -7,10 +7,10 @@ import { logger } from "@/lib/utils/logger";
 import {
   setBookmarkCache, getBookmarkCache,
   getTombstones, setTombstones, updateTombstones,
-  getMoves, setMoves, updateMoves,
-  getFolderMoves, setFolderMoves, updateFolderMoves,
-  getTitles, setTitles, updateTitles,
-  getFolderRenames, setFolderRenames, updateFolderRenames,
+  getMoves, updateMoves,
+  getFolderMoves, updateFolderMoves,
+  getTitles, updateTitles,
+  getFolderRenames, updateFolderRenames,
   updateFolderDeletes,
   getAppeared, updateAppeared, getKeptShells, updateKeptShells,
   getCreated, updateCreated, getPeerRemovals, updatePeerRemovals, getBookmarkExclusions,
@@ -26,7 +26,10 @@ import {
 } from "@/lib/utils/bookmark-exclusions";
 import { browser } from "@/lib/utils/ext";
 import { assertDataTypeApi, eventPresent } from "@/lib/utils/capabilities";
-import { noteSelfTitleWrite, takeSelfTitleWrite } from "@/lib/utils/self-writes";
+import {
+  noteSelfMove, noteSelfRemoval, noteSelfTitleWrite,
+  takeSelfMove, takeSelfRemoval, takeSelfTitleWrite,
+} from "@/lib/utils/self-writes";
 
 // Chromium 134+ types its permanent folders on the node (`folderType`) and tells an
 // account root from a local-only one (`syncing`); @types/chrome doesn't carry either yet.
@@ -127,6 +130,13 @@ const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 // Suppress recording while ANY of our imports/restores is active: one finishing must
 // not expose another's create/remove churn as user edits. This is not an operation lock.
 let activeImports = 0;
+
+// The imports that replace the whole tree (a baseline/replace, a restore point). Their
+// writes carry no per-node meaning, so the recorders skip them wholesale. A MERGE does not
+// raise this: its moves and removals are named one by one in the self-write ledger, so a
+// user editing bookmark-manager entries while a merge runs is still recorded — the loss of
+// those records is what made moves and deletions stop travelling (see self-writes.ts).
+let wholesaleImports = 0;
 
 export function toDeletedMap(list: Tombstone[]): Map<string, number> {
   const m = new Map<string, number>();
@@ -403,7 +413,7 @@ async function withRemovedContents(node: BookmarkNode): Promise<BookmarkNode> {
  *  so it would delete every copy on every peer (and the surviving local copy, being
  *  older than the tombstone, wouldn't re-propagate → the devices diverge). */
 async function recordRemovedTombstones(node: BookmarkNode, skip?: Set<string>): Promise<void> {
-  if (activeImports > 0) return;
+  if (wholesaleImports > 0) return;
   const urls: string[] = [];
   // `skip`: what this device keeps to itself (#54). Deleting a synced folder that holds an
   // excluded one must not tell the peers to delete their copies of what was never theirs.
@@ -471,7 +481,7 @@ export function resetDeletionLog(): void {
  * as older than the tombstone and deleted them again, for as long as the tombstone lived.
  */
 async function recordAppeared(node: BookmarkNode): Promise<void> {
-  if (activeImports > 0 || !node.url) return;
+  if (wholesaleImports > 0 || !node.url) return;
   const now = Date.now();
   if (now - (node.dateAdded ?? now) < APPEARED_SLACK_MS) return;
   const url = node.url;
@@ -488,7 +498,7 @@ async function recordAppeared(node: BookmarkNode): Promise<void> {
  * from the PARENT: by the time this runs the folder itself is gone.
  */
 async function recordRemovedFolder(parentId: string, node: BookmarkNode): Promise<void> {
-  if (activeImports > 0 || node.url) return;
+  if (wholesaleImports > 0 || node.url) return;
   const parentPath = await folderPath(parentId);
   if (!parentPath) return;
   const path = [...parentPath, node.title];
@@ -509,7 +519,7 @@ async function recordRemovedFolder(parentId: string, node: BookmarkNode): Promis
  *  The old url comes from the last-synced snapshot (konode_bm_cache), which is
  *  exactly what peers still hold. */
 async function recordUrlChange(id: string, newUrl: string | undefined): Promise<void> {
-  if (activeImports > 0 || !newUrl) return;
+  if (wholesaleImports > 0 || !newUrl) return;
   const cache = await getBookmarkCache<SyncBookmark[]>();
   if (!cache) return;
   const prev = flattenNodes(cache).find((n) => n.id === id);
@@ -581,7 +591,7 @@ async function recordTitleChange(id: string, newTitle: string | undefined): Prom
 /** Record a move (per URL) for a moved bookmark/folder subtree, so the new
  *  placement propagates with LWW. */
 async function recordMove(id: string): Promise<void> {
-  if (activeImports > 0) return;
+  if (wholesaleImports > 0) return;
   const urls: string[] = [];
   try {
     const sub = await browser.bookmarks.getSubTree(id);
@@ -701,7 +711,7 @@ async function markedFolder(
  *  shell is cleaned up on the receiver during merge. A folder has no URL, so this
  *  is the only signal that carries its own position across devices. */
 async function recordFolderMove(id: string, moveInfo: chrome.bookmarks.BookmarkMoveInfo): Promise<void> {
-  if (activeImports > 0) return;
+  if (wholesaleImports > 0) return;
   if (moveInfo.parentId !== moveInfo.oldParentId) return; // reorder only
   let node: BookmarkNode | undefined;
   try { [node] = await browser.bookmarks.get(id); } catch { return; }
@@ -732,7 +742,8 @@ export async function exportBookmarkPayload(): Promise<BookmarkPayload> {
   // event landing mid-export would otherwise read the pre-GC list and write it back —
   // either undoing the prune or dropping the event's own record, depending on which
   // write happened to land last. Nothing here is exempt from the burst just because it
-  // runs inside a sync: `activeImports` only suppresses the recorders during an IMPORT.
+  // runs inside a sync: only a wholesale import suppresses the recorders (a merge names
+  // its own writes in the ledger and records everything else, the user's included).
   const [tree, gced, gcedMoves, gcedFolderMoves, gcedTitles, gcedRenames, gcedFolderDeletes, gcedAppeared, createdRecords] = await Promise.all([
     exportBookmarks(),
     updateTombstones(gcTombstones),
@@ -1073,18 +1084,42 @@ export async function importBookmarks(
     // Folded in as the PEER's, never as ours. Keeping them is what stops a stale peer
     // resurrecting a bookmark someone else deleted; claiming them is what turned a single
     // refused deletion into every device demanding it of every other one (#31).
-    await setTombstones(
-      mergeTombstoneLists(logs.tombstones.local, asForeignTombstones(logs.tombstones.remote))
+    //
+    // Merge into the log as it stands NOW, not into the snapshot read above: the fold takes
+    // seconds, and a move or deletion the user recorded in that window would otherwise be
+    // overwritten by the snapshot. Those records are the ONLY thing that carries such an
+    // edit to the peers — the tree alone relocates and removes nothing.
+    await updateTombstones((current) =>
+      mergeTombstoneLists(current, asForeignTombstones(logs.tombstones.remote))
     );
-    await setMoves(mergeMoveLists(logs.moves.local, logs.moves.remote));
-    await setFolderMoves(mergeFolderMoveLists(logs.folderMoves.local, logs.folderMoves.remote));
-    await setTitles(mergeTitleLists(logs.titles.local, logs.titles.remote));
-    await setFolderRenames(mergeFolderRenameLists(logs.folderRenames.local, logs.folderRenames.remote));
+    // The MOVE log is folded in after the merge, and only for the placements the merge
+    // established — see below.
+    await updateFolderMoves((current) => mergeFolderMoveLists(current, logs.folderMoves.remote));
+    await updateTitles((current) => mergeTitleLists(current, logs.titles.remote));
+    await updateFolderRenames((current) => mergeFolderRenameLists(current, logs.folderRenames.remote));
 
     if (strategy === "replace") {
-      await clearAndImport(tree, local?.part.excludedIds);
+      wholesaleImports++;
+      try {
+        await clearAndImport(tree, local?.part.excludedIds);
+      } finally {
+        wholesaleImports--;
+      }
+      // The whole tree is the peer's now, so every placement it describes is in place.
+      await updateMoves((current) => mergeMoveLists(current, logs.moves.remote));
     } else {
-      await mergeBookmarks(tree, logs, conflictStrategy, deletePercent, approvedFor, onBulkBlocked, local?.part.excludedIds, orderMode);
+      const placed = await mergeBookmarks(
+        tree, logs, conflictStrategy, deletePercent, approvedFor, onBulkBlocked, local?.part.excludedIds, orderMode,
+      );
+      // Fold the peer's move records in AFTER the merge, and only the ones the merge
+      // actually established. The log is the LWW baseline: a record sitting in it reads
+      // as "this placement is already done" (the comparison is strictly newer-than), so
+      // folding a record in for a placement the merge could NOT make — an unmappable
+      // root, a folder that would not create — would lose that move for good. It is
+      // retried every cycle instead, and lands as soon as the merge can make it.
+      await updateMoves((current) =>
+        mergeMoveLists(current, logs.moves.remote.filter((r) => placed.has(canonicalUrlKey(r.url))))
+      );
     }
   } finally {
     activeImports--;
@@ -1218,7 +1253,13 @@ async function mergeBookmarks(
   // never hand back an excluded folder to write into.
   excluded: Set<string> = new Set(),
   orderMode: BookmarkOrderMode = "lww",
-): Promise<void> {
+  /**
+   * The canonical URLs whose placement this merge established — moved here, or already
+   * where the peer says they belong. The caller folds the peer's move records in only
+   * for these: a record for a placement this merge did not make must not sit in the LWW
+   * baseline, or the move reads as done and is never retried.
+   */
+): Promise<Set<string>> {
   // All URL identity maps below are keyed by the CANONICAL url (canonicalUrlKey),
   // not the raw string, so a bare-origin bookmark that Chromium/Firefox store with
   // a trailing slash and WebKit (Orion) store without one are treated as the SAME
@@ -1420,6 +1461,7 @@ async function mergeBookmarks(
   } else {
     for (const id of toRemove) {
       try {
+        noteSelfRemoval(id);
         await browser.bookmarks.remove(id);
         removed++;
         removedKeys.add(keyOfId.get(id) as string);
@@ -1511,8 +1553,11 @@ async function mergeBookmarks(
   const otherId = defaultOtherRootId(localRoots);
   if (!otherId) {
     logger.warn("mergeBookmarks", "No writable root folder found");
-    return;
+    return new Set<string>();
   }
+
+  /** The canonical URLs whose placement this merge settled. See the return type. */
+  const placed = new Set<string>();
 
   let renamedFolders = 0;
 
@@ -1623,6 +1668,7 @@ async function mergeBookmarks(
             if (loc.parentId !== targetId || loc.index !== target) {
               const from = loc.parentId;
               if (loc.parentId !== targetId) {
+                noteSelfMove(loc.id, targetId);
                 await browser.bookmarks.move(loc.id, { parentId: targetId, index: target });
               } else {
                 // Same-parent reorder: moveToIndex corrects the ±1 move-convention quirk
@@ -1630,9 +1676,15 @@ async function mergeBookmarks(
                 await moveToIndex(loc.id, targetId, target);
               }
               moved++;
+              // The placement is settled here, so the peer's record for it may be folded in.
+              placed.add(urlKey);
               // Track the folder we moved this bookmark OUT of, so an emptied shell
               // (left by a cross-parent folder move on the peer) is cleaned up below.
               if (from && from !== targetId && !localRootIds.has(from)) emptiedParents.add(from);
+            } else {
+              // Already exactly where the peer says it belongs: settled, and the record
+              // may be folded in.
+              placed.add(urlKey);
             }
           } catch (err) {
             logger.error(`Bookmark move: ${node.title}`, err);
@@ -1867,6 +1919,7 @@ async function mergeBookmarks(
         continue;
       }
       if (reason === "recorded" && !(await peerDeletedFolder(id, node.dateAdded))) continue;
+      noteSelfRemoval(id);
       await browser.bookmarks.remove(id);
       pruned.add(id);
       shells++;
@@ -1923,6 +1976,7 @@ async function mergeBookmarks(
   const summary = `Merged +${added} / -${removed} / moved ${moved} / renamed ${renamed}+${renamedFolders} / folders ${folderMoved} / shells ${shells} (folders preserved)`;
   if (added || removed || moved || renamed || renamedFolders || folderMoved || shells) logger.event("mergeBookmarks", summary);
   else logger.info("mergeBookmarks", summary);
+  return placed;
 }
 
 /** Resolve a browser-agnostic folder path (`[rootKind, …titles]`) to a local
@@ -2067,6 +2121,7 @@ function nthIndexOf(keys: string[], key: string, nth: number): number {
 }
 
 async function moveToIndex(id: string, parentId: string, finalIndex: number): Promise<void> {
+  noteSelfMove(id, parentId);
   await browser.bookmarks.move(id, { index: finalIndex });
   const kids = await browser.bookmarks.getChildren(parentId);
   const actual = kids.findIndex((c) => c.id === id);
@@ -2074,6 +2129,7 @@ async function moveToIndex(id: string, parentId: string, finalIndex: number): Pr
     // Clamp to kids.length (not length-1): a same-parent move accepts index = count
     // ("to the end"), and clamping one lower re-requests the index that already fell
     // short — a move to the LAST slot would never converge.
+    noteSelfMove(id, parentId);
     await browser.bookmarks.move(id, { index: Math.min(finalIndex + 1, kids.length) });
   }
 }
@@ -2170,6 +2226,7 @@ export async function restoreBookmarks(snapshot: SyncBookmark[]): Promise<number
   const local = rules.length ? await localExclusions(rules) : null;
   const tree = local ? withoutExcluded(snapshot, local) : snapshot;
   activeImports++;
+  wholesaleImports++;
   try {
     const snapUrls = new Set(
       flattenNodes(tree).filter((n) => n.url).map((n) => canonicalUrlKey(n.url as string))
@@ -2251,6 +2308,7 @@ export async function restoreBookmarks(snapshot: SyncBookmark[]): Promise<number
     logger.event("Snapshots", `Restored ${added} bookmark(s)`);
     return added;
   } finally {
+    wholesaleImports--;
     activeImports--;
   }
 }
@@ -2475,10 +2533,13 @@ export function registerBookmarkListeners(onChange: BookmarkChangeCallback): voi
   // Each event first asks whether it is about something this device keeps to itself (#54).
   // Those record nothing and start no sync: an extension rewriting its excluded folder is
   // exactly the storm of events that froze the browser. A merge never writes there, so
-  // its own churn (`activeImports > 0`) skips the question.
+  // its own churn skips the question. Only a WHOLESALE import (replace/restore) does:
+  // a merge's own writes are named in the self-write ledger, and what is left during a
+  // merge is the user's, which must be judged like any other edit.
   // A storage read that fails is no reason to drop the event: judged as not excluded, it is
   // recorded and synced as it always was.
   const exclusions = () => (activeImports > 0 ? Promise.resolve(null) : excludedNow().catch(() => null));
+  const exclusionsForEdit = () => (wholesaleImports > 0 ? Promise.resolve(null) : excludedNow().catch(() => null));
   browser.bookmarks.onCreated.addListener((id, node) => {
     swallow((async () => {
       const ex = await exclusions();
@@ -2526,8 +2587,12 @@ export function registerBookmarkListeners(onChange: BookmarkChangeCallback): voi
     })());
   });
   browser.bookmarks.onMoved.addListener((id, moveInfo) => {
+    // The merge's own relocation, coming back. Claimed by content (node + target parent)
+    // before any await, so the same delivery delay the titles fought cannot turn it into a
+    // user move re-stamped `Date.now()`; everything else is the user's, mid-sync or not.
+    if (takeSelfMove(id, moveInfo.parentId)) return;
     swallow((async () => {
-      const ex = await exclusions();
+      const ex = await exclusionsForEdit();
       if (ex) {
         const [node] = await browser.bookmarks.get(id).catch(() => [] as BookmarkNode[]);
         if (node) {
@@ -2553,8 +2618,13 @@ export function registerBookmarkListeners(onChange: BookmarkChangeCallback): voi
     })());
   });
   browser.bookmarks.onRemoved.addListener((_id, removeInfo) => {
+    // The merge's own removal (a tombstone applied, or a shell pruned), coming back.
+    // Without this claim every one of those was recorded as a deletion of THIS device's
+    // own — re-stamped, re-published, and for a shell turned into a folder-delete this
+    // device then demanded of every other one.
+    if (takeSelfRemoval(removeInfo.node.id)) return;
     swallow((async () => {
-      const ex = await exclusions();
+      const ex = await exclusionsForEdit();
       let skip: Set<string> | undefined;
       if (ex) {
         if (await excludedUnder(ex, removeInfo.parentId, removeInfo.node)) return;

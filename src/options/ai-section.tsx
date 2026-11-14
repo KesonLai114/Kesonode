@@ -12,7 +12,7 @@
  * ticks rows and presses Apply, and Apply takes a pinned restore point first.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -21,8 +21,10 @@ import {
   Sparkles,
 } from "lucide-react";
 import {
+  aiConfigReady,
   aiOrigin,
   callModel,
+  planRemovals,
   sanitizeAiBookmarks,
   suggestOrganization,
   type AiConfig,
@@ -33,7 +35,7 @@ import {
   collectAiBookmarks,
   type AiBookmarkSnapshot,
 } from "@/lib/ai-bookmarks";
-import { aiErrorMessage } from "@/lib/ai-errors";
+import { aiErrorMessage, isAiCancelled } from "@/lib/ai-errors";
 import type { SyncSettings } from "@/lib/types";
 import { ensurePermission } from "@/lib/utils/capabilities";
 import { t } from "@/lib/utils/i18n";
@@ -71,12 +73,20 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
   const [snapshot, setSnapshot] = useState<AiBookmarkSnapshot | null>(null);
   const [selectedMoves, setSelectedMoves] = useState<Set<string>>(new Set());
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+  const [keepers, setKeepers] = useState<Map<string, string>>(new Map());
+  const [coverage, setCoverage] = useState<{ sent: number; total: number } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const enabled = settings.ai_enabled === true;
   const config = toConfig(settings);
 
   const onTest = async () => {
     setMessage(null);
+    // Synchronous, so an unconfigured form says so before any permission prompt.
+    if (!aiConfigReady(config)) {
+      setMessage({ kind: "error", text: t("ai_err_config") });
+      return;
+    }
     setBusy("test");
     const granted = await grantOrigin(config.baseUrl);
     if (!granted) {
@@ -84,18 +94,25 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
       setBusy("");
       return;
     }
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       // A one-word ping: the answer is discarded, we only need a 200 and a content field.
-      await callModel(config, [{ role: "user", content: "Reply with the single word OK." }]);
+      await callModel(config, [{ role: "user", content: "Reply with the single word OK." }], { signal: controller.signal });
       setMessage({ kind: "ok", text: t("ai_status_ok") });
     } catch (err) {
-      setMessage({ kind: "error", text: aiErrorMessage(err) });
+      if (!isAiCancelled(err)) setMessage({ kind: "error", text: aiErrorMessage(err) });
     }
+    abortRef.current = null;
     setBusy("");
   };
 
   const onPlan = async () => {
     setMessage(null);
+    if (!aiConfigReady(config)) {
+      setMessage({ kind: "error", text: t("ai_err_config") });
+      return;
+    }
     setBusy("plan");
     const granted = await grantOrigin(config.baseUrl);
     if (!granted) {
@@ -103,20 +120,31 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
       setBusy("");
       return;
     }
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const snap = await collectAiBookmarks();
-      const items = sanitizeAiBookmarks(snap.bookmarks);
-      const result = await suggestOrganization(config, items, snap.folders);
+      // Only the bookmarks filed directly in a root need filing: the ones already in a
+      // folder were put there by hand, and asking about them is noise. It also keeps
+      // the list short enough that the ceiling rarely bites.
+      const loose = snap.bookmarks.filter((b) => !b.folder.includes(" / "));
+      const items = sanitizeAiBookmarks(loose);
+      const result = await suggestOrganization(config, items, snap.folders, { signal: controller.signal });
       setSnapshot(snap);
       setPlan(result);
       setSelectedMoves(new Set());
       setSelectedGroups(new Set());
+      setKeepers(new Map());
+      setCoverage(items.length < loose.length
+        ? { sent: items.length, total: loose.length }
+        : null);
       if (!result.moves.length && !result.duplicates.length) {
         setMessage({ kind: "ok", text: t("ai_organize_empty") });
       }
     } catch (err) {
-      setMessage({ kind: "error", text: aiErrorMessage(err) });
+      if (!isAiCancelled(err)) setMessage({ kind: "error", text: aiErrorMessage(err) });
     }
+    abortRef.current = null;
     setBusy("");
   };
 
@@ -124,9 +152,7 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
     if (!plan || !snapshot) return;
     setMessage(null);
     setBusy("apply");
-    const removeIds = plan.duplicates
-      .filter((g) => selectedGroups.has(g.ids.join("|")))
-      .flatMap((g) => g.ids.slice(1));
+    const removeIds = planRemovals(plan.duplicates, selectedGroups, keepers);
     try {
       await applyOrganizationPlan(
         plan,
@@ -137,6 +163,8 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
       setSnapshot(null);
       setSelectedMoves(new Set());
       setSelectedGroups(new Set());
+      setKeepers(new Map());
+      setCoverage(null);
       setMessage({ kind: "ok", text: t("ai_organize_applied") });
     } catch (err) {
       setMessage({ kind: "error", text: aiErrorMessage(err) });
@@ -249,6 +277,11 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
           {busy === "test" ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
           {t("ai_save_test")}
         </button>
+        {busy === "test" && (
+          <button className="btn-secondary" onClick={() => abortRef.current?.abort()}>
+            {t("opt_cancel")}
+          </button>
+        )}
       </div>
 
       {message && (
@@ -269,7 +302,19 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
           {busy === "plan" ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
           {t("ai_organize_run")}
         </button>
+        {busy === "plan" && (
+          <button className="btn-secondary" onClick={() => abortRef.current?.abort()}>
+            {t("opt_cancel")}
+          </button>
+        )}
       </div>
+
+      {coverage && (
+        <div className="config-hint">
+          <Info size={14} />
+          <div>{t("ai_coverage_hint", [String(coverage.sent), String(coverage.total)])}</div>
+        </div>
+      )}
 
       {plan && snapshot && (
         <>
@@ -296,20 +341,32 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
           )}
           {plan.duplicates.map((g) => {
             const key = g.ids.join("|");
+            const keeper = keepers.get(key) ?? g.ids[0];
             return (
-              <label key={key} className="settings-row" style={{ cursor: "pointer" }}>
+              <div key={key} className="settings-row">
                 <input
+                  id={`ai-dup-${key}`}
                   type="checkbox"
                   checked={selectedGroups.has(key)}
                   onChange={() => toggleGroup(key)}
                 />
-                <div className="settings-row-left">
+                <label htmlFor={`ai-dup-${key}`} className="settings-row-left" style={{ cursor: "pointer" }}>
                   <div>
                     <div className="row-label">{g.ids.map((id) => titleById(snapshot, id)).join(" · ")}</div>
                     <div className="row-desc">{g.reason}</div>
                   </div>
-                </div>
-              </label>
+                </label>
+                <select
+                  className="field-input-inline"
+                  value={keeper}
+                  aria-label={t("ai_organize_keep")}
+                  onChange={(e) => setKeepers((prev) => new Map(prev).set(key, e.target.value))}
+                >
+                  {g.ids.map((id) => (
+                    <option key={id} value={id}>{t("ai_organize_keep")}: {titleById(snapshot, id)}</option>
+                  ))}
+                </select>
+              </div>
             );
           })}
           <div className="settings-row">

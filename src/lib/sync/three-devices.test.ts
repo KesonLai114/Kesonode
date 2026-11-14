@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { SyncEngine } from "@/lib/sync/sync-engine";
 import { createSnapshot } from "@/lib/sync/snapshots";
-import { exportBookmarkPayload, registerBookmarkListeners } from "@/lib/handlers/bookmarks-handler";
+import { exportBookmarkPayload, importBookmarks, registerBookmarkListeners } from "@/lib/handlers/bookmarks-handler";
 import { sha256 } from "@/lib/crypto/encryption";
 import {
   DEFAULT_SETTINGS,
   DEFAULT_STATE,
   getBulkDeleteApproval,
   getState,
+  getMoves,
   getTombstones,
   KEYS,
   setState,
@@ -1179,5 +1180,231 @@ describe("AF. Norton Neo keeps chrome://newtab/ as neo://newtab/ (#41)", () => {
     await cycle(H, N, H, N);
     await at(N, async () => { expect(await urlsHere()).toEqual([KEPT, site(0)].sort()); });
     await at(H, async () => { expect(await urlsHere()).toEqual([PEER, site(0)].sort()); });
+  });
+});
+
+// ─── Moving bookmarks out of a folder, then deleting the folder ─────────────
+describe("move-then-delete a folder", () => {
+  it("moves reach the peer and the emptied folder is pruned", async () => {
+    const A = newDevice("A", 1000);
+    const B = newDevice("B", 2000);
+    await at(A, async () => {
+      const soft = await addFolder("软件");
+      const geek = await addFolder("极客工具", soft);
+      const plug = await addFolder("浏览器插件", soft);
+      await add("g1", "https://g1.example/", geek);
+      await add("g2", "https://g2.example/", geek);
+      await add("g3", "https://g3.example/", geek);
+      await add("konode", "https://konode.example/", plug);
+    });
+    await cycle(A, B, A);
+    await at(A, async () => {
+      const plug = await folderFor("浏览器插件");
+      await moveInto("https://g1.example/", plug.id);
+      await moveInto("https://g2.example/", plug.id);
+      await delFolder("极客工具");
+    });
+    await cycle(A, B);
+    await at(B, async () => {
+      const all = await walk();
+      const folders = all.filter((n) => !n.url).map((n) => n.title);
+      const plug = await folderFor("浏览器插件");
+      const plugUrls = (await chrome.bookmarks.getChildren(plug.id)).map((c) => c.url).sort();
+      expect(folders, "极客工具 should be gone on B").not.toContain("极客工具");
+      expect(plugUrls).toEqual(["https://g1.example/", "https://g2.example/", "https://konode.example/"]);
+    });
+  });
+
+  it("a stale third device does not drag the folder back", async () => {
+    const A = newDevice("A", 1000);
+    const B = newDevice("B", 2000);
+    const C = newDevice("C", 3000);
+    await at(A, async () => {
+      const soft = await addFolder("软件");
+      const geek = await addFolder("极客工具", soft);
+      const plug = await addFolder("浏览器插件", soft);
+      await add("g1", "https://g1.example/", geek);
+      await add("g2", "https://g2.example/", geek);
+      await add("g3", "https://g3.example/", geek);
+      await add("konode", "https://konode.example/", plug);
+    });
+    await cycle(A, B, C, A); // everyone converged; C's file now holds the old tree
+    await at(A, async () => {
+      const plug = await folderFor("浏览器插件");
+      await moveInto("https://g1.example/", plug.id);
+      await moveInto("https://g2.example/", plug.id);
+      await delFolder("极客工具");
+    });
+    // A publishes the change; B folds A (newest) AND stale C in one cycle. C never syncs.
+    await cycle(A, B);
+    await at(B, async () => {
+      const all = await walk();
+      const folders = all.filter((n) => !n.url).map((n) => n.title);
+      expect(folders, "stale C resurrected 极客工具 on B").not.toContain("极客工具");
+      expect(await urlsHere()).toEqual(["https://g1.example/", "https://g2.example/", "https://konode.example/"]);
+    });
+  });
+});
+
+// ─── The field report, played out ──────────────────────────────────────────
+
+/**
+ * "I moved some bookmarks out of 极客工具 into 浏览器插件, deleted 极客工具, synced, and the
+ * other browser changed nothing."
+ *
+ * The shape of the report matters: the peer received the DELETIONS (its receipt said −13)
+ * but never received the MOVES, so the emptied folder stayed standing with the moved
+ * bookmarks still in it. A placement travels only as its log record, and the record was
+ * being discarded — see the block above.
+ */
+describe("a folder reorganised on one device reaches the other", () => {
+  it("moves the bookmarks out, deletes the folder, and the peer follows", async () => {
+    const A = newDevice("A", 1000);
+    const B = newDevice("B", 2000);
+    await at(A, async () => {
+      const geek = await addFolder("极客工具");
+      const plug = await addFolder("浏览器插件");
+      for (let i = 0; i < 13; i++) await add(`S${i}`, site(i), geek);
+      await add("P", "https://p.example/", plug);
+    });
+    await cycle(A, B);
+    await at(B, async () => {
+      expect(await folderFor("极客工具")).toBeDefined();
+      expect(await urlsHere()).toHaveLength(14);
+    });
+
+    // The user's half of the report: five bookmarks moved out, the folder deleted with the
+    // other eight still in it.
+    await at(A, async () => {
+      const plug = await folderFor("浏览器插件");
+      for (let i = 0; i < 5; i++) await moveInto(site(i), plug.id);
+      await delFolder("极客工具");
+    });
+    await cycle(A, B);
+
+    await at(B, async () => {
+      const plug = await folderFor("浏览器插件");
+      const moved = (await chrome.bookmarks.getChildren(plug.id)).filter((c) => c.url).map((c) => c.url);
+      expect(moved.filter((u) => u !== "https://p.example/").sort(), "the moved bookmarks did not follow").toEqual(sites(0, 5));
+      expect(await urlsHere(), "the deleted bookmarks came back").toHaveLength(6);
+      expect(
+        (await walk()).some((n) => !n.url && n.title === "极客工具"),
+        "the deleted folder is still standing on the peer",
+      ).toBe(false);
+    });
+  });
+
+  it("prunes the folder the peer emptied by moving its bookmarks out of it", async () => {
+    const A = newDevice("A", 1000);
+    const B = newDevice("B", 2000);
+    await at(A, async () => {
+      const geek = await addFolder("极客工具");
+      const plug = await addFolder("浏览器插件");
+      for (let i = 0; i < 3; i++) await add(`S${i}`, site(i), geek);
+      await add("P", "https://p.example/", plug);
+    });
+    await cycle(A, B);
+
+    // Everything moved out, so the folder was empty; then the empty folder was deleted.
+    await at(A, async () => {
+      const plug = await folderFor("浏览器插件");
+      for (let i = 0; i < 3; i++) await moveInto(site(i), plug.id);
+      await delFolder("极客工具");
+    });
+    await cycle(A, B);
+
+    await at(B, async () => {
+      const plug = await folderFor("浏览器插件");
+      const moved = (await chrome.bookmarks.getChildren(plug.id)).filter((c) => c.url).map((c) => c.url);
+      expect(moved.filter((u) => u !== "https://p.example/").sort()).toEqual(sites(0, 3));
+      expect(
+        (await walk()).some((n) => !n.url && n.title === "极客工具"),
+        "the folder the peer emptied is still standing",
+      ).toBe(false);
+    });
+  });
+});
+
+// ─── Edits made while a peer merge is running ───────────────────────────────
+
+/**
+ * A placement and a removal travel ONLY as their log records — a peer never relocates or
+ * drops a bookmark because the tree shows it somewhere else. The recorders used to sit
+ * behind `activeImports`, which covers the whole fold of every peer; a sync runs on every
+ * change and takes seconds, so a user reorganising the bookmarks mid-sync had every move
+ * and delete silently discarded. The field report read "sync stopped working": moved
+ * bookmarks stayed put on the other devices, deleted ones came back, and the emptied
+ * folder could never be pruned.
+ */
+describe("edits made while a peer is being merged", () => {
+  it("records the move and the deletion instead of dropping them", async () => {
+    const A = newDevice("A", 1000);
+    const B = newDevice("B", 2000);
+    await at(A, async () => { for (let i = 0; i < 80; i++) await add(`S${i}`, site(i)); });
+    await cycle(A, B); // B holds the same 80; A's logs are empty
+
+    // Deep copy: the fold is free to walk the payload object.
+    const payload = JSON.parse(JSON.stringify(filed(A))) as BookmarkPayload;
+
+    await at(B, async () => {
+      const plug = await addFolder("插件");
+      // Not awaited: the user edits while this fold is still running.
+      const importing = importBookmarks(payload, "merge", "lww");
+      await moveInto(site(0), plug);
+      await del(site(1));
+      await importing;
+
+      expect(
+        (await getMoves()).find((r) => r.url === site(0)),
+        "the move made during the merge was dropped",
+      ).toBeDefined();
+      expect(
+        (await getTombstones()).find((t) => t.url === site(1)),
+        "the deletion made during the merge was dropped",
+      ).toBeDefined();
+    });
+  });
+
+  it("does not re-stamp the merge's own move as this device's", async () => {
+    const A = newDevice("A", 1000);
+    const B = newDevice("B", 2000);
+    await at(A, async () => {
+      const soft = await addFolder("软件");
+      const plug = await addFolder("插件");
+      await add("x", "https://x.example/", soft);
+      // Empty folders are never synced, so the target folder needs one bookmark to exist
+      // on B at all.
+      await add("y", "https://y.example/", plug);
+    });
+    await cycle(A, B); // B holds x in 软件
+    await at(A, async () => {
+      await moveInto("https://x.example/", (await folderFor("插件")).id);
+    });
+    await cycle(A); // A publishes the new placement and its move record
+    const payload = JSON.parse(JSON.stringify(filed(A))) as BookmarkPayload;
+    const mergeMovedAt = (payload.moves ?? []).find((r) => r.url === "https://x.example/")?.at;
+    expect(mergeMovedAt).toBeDefined();
+
+    await at(B, async () => {
+      const x = await nodeFor("https://x.example/");
+      const plug = await folderFor("插件");
+      const soft = await folderFor("软件");
+      await importBookmarks(payload, "merge", "lww"); // B moves x into 插件
+
+      // A user drag of the SAME bookmark somewhere else is still the user's move.
+      await new Promise((r) => setTimeout(r, 5));
+      await moveInto("https://x.example/", soft.id);
+      const userAt = (await getMoves()).find((r) => r.url === "https://x.example/")?.at;
+      expect(userAt, "the user's move was swallowed by the merge's ledger").toBeGreaterThan(mergeMovedAt as number);
+
+      // The browser delivers the merge's own onMoved late, after the fold returned. It must
+      // be claimed by content, or it would be re-stamped and outrank every peer's copy.
+      fire.moved?.(x.id, { parentId: plug.id, index: 0, oldParentId: soft.id, oldIndex: 0 });
+      await settle();
+      expect(
+        (await getMoves()).find((r) => r.url === "https://x.example/")?.at,
+        "the merge's own move was re-recorded as the user's",
+      ).toBe(userAt);
+    });
   });
 });

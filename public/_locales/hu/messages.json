@@ -22,7 +22,7 @@
     "message": "hu"
   },
   "extension_name": {
-    "message": "Kesonode | Privát könyvjelző- és lapszinkron v1.5.18"
+    "message": "Kesonode | Privát könyvjelző- és lapszinkron v1.5.19"
   },
   "extension_description": {
     "message": "Adatvédelem-központú böngésző-szinkronizálás a saját tárhelyedre: Google Drive, WebDAV, GitHub."
@@ -2520,13 +2520,17 @@
   "opt_update_up_to_date": {
     "message": "Már a legújabb, $VERSION$ verziót használod.",
     "placeholders": {
-      "version": { "content": "$1" }
+      "version": {
+        "content": "$1"
+      }
     }
   },
   "opt_update_available": {
     "message": "Elérhető a(z) $VERSION$ verzió.",
     "placeholders": {
-      "version": { "content": "$1" }
+      "version": {
+        "content": "$1"
+      }
     }
   },
   "opt_update_download": {
@@ -2547,15 +2551,23 @@
   "opt_update_package_ok": {
     "message": "Ellenőrizve: $VERSION$, $TARGET$ ($COUNT$ fájl). Ezután futtasd az alábbi frissítő szkriptet.",
     "placeholders": {
-      "version": { "content": "$1" },
-      "target": { "content": "$2" },
-      "count": { "content": "$3" }
+      "version": {
+        "content": "$1"
+      },
+      "target": {
+        "content": "$2"
+      },
+      "count": {
+        "content": "$3"
+      }
     }
   },
   "opt_update_package_bad": {
     "message": "Ez a csomag nem használható: $REASON$",
     "placeholders": {
-      "reason": { "content": "$1" }
+      "reason": {
+        "content": "$1"
+      }
     }
   },
   "opt_update_bad_zip": {
@@ -2589,7 +2601,7 @@
     "message": "Kapcsolat beállításai"
   },
   "ai_privacy_notice": {
-    "message": "Alapértelmezés szerint ki van kapcsolva, és a saját API-kulcsodat használja. Kérdés esetén csak a könyvjelzők címe, a gazdagépnevek és a mappák elérési útja (legfeljebb 400 tétel) kerül a megadott címre. Teljes URL-ek, előzmények, lapok és a szinkrontároló soha nem kerülnek elküldésre. A Kesonode-nak nincs szervere, és nem kapja meg ezeket az adatokat."
+    "message": "Alapértelmezés szerint ki van kapcsolva, a saját API-kulcsoddal. Egy kérdés csak a készüléken kiválasztott könyvjelzőket küldi el: a kérdésed szövegére kapott helyi találatot és a legutóbban hozzáadottakat, legfeljebb 120 bejegyzést, kis adagokban. Csak a címek, gazdagépnevek és mappák elérési útja hagyja el a készüléket; a teljes URL, az előzmények, a lapok és a szinkrontároló soha. A rendezési terv csak a gyökérben közvetlenül tárolt könyvjelzőket nézi, legfeljebb 400-at. A Kesonode-nak nincs szervere, és ezeket az adatokat nem kapja meg."
   },
   "ai_enable": {
     "message": "AI-asszisztens bekapcsolása"
@@ -2636,6 +2648,21 @@
   "ai_err_snapshot": {
     "message": "Nem sikerült visszaállítási pontot létrehozni, ezért egy könyvjelző sem változott. Először állíts be egy tároló backendet."
   },
+  "ai_err_auth": {
+    "message": "A szolgáltató elutasította az API-kulcsot (401/403). Ellenőrizd a kulcsot és a keretét."
+  },
+  "ai_err_notfound": {
+    "message": "A végpont vagy a modellnév nem található (404). Ellenőrizd az alap URL-t és a modell nevét."
+  },
+  "ai_err_rate": {
+    "message": "A szolgáltató korlátozza a kérések gyakoriságát (429). Várj egy kicsit, majd próbáld újra."
+  },
+  "ai_err_provider": {
+    "message": "A modellszolgáltatás a saját oldalán hibásodott meg (5xx). Próbáld újra később."
+  },
+  "ai_err_cancelled": {
+    "message": "Megszakítva."
+  },
   "ai_organize_section": {
     "message": "Könyvjelző-rendezési javaslatok"
   },
@@ -2645,6 +2672,17 @@
   "ai_organize_run": {
     "message": "Javaslatok készítése"
   },
+  "ai_coverage_hint": {
+    "message": "A modell $TOTAL$ könyvjelzőből $SENT$ darabot látott; a többit ezen a készüléken szűrtük ki.",
+    "placeholders": {
+      "sent": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
   "ai_organize_empty": {
     "message": "Most nincs javaslat."
   },
@@ -2652,7 +2690,10 @@
     "message": "Javasolt mappák"
   },
   "ai_organize_duplicates": {
-    "message": "Lehetséges duplikátumok (az első megmarad)"
+    "message": "Lehetséges duplikátumok (válaszd ki, melyik maradjon meg)"
+  },
+  "ai_organize_keep": {
+    "message": "Megtartás"
   },
   "ai_organize_apply": {
     "message": "Kijelöltek alkalmazása"

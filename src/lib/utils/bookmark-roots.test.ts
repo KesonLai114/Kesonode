@@ -235,8 +235,30 @@ describe("rootKindOf — strongest signal wins", () => {
   });
 
   it("stays undefined for a localized title it cannot know", () => {
-    // Root titles are localized, so the title table only ever rescues English UIs.
+    // Root titles are localized, so the title table only rescues the UIs it lists.
     expect(rootKindOf({ id: "17", title: "Kedvencek sávja" })).toBeUndefined();
+  });
+
+  it("falls back to a Chinese root title when the id means nothing", () => {
+    // A fork that renumbered its roots AND a Chinese UI: with no answer at all the
+    // root fell back to a positional guess, which is not confident — and an unconfident
+    // root GATES THE MOVES, so a device like this could delete bookmarks and never
+    // relocate one. The title is the only signal left, so it has to carry.
+    expect(rootKindOf({ id: "17", title: "书签栏" })).toBe("bar");
+    expect(rootKindOf({ id: "18", title: "其他书签" })).toBe("other");
+    expect(rootKindOf({ id: "19", title: "移动设备书签" })).toBe("mobile");
+    expect(rootKindOf({ id: "20", title: "书签工具栏" })).toBe("bar");
+    expect(rootKindOf({ id: "21", title: "收藏夹栏" })).toBe("bar");
+    expect(rootKindOf({ id: "22", title: "已管理的书签" })).toBe("managed");
+    expect(rootKindOf({ id: "23", title: "書籤列" })).toBe("bar");
+    expect(rootKindOf({ id: "24", title: "行動裝置書籤" })).toBe("mobile");
+  });
+
+  it("leaves the id table in charge when the ids are intact", () => {
+    // A standard Chinese Chromium: id and title agree, and the id still wins.
+    expect(rootKindOf({ id: "1", title: "书签栏" })).toBe("bar");
+    expect(rootKindOf({ id: "2", title: "其他书签" })).toBe("other");
+    expect(rootKindOf({ id: "3", title: "移动设备书签" })).toBe("mobile");
   });
 
   it("does not type an ordinary folder", () => {

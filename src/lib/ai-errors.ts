@@ -16,7 +16,12 @@ const AI_ERROR_KEYS: Record<AiErrorCode, string> = {
   permission: "ai_err_permission",
   network: "ai_err_request",
   http: "ai_err_request",
+  auth: "ai_err_auth",
+  notfound: "ai_err_notfound",
+  rate: "ai_err_rate",
+  provider: "ai_err_provider",
   timeout: "ai_err_request",
+  cancelled: "ai_err_cancelled",
   format: "ai_err_format",
   empty: "ai_err_format",
   snapshot: "ai_err_snapshot",
@@ -25,4 +30,9 @@ const AI_ERROR_KEYS: Record<AiErrorCode, string> = {
 export function aiErrorMessage(err: unknown): string {
   const code: AiErrorCode = err instanceof AiError ? err.code : "network";
   return t(AI_ERROR_KEYS[code]);
+}
+
+/** A user cancel is not a failure: callers clear the spinner and show nothing. */
+export function isAiCancelled(err: unknown): boolean {
+  return err instanceof AiError && err.code === "cancelled";
 }

@@ -7,19 +7,23 @@
  * any bookmark and never replaces the local results.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AlertCircle, Loader2, Sparkles, X } from "lucide-react";
 import {
+  aiConfigReady,
   aiOrigin,
   askBookmarks,
+  candidatePool,
+  CANDIDATE_BATCH,
   explainSync,
-  sanitizeAiBookmarks,
+  MAX_BATCHES,
   syncExplanationContext,
+  toAiBookmarks,
   type AiConfig,
   type AiSearchAnswer,
 } from "@/lib/ai-assistant";
 import { collectAiBookmarks } from "@/lib/ai-bookmarks";
-import { aiErrorMessage } from "@/lib/ai-errors";
+import { aiErrorMessage, isAiCancelled } from "@/lib/ai-errors";
 import type { FlatBookmark } from "@/lib/handlers/reading-list-handler";
 import type { SyncSettings, SyncState } from "@/lib/types";
 import { ensurePermission } from "@/lib/utils/capabilities";
@@ -55,6 +59,8 @@ export function AiPanel({ settings, state, onOpen }: AiPanelProps) {
   const [hits, setHits] = useState<FlatBookmark[]>([]);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [coverage, setCoverage] = useState<{ sent: number; total: number } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   if (settings.ai_enabled !== true) {
     return (
@@ -65,7 +71,14 @@ export function AiPanel({ settings, state, onOpen }: AiPanelProps) {
   }
 
   const run = async (kind: "ask" | "receipt" | "conflict") => {
+    if (busy) return;
     setError(null);
+    const config = configOf(settings);
+    // Synchronous, so an unconfigured form says so before any permission prompt.
+    if (!aiConfigReady(config)) {
+      setError(t("ai_err_config"));
+      return;
+    }
     // The FIRST await of the click handler, before any bookmark read or storage access.
     const granted = await grantOrigin(settings.ai_base_url ?? "");
     if (!granted) {
@@ -73,29 +86,45 @@ export function AiPanel({ settings, state, onOpen }: AiPanelProps) {
       return;
     }
     setBusy(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const config = configOf(settings);
       if (kind === "ask") {
         const snap = await collectAiBookmarks();
-        const result = await askBookmarks(config, question, sanitizeAiBookmarks(snap.bookmarks));
+        // The candidates are chosen ON THIS DEVICE: what the question literally matches,
+        // plus the most recently added bookmarks. Shipping the whole tree would be both
+        // expensive and a much larger disclosure than the question needs — and a hard
+        // cut to "the newest N" would exclude everything filed deeper.
+        const pool = candidatePool(
+          question,
+          toAiBookmarks(snap.bookmarks),
+          CANDIDATE_BATCH * MAX_BATCHES,
+        );
+        const result = await askBookmarks(config, question, pool, { signal: controller.signal });
         setAnswer(result);
         setHits(snap.bookmarks.filter((b) => result.ids.includes(b.id)));
         setExplanation(null);
+        setCoverage(pool.length < snap.bookmarks.length
+          ? { sent: pool.length, total: snap.bookmarks.length }
+          : null);
       } else {
         const text = syncExplanationContext(state, kind);
         if (!text) {
           setError(t("ai_popup_no_report"));
           setBusy(false);
+          abortRef.current = null;
           return;
         }
-        const line = await explainSync(config, text);
+        const line = await explainSync(config, text, { signal: controller.signal });
         setExplanation(line);
         setAnswer(null);
         setHits([]);
+        setCoverage(null);
       }
     } catch (err) {
-      setError(aiErrorMessage(err));
+      if (!isAiCancelled(err)) setError(aiErrorMessage(err));
     }
+    abortRef.current = null;
     setBusy(false);
   };
 
@@ -104,6 +133,7 @@ export function AiPanel({ settings, state, onOpen }: AiPanelProps) {
     setHits([]);
     setExplanation(null);
     setError(null);
+    setCoverage(null);
   };
 
   return (
@@ -113,12 +143,21 @@ export function AiPanel({ settings, state, onOpen }: AiPanelProps) {
         <input
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && question.trim()) void run("ask"); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && !busy && question.trim()) void run("ask"); }}
           placeholder={t("ai_popup_placeholder")}
           aria-label={t("ai_popup_placeholder")}
           className="min-w-0 flex-1 bg-transparent text-[13px] text-sk-text placeholder:text-sk-subtle focus:outline-none"
         />
         {busy && <Loader2 size={12} className="shrink-0 animate-spin text-sk-subtle" />}
+        {busy && (
+          <button
+            onClick={() => abortRef.current?.abort()}
+            aria-label={t("opt_cancel")}
+            className="shrink-0 p-0.5 text-sk-subtle"
+          >
+            <X size={12} />
+          </button>
+        )}
         {!busy && (answer || explanation || error) && (
           <button onClick={clear} aria-label={t("popup_search_clear")} className="shrink-0 p-0.5 text-sk-subtle">
             <X size={12} />
@@ -143,6 +182,11 @@ export function AiPanel({ settings, state, onOpen }: AiPanelProps) {
       {answer && (
         <div className="mt-1.5 space-y-0.5">
           <p className="px-1 py-1 text-[12px] text-sk-muted">{answer.explanation}</p>
+          {coverage && (
+            <p className="px-1 text-[11px] text-sk-subtle">
+              {t("ai_coverage_hint", [String(coverage.sent), String(coverage.total)])}
+            </p>
+          )}
           {hits.length === 0 && (
             <p className="px-1 py-1 text-[12px] text-sk-subtle">{t("ai_popup_empty")}</p>
           )}

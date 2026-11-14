@@ -5,14 +5,21 @@ import {
   aiOrigin,
   askBookmarks,
   callModel,
+  candidatePool,
+  CANDIDATE_BATCH,
   explainSync,
   parseModelJson,
+  planRemovals,
+  questionTerms,
+  rankCandidates,
   renderAiBookmarkList,
   sanitizeAiBookmarks,
   suggestOrganization,
   syncExplanationContext,
+  toAiBookmarks,
   type AiBookmark,
   type AiConfig,
+  type AiDuplicateGroup,
 } from "@/lib/ai-assistant";
 import type { FlatBookmark } from "@/lib/handlers/reading-list-handler";
 import type { SyncState } from "@/lib/types";
@@ -85,6 +92,14 @@ describe("bookmark reduction", () => {
     expect(sanitizeAiBookmarks(many, 3)).toHaveLength(3);
   });
 
+  it("spends the ceiling on the newest bookmarks, not the tree's prefix", () => {
+    const many = Array.from({ length: 10 }, (_, i) => ({
+      ...flat(String(i), `https://e.com/${i}`),
+      dateAdded: i,
+    }));
+    expect(sanitizeAiBookmarks(many, 3).map((b) => b.id)).toEqual(["9", "8", "7"]);
+  });
+
   it("renders a numbered list keyed by id", () => {
     const text = renderAiBookmarkList(BOOKMARKS);
     expect(text).toContain("1. [a] WebDAV guide | example.com | Work");
@@ -131,9 +146,35 @@ describe("callModel", () => {
     const error = await callModel(CONFIG, [], { fetchImpl: async () => chat("leaked key: sk-test", 429) })
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(AiError);
-    expect((error as AiError).code).toBe("http");
+    expect((error as AiError).code).toBe("rate");
     expect((error as AiError).status).toBe(429);
     expect((error as Error).message).not.toContain("sk-test");
+  });
+
+  it("maps HTTP statuses to actionable codes", async () => {
+    const cases: [number, string][] = [
+      [401, "auth"], [403, "auth"], [404, "notfound"],
+      [429, "rate"], [500, "provider"], [503, "provider"], [418, "http"],
+    ];
+    for (const [status, code] of cases) {
+      const error = await callModel(CONFIG, [], { fetchImpl: async () => chat("x", status) })
+        .catch((e: unknown) => e);
+      expect((error as AiError).code, `status ${status}`).toBe(code);
+      expect((error as AiError).status).toBe(status);
+    }
+  });
+
+  it("tells a missing host permission apart from a network failure", async () => {
+    const boom = async () => { throw new TypeError("Failed to fetch"); };
+    const perms = chrome.permissions as { contains: (req: chrome.permissions.Permissions) => Promise<boolean> };
+    const original = perms.contains;
+    perms.contains = async () => false;
+    await expect(callModel(CONFIG, [], { fetchImpl: boom }))
+      .rejects.toMatchObject({ code: "permission" });
+    perms.contains = async () => true;
+    await expect(callModel(CONFIG, [], { fetchImpl: boom }))
+      .rejects.toMatchObject({ code: "network" });
+    perms.contains = original;
   });
 
   it("reports an empty answer and a timeout", async () => {
@@ -145,6 +186,17 @@ describe("callModel", () => {
       });
     await expect(callModel(CONFIG, [], { fetchImpl: never, timeoutMs: 5 }))
       .rejects.toMatchObject({ code: "timeout" });
+  });
+
+  it("reports a user cancel separately from a timeout", async () => {
+    const controller = new AbortController();
+    const never = (_input: string, init?: RequestInit): Promise<Response> =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    const pending = callModel(CONFIG, [], { fetchImpl: never, signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: "cancelled" });
   });
 });
 
@@ -211,5 +263,136 @@ describe("the three capabilities", () => {
     expect(conflict).toContain("1 conflicts");
     expect(conflict).not.toContain("Laptop");
     expect(syncExplanationContext(null, "receipt")).toBe("");
+  });
+});
+
+describe("output limits and plan selection", () => {
+  it("caps a long question instead of silently keeping all of it", async () => {
+    const fetchImpl = vi.fn(async (_input: string, _init?: RequestInit) => chat('{"ids":[],"explanation":"none"}'));
+    await askBookmarks(CONFIG, "q".repeat(600), BOOKMARKS, { fetchImpl });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1]?.body as string) as { messages: { content: string }[] };
+    const user = body.messages[1].content;
+    expect(user).toContain("q".repeat(500) + "…");
+    expect(user).not.toContain("q".repeat(501));
+  });
+
+  it("keeps a three-sentence sync explanation intact up to its own cap", async () => {
+    const long = "word ".repeat(60).trim(); // 299 chars: far past a title's 120, under 400
+    const fetchImpl = vi.fn(async () => chat(long));
+    expect(await explainSync(CONFIG, "bookmarks: retitled 3", { fetchImpl })).toBe(long);
+  });
+
+  it("gives the organisation plan a larger output budget than a search", async () => {
+    const fetchImpl = vi.fn(async (_input: string, _init?: RequestInit) => chat(JSON.stringify({ moves: [], duplicates: [] })));
+    await suggestOrganization(CONFIG, BOOKMARKS, ["Work"], { fetchImpl });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1]?.body as string) as { max_tokens: number };
+    expect(body.max_tokens).toBeGreaterThan(700);
+  });
+
+  it("matches a folder on the clipped form the model actually saw", async () => {
+    const raw = "F".repeat(150);
+    const clipped = "F".repeat(120) + "…";
+    const fetchImpl = vi.fn(async () => chat(JSON.stringify({
+      moves: [{ id: "a", folder: clipped, reason: "r" }],
+      duplicates: [],
+    })));
+    const plan = await suggestOrganization(CONFIG, BOOKMARKS, [raw], { fetchImpl });
+    expect(plan.moves).toEqual([{ id: "a", folder: clipped, reason: "r" }]);
+  });
+
+  it("planRemovals never deletes a keeper chosen in another selected group", () => {
+    const groups: AiDuplicateGroup[] = [
+      { ids: ["1", "2"], reason: "a" },
+      { ids: ["2", "3"], reason: "b" },
+    ];
+    const selected = new Set(["1|2", "2|3"]);
+    // Group two keeps "2", which group one would otherwise delete.
+    const keepers = new Map([["2|3", "2"]]);
+    expect(planRemovals(groups, selected, keepers).sort()).toEqual(["3"]);
+  });
+
+  it("planRemovals honours a custom keeper and ignores unselected groups", () => {
+    const groups: AiDuplicateGroup[] = [
+      { ids: ["1", "2", "3"], reason: "a" },
+      { ids: ["4", "5"], reason: "b" },
+    ];
+    const selected = new Set(["1|2|3"]);
+    const keepers = new Map([["1|2|3", "3"]]);
+    expect(planRemovals(groups, selected, keepers).sort()).toEqual(["1", "2"]);
+  });
+
+  it("planRemovals falls back to the first id for an unknown keeper", () => {
+    const groups: AiDuplicateGroup[] = [{ ids: ["1", "2"], reason: "a" }];
+    const selected = new Set(["1|2"]);
+    const keepers = new Map([["1|2", "ghost"]]);
+    expect(planRemovals(groups, selected, keepers)).toEqual(["2"]);
+  });
+});
+
+describe("choosing the candidates on this device", () => {
+  const ITEMS: AiBookmark[] = [
+    { id: "a", title: "WebDAV guide", host: "example.com", folder: "Work", added: 1 },
+    { id: "b", title: "Recipe", host: "cook.example", folder: "Personal", added: 2 },
+    { id: "c", title: "自建笔记", host: "notes.example", folder: "Personal", added: 3 },
+  ];
+
+  it("keeps latin words whole and breaks CJK runs into pairs", () => {
+    expect(questionTerms("WebDAV setup")).toContain("webdav");
+    expect(questionTerms("那个讲自建 WebDAV 的教程")).toContain("自建");
+    expect(questionTerms("that WebDAV one")).toContain("that");
+    // A single latin letter is not a term; a single CJK character is.
+    expect(questionTerms("a")).toEqual([]);
+    expect(questionTerms("书")).toEqual(["书"]);
+  });
+
+  it("ranks the literal matches first and leaves the rest out", () => {
+    expect(rankCandidates("webdav", ITEMS, 10).map((b) => b.id)).toEqual(["a"]);
+    expect(rankCandidates("自建", ITEMS, 10).map((b) => b.id)).toEqual(["c"]);
+    expect(rankCandidates("nothing in here", ITEMS, 10)).toEqual([]);
+  });
+
+  it("fills the rest of the pool with the most recently added bookmarks", () => {
+    const pool = candidatePool("webdav", ITEMS, 2);
+    expect(pool).toHaveLength(2);
+    expect(pool[0].id).toBe("a");
+    expect(pool[1].added).toBe(3);
+  });
+
+  it("keeps every entry until the caller applies a ceiling", () => {
+    const many = Array.from({ length: 5 }, (_, i) => flat(String(i), `https://e.com/${i}`));
+    expect(toAiBookmarks(many)).toHaveLength(5);
+    expect(sanitizeAiBookmarks(many, 3)).toHaveLength(3);
+  });
+});
+
+describe("asking in batches", () => {
+  const many: AiBookmark[] = Array.from({ length: CANDIDATE_BATCH + 2 }, (_, i) => ({
+    id: `b${i}`,
+    title: `Page ${i}`,
+    host: `e${i}.example`,
+    folder: "Work",
+    added: i,
+  }));
+
+  it("looks at a second batch when the first one comes back empty", async () => {
+    const fetchImpl = vi.fn(async () => chat('{"ids":[],"explanation":"nothing here"}'));
+    const answer = await askBookmarks(CONFIG, "something", many, { fetchImpl });
+    expect(answer.ids).toEqual([]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts an id from the batch it was offered", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(chat('{"ids":[],"explanation":"nothing here"}'))
+      .mockResolvedValueOnce(chat('{"ids":["b60"],"explanation":"found it"}'));
+    const answer = await askBookmarks(CONFIG, "something", many, { fetchImpl });
+    expect(answer.ids).toEqual(["b60"]);
+    expect(answer.explanation).toBe("found it");
+  });
+
+  it("never accepts an id that was not offered", async () => {
+    const fetchImpl = vi.fn(async () => chat('{"ids":["not-in-the-list"],"explanation":"sure"}'));
+    const answer = await askBookmarks(CONFIG, "something", many, { fetchImpl });
+    expect(answer.ids).toEqual([]);
   });
 });

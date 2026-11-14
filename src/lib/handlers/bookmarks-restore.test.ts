@@ -184,9 +184,12 @@ describe("restoreBookmarks keeps the snapshot's order (#29)", () => {
   });
 });
 
-describe("overlapping bookmark imports keep event recording suppressed", () => {
+describe("overlapping restores keep event recording suppressed", () => {
+  // A MERGE is deliberately not one of these operations: it names its own writes in the
+  // self-write ledger and records everything else, so the user's moves and deletions made
+  // while a fold runs are no longer dropped (three-devices.test.ts covers that). Only a
+  // WHOLESALE import — a restore point, or a baseline/replace — is still a window in time.
   const operations = {
-    import: () => importBookmarks({ tree: snapshot([]), tombstones: [] }),
     restore: () => restoreBookmarks(snapshot([])),
   };
 
@@ -196,8 +199,8 @@ describe("overlapping bookmark imports keep event recording suppressed", () => {
     return { promise, resolve };
   }
 
-  for (const first of ["import", "restore"] as const) {
-    for (const second of ["import", "restore"] as const) {
+  for (const first of ["restore"] as const) {
+    for (const second of ["restore"] as const) {
       it.each([false, true])(`${first} stays suppressed after overlapping ${second} settles (failure=%s)`, async (failSecond) => {
         let onCreated!: Parameters<typeof chrome.bookmarks.onCreated.addListener>[0];
         let onChanged!: Parameters<typeof chrome.bookmarks.onChanged.addListener>[0];
@@ -278,6 +281,40 @@ describe("overlapping bookmark imports keep event recording suppressed", () => {
       });
     }
   }
+
+  it("a failed replace import does not leave the recorders suppressed", async () => {
+    // The replace path is a wholesale import too, and it raises the same counter around
+    // clearAndImport. A throw from there must not leave it raised: every later user edit
+    // would be dropped — the field bug in its worst form.
+    let onRemoved!: Parameters<typeof chrome.bookmarks.onRemoved.addListener>[0];
+    const listener = vi.spyOn(chrome.bookmarks.onRemoved, "addListener").mockImplementation((cb) => { onRemoved = cb; });
+    registerBookmarkListeners(() => {});
+    const realGetTree = chrome.bookmarks.getTree.bind(chrome.bookmarks);
+    try {
+      const victim = await chrome.bookmarks.create({ parentId: "1", title: "Victim", url: "https://victim.com" });
+      // First read: clearAndImport's recovery snapshot (its rejection is swallowed).
+      // Second read: clearing the roots, where the failure must abort the import.
+      let reads = 0;
+      const read = vi.spyOn(chrome.bookmarks, "getTree").mockImplementation(async () => {
+        reads++;
+        if (reads === 2) throw new Error("replace tree read failed");
+        return realGetTree();
+      });
+      try {
+        await expect(importBookmarks(snapshot([link("A")]), "replace")).rejects.toThrow("replace tree read failed");
+      } finally {
+        read.mockRestore();
+      }
+
+      await chrome.bookmarks.remove(victim.id);
+      onRemoved(victim.id, { parentId: "1", index: 0, node: { ...victim, id: victim.id } });
+      await new Promise((r) => setTimeout(r, 0));
+      expect((await getTombstones()).map((t) => t.url)).toContain("https://victim.com");
+    } finally {
+      listener.mockRestore();
+      resetDeletionLog();
+    }
+  });
 });
 
 describe("restoreBookmarks on the tree QA step AC was played on", () => {

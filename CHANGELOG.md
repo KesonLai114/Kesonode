@@ -10,21 +10,51 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+## [1.5.19] - 2026-11-14
+
 ### Added
 
 - **An optional AI assistant for bookmarks — off by default, bring your own key.** Settings →
   AI assistant takes an OpenAI-compatible base URL, a key and a model name; nothing leaves
   the device until the feature is enabled AND a question is asked. One non-streaming
   `/chat/completions` request carries only a reduced bookmark list — title, hostname and
-  folder path, capped at 400 entries — after sync exclusions, unsafe schemes and URLs
-  carrying tokens have been removed. The endpoint's host permission is requested on first
-  use, not at install. Three things share that one channel: natural-language bookmark
-  search in the popup, organisation suggestions in Settings (a plan only — tick rows, take
-  a pinned restore point, then apply), and one-tap explanations of the last sync receipt or
-  pending conflicts. Model output is untrusted: every returned id is checked against the
-  ids actually sent, and answers are rendered as text. The key stays in `storage.local`,
-  is never synced, and is stripped from every settings export including the encrypted one.
-  README.md, README.en.md and PRIVACY.md now spell out the single new data recipient.
+  folder path — after sync exclusions, unsafe schemes and URLs carrying tokens have been
+  removed. **The candidates are picked on this device**: a local text match on the question
+  (Chinese questions included) plus the most recently added bookmarks, at most 120 entries,
+  searched in small batches, so a deep tree is never cut off silently the way a fixed
+  "newest N" slice would. The organisation plan looks only at bookmarks filed directly in a
+  root, at most 400. The endpoint's host permission is requested on first use, not at
+  install. Three things share that one channel: natural-language bookmark search in the
+  popup, organisation suggestions in Settings (a plan only — tick rows, take a pinned
+  restore point, then apply), and one-tap explanations of the last sync receipt or pending
+  conflicts. Provider status codes are surfaced (401/403, 404, 429, 5xx) so a wrong key is
+  told apart from a rate limit, and a request can be cancelled. Model output is untrusted:
+  every returned id is checked against the ids actually sent, and answers are rendered as
+  text. The key stays in `storage.local`, is never synced, and is stripped from every
+  settings export including the encrypted one. README.md, README.en.md and PRIVACY.md now
+  spell out the single new data recipient.
+
+### Fixed
+
+- **A Chinese browser no longer loses bookmark moves.** The root-kind resolver knew the
+  English root titles and nothing else, so a profile whose root ids it did not recognise
+  AND whose interface was in Chinese had no root kind at all — and that answer carries
+  the folder paths, so the delete, rename and reposition records were never written. The
+  symptom was a device where deletions arrived but moves never did. Simplified and
+  Traditional Chinese root titles are now recognised (书签栏 / 收藏夹栏 / 其他书签 /
+  書籤工具列 / …), in every engine's wording.
+- **A reorganization made during a sync is no longer discarded.** The recorders used to
+  suppress anything that happened while an import was running, and the merge's own writes
+  were told apart by a title-and-node ledger that covered renames only. A move or a
+  deletion the user made while a merge was folding therefore lost its record — and that
+  record is the only thing that carries such an edit to the peers, since a tree alone
+  relocates and removes nothing. The moved bookmarks stayed in the old folder everywhere
+  else, deleted ones came back, and an emptied folder could never be pruned; from the
+  field this read as "sync stopped working". The ledger now covers moves and removals by
+  their target parent and node id, a merge no longer suppresses the recorders wholesale
+  (only a wholesale import does), and the logs are folded into their CURRENT value rather
+  than into the snapshot read at the start of the fold — a change recorded during those
+  seconds is no longer overwritten.
 
 ## [1.5.18] - 2026-11-12
 

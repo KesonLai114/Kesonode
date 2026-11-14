@@ -89,10 +89,19 @@ export function rootKindFromTitle(title: string | undefined): RootKind | undefin
 
 // Last-resort title table, for a root whose id we don't recognize on an engine that
 // doesn't report `folderType` (a pre-134 Chromium fork, a nonstandard build). Root
-// titles are LOCALIZED, so this only rescues English UIs — but a known English root
-// name is still a far better guess than "whichever root sits at this index". It is
-// ranked BELOW the id tables: on any engine whose ids are intact the two agree, and
-// of the two a title is the weaker signal.
+// titles are LOCALIZED, so this only rescues the UIs it lists — but a known root name
+// is still a far better guess than "whichever root sits at this index". It is ranked
+// BELOW the id tables: on any engine whose ids are intact the two agree, and of the
+// two a title is the weaker signal.
+//
+// The Chinese rows are not decoration. A root whose id matches nothing AND whose title
+// is localized leaves `rootKindOf` with no answer at all — and that answer is load-
+// bearing twice over: `folderPath` returns null without it, so the folder delete, rename
+// and reposition records (all path-keyed) are never written; and `matchLocalRootEx`
+// falls back to a positional guess with `confident: false`, which GATES THE MOVES. A
+// fork that renumbered its roots (some do) and a Chinese UI therefore produced a device
+// whose bookmarks could be deleted but never relocated — the field report: deletions
+// arrived, moves did not.
 const KNOWN_ROOT_TITLE_KINDS: Record<string, RootKind> = {
   // Chrome / Chromium / Brave / Opera
   "bookmarks bar": "bar",
@@ -107,6 +116,25 @@ const KNOWN_ROOT_TITLE_KINDS: Record<string, RootKind> = {
   // Firefox ("Other Bookmarks" / "Mobile Bookmarks" are spelled as above)
   "bookmarks toolbar": "bar",
   "bookmarks menu": "menu",
+  // Chrome / Edge, Simplified Chinese
+  "书签栏": "bar",
+  "收藏夹栏": "bar",
+  "其他书签": "other",
+  "其他收藏夹": "other",
+  "移动设备书签": "mobile",
+  "移动设备收藏夹": "mobile",
+  "已管理的书签": "managed",
+  "已管理的收藏夹": "managed",
+  // Firefox, Simplified Chinese
+  "书签工具栏": "bar",
+  "书签菜单": "menu",
+  // Traditional Chinese
+  "書籤列": "bar",
+  "書籤工具列": "bar",
+  "其他書籤": "other",
+  "行動裝置書籤": "mobile",
+  "書籤選單": "menu",
+  "受管理的書籤": "managed",
 };
 
 function rootKindFromKnownTitle(title: string | undefined): RootKind | undefined {
