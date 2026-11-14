@@ -70,6 +70,14 @@ All notable changes to Konode. Format loosely follows
   it was instead of half-replaced. The restore point is taken before anything is removed.
 - **The error message after a failed handover says what actually happened.** It used to
   claim nothing had changed, although the other browsers' files had already been removed.
+- **The baseline card can no longer be "saved" into nothing.** Choosing the baseline opens
+  a confirmation, and its confirm button carried the same label as the one that opened it.
+  With the page's "Save changes" right below, "click set, then click Save, then reload"
+  looked complete — and came back as "Not set", because Save does not apply the baseline
+  and the confirmation was never confirmed. The confirm button now says what it does
+  ("Yes, set this browser"), and pressing "Save changes" while a confirmation is still
+  open says so in the card: it takes effect immediately, and Save does not apply to it.
+  Clearing the baseline gets the same treatment.
 
 ## [1.5.19] - 2026-11-14
 

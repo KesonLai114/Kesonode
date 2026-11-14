@@ -1018,6 +1018,15 @@
   "opt_baseline_confirm_clear": {
     "message": "I segnalibri restano invariati su ogni browser e la sincronizzazione torna bidirezionale."
   },
+  "opt_baseline_set_confirm": {
+    "message": "Sì, usa questo browser"
+  },
+  "opt_baseline_clear_confirm": {
+    "message": "Sì, rimuovila"
+  },
+  "opt_baseline_save_pending": {
+    "message": "La base dei segnalibri non è cambiata: la conferma nella scheda qui sopra è ancora aperta. Ha effetto immediato e «Salva modifiche» non la riguarda."
+  },
   "opt_baseline_set_done": {
     "message": "Questo browser è ora la base. Gli altri si allineeranno alla prossima sincronizzazione."
   },

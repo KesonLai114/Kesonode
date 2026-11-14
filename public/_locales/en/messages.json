@@ -1190,6 +1190,18 @@
     "message": "Bookmarks stay as they are on every browser, and sync becomes two-way again.",
     "description": "Confirmation before removing the baseline. No bookmarks are deleted."
   },
+  "opt_baseline_set_confirm": {
+    "message": "Yes, set this browser",
+    "description": "Confirm button in the Bookmark baseline card. Distinct from the label that opens the confirmation, so the second, committing click is unmistakable."
+  },
+  "opt_baseline_clear_confirm": {
+    "message": "Yes, clear it",
+    "description": "Confirm button for removing the baseline."
+  },
+  "opt_baseline_save_pending": {
+    "message": "The bookmark baseline was not changed: the confirmation is still open in the card above. Click its confirm button — the change takes effect immediately, and \"Save changes\" does not apply to it.",
+    "description": "Shown in the baseline card when Save changes is pressed while a baseline confirmation is still open."
+  },
   "opt_baseline_set_done": {
     "message": "This browser is now the baseline. Other browsers will align on their next sync."
   },

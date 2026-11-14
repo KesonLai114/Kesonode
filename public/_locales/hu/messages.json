@@ -1018,6 +1018,15 @@
   "opt_baseline_confirm_clear": {
     "message": "A könyvjelzők minden böngészőben megmaradnak, és a szinkronizálás ismét kétirányú lesz."
   },
+  "opt_baseline_set_confirm": {
+    "message": "Igen, ez a böngésző legyen az alap"
+  },
+  "opt_baseline_clear_confirm": {
+    "message": "Igen, törlés"
+  },
+  "opt_baseline_save_pending": {
+    "message": "A könyvjelző-alap nem változott: a fenti kártyán a megerősítés még nyitva van. A művelet azonnal érvénybe lép, a „Változások mentése” nem vonatkozik rá."
+  },
   "opt_baseline_set_done": {
     "message": "Ez a böngésző mostantól az alap. A többi böngésző a következő szinkronizáláskor igazodik hozzá."
   },

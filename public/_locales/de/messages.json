@@ -1018,6 +1018,15 @@
   "opt_baseline_confirm_clear": {
     "message": "Die Lesezeichen bleiben auf jedem Browser erhalten und werden wieder in beide Richtungen zusammengeführt."
   },
+  "opt_baseline_set_confirm": {
+    "message": "Ja, diesen Browser verwenden"
+  },
+  "opt_baseline_clear_confirm": {
+    "message": "Ja, entfernen"
+  },
+  "opt_baseline_save_pending": {
+    "message": "Die Lesezeichen-Basis wurde nicht geändert: Die Bestätigung in der Karte oben ist noch offen. Ihre Bestätigung wirkt sofort; „Änderungen speichern“ gilt dafür nicht."
+  },
   "opt_baseline_set_done": {
     "message": "Dieser Browser ist jetzt die Basis. Andere Browser richten sich bei der nächsten Synchronisierung daran aus."
   },

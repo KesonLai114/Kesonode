@@ -1638,6 +1638,15 @@
   "opt_baseline_confirm_clear": {
     "message": "Los marcadores se mantienen en cada navegador y la sincronización vuelve a ser bidireccional."
   },
+  "opt_baseline_set_confirm": {
+    "message": "Sí, usar este navegador"
+  },
+  "opt_baseline_clear_confirm": {
+    "message": "Sí, quitarla"
+  },
+  "opt_baseline_save_pending": {
+    "message": "La base de marcadores no ha cambiado: la confirmación de la tarjeta de arriba sigue abierta. Surte efecto al momento y «Guardar cambios» no se aplica a ella."
+  },
   "opt_baseline_set_done": {
     "message": "Este navegador es ahora la base. Los demás se alinearán en su próxima sincronización."
   },

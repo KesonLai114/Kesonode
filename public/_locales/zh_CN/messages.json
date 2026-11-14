@@ -1009,6 +1009,15 @@
   "opt_baseline_confirm_clear": {
     "message": "各浏览器的书签保持不变，同步恢复为双向。"
   },
+  "opt_baseline_set_confirm": {
+    "message": "确定，设为本机基准"
+  },
+  "opt_baseline_clear_confirm": {
+    "message": "确定，清除基准"
+  },
+  "opt_baseline_save_pending": {
+    "message": "书签基准没有变化：上面卡片里的确认还在等你点。该操作立即生效，不需要点「保存更改」。"
+  },
   "opt_baseline_set_done": {
     "message": "已将本机设为基准。其他浏览器将在下次同步时对齐。"
   },

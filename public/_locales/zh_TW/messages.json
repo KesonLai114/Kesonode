@@ -1018,6 +1018,15 @@
   "opt_baseline_confirm_clear": {
     "message": "各瀏覽器的書籤保持不變，同步恢復為雙向。"
   },
+  "opt_baseline_set_confirm": {
+    "message": "確定，設為本機基準"
+  },
+  "opt_baseline_clear_confirm": {
+    "message": "確定，清除基準"
+  },
+  "opt_baseline_save_pending": {
+    "message": "書籤基準沒有變更：上方卡片裡的確認還在等你點。此操作立即生效，不需要點「儲存變更」。"
+  },
   "opt_baseline_set_done": {
     "message": "已將本機設為基準。其他瀏覽器將於下次同步時對齊。"
   },

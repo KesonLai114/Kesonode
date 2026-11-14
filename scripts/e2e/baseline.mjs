@@ -61,6 +61,7 @@ const readCard = (page) => page.evaluate(() => {
 const strings = (page) => page.evaluate(() => ({
   label: chrome.i18n.getMessage("opt_baseline_label"),
   set: chrome.i18n.getMessage("opt_baseline_set"),
+  setConfirm: chrome.i18n.getMessage("opt_baseline_set_confirm"),
   none: chrome.i18n.getMessage("opt_baseline_none"),
   stale: chrome.i18n.getMessage("opt_baseline_stale"),
   mine: chrome.i18n.getMessage("opt_baseline_mine").split("$")[0].trim(),
@@ -129,11 +130,10 @@ try {
     JSON.stringify(audit.slice(0, 3)));
 
   // ─── And setting it again puts it back ────────────────────────────────────
-  const setButton = page.locator(".settings-section").filter({ hasText: s.label })
-    .getByRole("button", { name: s.set });
-  await setButton.first().click();
+  const card = page.locator(".settings-section").filter({ hasText: s.label });
+  await card.getByRole("button", { name: s.set }).first().click();
   await page.waitForTimeout(400);
-  await setButton.last().click();
+  await card.getByRole("button", { name: s.setConfirm }).last().click();
   await page.waitForTimeout(2500);
   check("setting it again writes the marker back", dav.files.has(MARKER), dav.names().join(", "));
   const again = await send("GET_BASELINE");

@@ -1458,6 +1458,14 @@ export default function OptionsApp() {
   const save = async () => {
     if (!settings) return;
     setSaveError(null);
+    // The baseline card is a direct action, not a field in this form. "Set the baseline,
+    // then Save changes, then reload" is exactly what a user does — and Save does not
+    // apply it, so the reload showed "Not set" with nothing anywhere to say why. Said
+    // before any validation: the confirmation is still open whatever this save answers.
+    if (baselineConfirm) {
+      setBaselineMsg(t("opt_baseline_save_pending"));
+      document.getElementById("baseline-card")?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
     if (passTooShort) {
       setSaveError(t("opt_err_pass_too_short", String(MIN_PASSPHRASE_LENGTH)));
       return;
@@ -3164,7 +3172,7 @@ export default function OptionsApp() {
                 </div>
               </div>
 
-              <div className="settings-section">
+              <div className="settings-section" id="baseline-card">
                 <div className="settings-card-head">
                   {t("opt_baseline_label")}
                   <span className="head-sub">{t("opt_baseline_desc")}</span>
@@ -3187,22 +3195,22 @@ export default function OptionsApp() {
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                     {baselineConfirm === "set" ? (
                       <>
-                        <button className="btn-secondary" onClick={() => setBaselineConfirm(null)} disabled={baselineBusy}>
+                        <button className="btn-secondary" onClick={() => { setBaselineConfirm(null); setBaselineMsg(null); }} disabled={baselineBusy}>
                           {t("opt_cancel")}
                         </button>
                         <button className="btn-secondary" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}
                           onClick={setBaselineHere} disabled={baselineBusy}>
-                          {baselineBusy ? <Loader2 size={12} className="spin" /> : <Star size={12} />} {t("opt_baseline_set")}
+                          {baselineBusy ? <Loader2 size={12} className="spin" /> : <Star size={12} />} {t("opt_baseline_set_confirm")}
                         </button>
                       </>
                     ) : baselineConfirm === "clear" ? (
                       <>
-                        <button className="btn-secondary" onClick={() => setBaselineConfirm(null)} disabled={baselineBusy}>
+                        <button className="btn-secondary" onClick={() => { setBaselineConfirm(null); setBaselineMsg(null); }} disabled={baselineBusy}>
                           {t("opt_cancel")}
                         </button>
                         <button className="btn-secondary" style={{ color: "var(--danger)" }}
                           onClick={clearBaselineHere} disabled={baselineBusy}>
-                          {baselineBusy ? <Loader2 size={12} className="spin" /> : null} {t("opt_baseline_clear")}
+                          {baselineBusy ? <Loader2 size={12} className="spin" /> : null} {t("opt_baseline_clear_confirm")}
                         </button>
                       </>
                     ) : (
