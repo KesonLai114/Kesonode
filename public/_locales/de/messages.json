@@ -2515,7 +2515,7 @@
     "message": "Software-Update"
   },
   "opt_update_section_sub": {
-    "message": "Das Upgrade schreibt die neue Version in den Ordner, aus dem Kesonode geladen wurde, und startet die Erweiterung neu. Browser, die das nicht erlauben, bekommen stattdessen das entpackte Paket."
+    "message": "Neue ZIP herunterladen, einmal die Schaltfläche drücken – Kesonode prüft, ersetzt und startet sich neu. Firefox nutzt stattdessen das Upgrade-Skript."
   },
   "opt_update_check_label": {
     "message": "Nach Updates suchen"
@@ -2549,30 +2549,10 @@
     "message": "Paket herunterladen"
   },
   "opt_update_failed": {
-    "message": "Das hat nicht funktioniert. Versuche es erneut oder entpacke das ZIP selbst und folge den Schritten unten."
-  },
-  "opt_update_package_label": {
-    "message": "Paket importieren"
+    "message": "Das hat nicht geklappt. Ein Upgrade aus einem lokalen Paket funktioniert weiterhin, oder versuche es später erneut."
   },
   "opt_update_package_desc": {
-    "message": "Wähle die heruntergeladene ZIP-Datei, um Version, Browser und Inhalt zu prüfen. Es wird nichts installiert oder geändert."
-  },
-  "opt_update_package_pick": {
-    "message": "ZIP auswählen"
-  },
-  "opt_update_package_ok": {
-    "message": "Geprüft: $VERSION$ für $TARGET$ ($COUNT$ Dateien). Führe anschließend das Upgrade-Skript aus.",
-    "placeholders": {
-      "version": {
-        "content": "$1"
-      },
-      "target": {
-        "content": "$2"
-      },
-      "count": {
-        "content": "$3"
-      }
-    }
+    "message": "Wähle die heruntergeladene ZIP: Version und Inhalt werden geprüft, der Installationsordner aktualisiert und die Erweiterung neu gestartet. Beim ersten Upgrade wählst du diesen Ordner einmal aus."
   },
   "opt_update_package_bad": {
     "message": "Dieses Paket kann nicht verwendet werden: $REASON$",
@@ -2592,7 +2572,7 @@
     "message": "es wurde für einen anderen Browser erstellt"
   },
   "opt_update_bad_version": {
-    "message": "es ist nicht neuer als die installierte Version"
+    "message": "Das Paket ist nicht neuer als die installierte Version, es gibt also nichts zu aktualisieren."
   },
   "opt_update_script_label": {
     "message": "Upgrade-Skript mit einem Klick"
@@ -2604,7 +2584,7 @@
     "message": "Skript herunterladen"
   },
   "opt_update_steps": {
-    "message": "Chromium: Wähle den Ordner, aus dem Kesonode geladen wurde, importiere dann das neue Paket und klicke auf „Jetzt aktualisieren“ — die neue Version wird in diesen Ordner geschrieben und die Erweiterung startet neu.\nFirefox: Führe das Upgrade-Skript aus. Es installiert das Paket jedes Mal in denselben Ordner, damit Erweiterungs-ID und Einstellungen erhalten bleiben."
+    "message": "Chromium: Beim ersten Upgrade wird einmal nach dem Ordner gefragt, aus dem Kesonode geladen wurde. Danach genügt ein Knopfdruck und die Auswahl der neuen ZIP.\nFirefox: Führe das Upgrade-Skript aus. Es installiert immer in denselben Kesonode-Ordner, sodass Erweiterungs-ID und Einstellungen erhalten bleiben."
   },
   "ai_nav": {
     "message": "KI-Assistent"
@@ -2791,13 +2771,10 @@
     "message": "Warte darauf, dass du einen Ordner auswählst …"
   },
   "opt_update_dir_unsupported": {
-    "message": "Dieser Browser erlaubt Erweiterungen nicht, in einen lokalen Ordner zu schreiben (Firefox hat keine solche Schnittstelle). Nutze stattdessen das Upgrade-Skript unten."
+    "message": "Dieser Browser (Firefox) erlaubt einer Erweiterung nicht, in einen lokalen Ordner zu schreiben. Lade stattdessen das Upgrade-Skript herunter und führe es aus."
   },
   "opt_update_install_label": {
-    "message": "Upgrade mit einem Klick"
-  },
-  "opt_update_install_desc": {
-    "message": "Die neue Version wird in den festgelegten Ordner geschrieben und die Erweiterung startet neu."
+    "message": "Aktuelle Version"
   },
   "opt_update_install_go": {
     "message": "Jetzt aktualisieren"
@@ -2812,12 +2789,6 @@
         "content": "$1"
       }
     }
-  },
-  "opt_update_install_need_pkg": {
-    "message": "Importiere zuerst das neue Paket."
-  },
-  "opt_update_install_need_dir": {
-    "message": "Lege zuerst den Installationsordner fest."
   },
   "opt_update_err_no_folder": {
     "message": "Es ist kein Installationsordner festgelegt."
@@ -2836,5 +2807,17 @@
   },
   "opt_update_err_write": {
     "message": "Das Schreiben der neuen Version ist fehlgeschlagen. Der Ordner enthält noch die alte Version; wiederhole das Upgrade."
+  },
+  "opt_update_advanced": {
+    "message": "Erweiterte Optionen"
+  },
+  "opt_update_wait_folder": {
+    "message": "Erste Aktualisierung: Wähle im Browserdialog den Ordner, aus dem Kesonode geladen wurde. Dies ist nur einmal nötig."
+  },
+  "opt_update_wait_package": {
+    "message": "Wähle im Dialog die heruntergeladene ZIP-Datei. Falls du ihn geschlossen hast, drücke die Schaltfläche erneut."
+  },
+  "opt_update_check_unavailable": {
+    "message": "Release-Informationen sind derzeit nicht verfügbar (das Repository ist möglicherweise privat). Ein Upgrade aus einem lokalen Paket funktioniert weiterhin."
   }
 }

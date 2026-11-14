@@ -114,8 +114,9 @@ steps are things you start; neither happens on its own.
 **Checking for updates** sends one request to `api.github.com` (GitHub's public API) and
 reads the newest release of this repository. It carries nothing of yours: no bookmarks,
 no browsing history, no open tabs, no extension list, no credentials, no device
-identifier. Nothing is sent at all unless you press "Check for updates", and the button
-is not pressed for you.
+identifier. Nothing is sent at all unless you press "Check for updates" under Advanced
+options, and the button is not pressed for you. Pressing the main "Upgrade now" button
+makes no network request: the package is the zip you already downloaded.
 
 **Installing an update** (Chromium only) needs the folder Kesonode is loaded from. You
 pick that folder yourself, in the browser's own folder picker, and the browser asks

@@ -10,6 +10,16 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Software update is one button.** Settings → Advanced → Software update now shows a
+  single primary action instead of a six-button wizard: it binds the install folder on
+  first use, lets the user pick the downloaded zip, verifies it, writes the new version
+  and restarts the extension. On Firefox the same button downloads the upgrade script.
+  Release checking, folder management and the manual script download moved behind an
+  "Advanced options" disclosure, and a failed release check now says plainly that a
+  local package still works.
+
 ## [1.5.21] - 2026-11-15
 
 ### Added

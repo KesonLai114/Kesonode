@@ -2515,7 +2515,7 @@
     "message": "软件更新"
   },
   "opt_update_section_sub": {
-    "message": "升级会把新版本写进 Kesonode 被加载的那个文件夹，然后重启扩展。不允许这样做的浏览器会改为拿到解压好的安装包。"
+    "message": "下载新版 zip 后点一次按钮，自动完成校验、替换与重启；Firefox 改为使用升级脚本。"
   },
   "opt_update_check_label": {
     "message": "检查更新"
@@ -2549,30 +2549,10 @@
     "message": "下载安装包"
   },
   "opt_update_failed": {
-    "message": "操作未能完成。可以重试，也可以自行解压安装包并按下方步骤加载。"
-  },
-  "opt_update_package_label": {
-    "message": "导入压缩包"
+    "message": "这一步没能完成。用本地安装包升级不受影响，也可以稍后重试。"
   },
   "opt_update_package_desc": {
-    "message": "选择下载好的 zip，校验版本、适用浏览器和包内容。不会安装或改动扩展。"
-  },
-  "opt_update_package_pick": {
-    "message": "选择 zip"
-  },
-  "opt_update_package_ok": {
-    "message": "校验通过：$VERSION$（$TARGET$ 版，共 $COUNT$ 个文件）。接下来运行下方的升级脚本。",
-    "placeholders": {
-      "version": {
-        "content": "$1"
-      },
-      "target": {
-        "content": "$2"
-      },
-      "count": {
-        "content": "$3"
-      }
-    }
+    "message": "选择下载好的安装包 zip：自动校验版本与内容、写入安装目录并重启扩展。首次升级只需选一次安装目录。"
   },
   "opt_update_package_bad": {
     "message": "这个压缩包无法使用：$REASON$",
@@ -2592,7 +2572,7 @@
     "message": "这是另一个浏览器的安装包"
   },
   "opt_update_bad_version": {
-    "message": "版本不比当前已安装的版本新"
+    "message": "所选安装包不比当前版本新，无需升级。"
   },
   "opt_update_script_label": {
     "message": "一键升级脚本"
@@ -2604,7 +2584,7 @@
     "message": "下载脚本"
   },
   "opt_update_steps": {
-    "message": "Chromium：绑定你加载 Kesonode 的那个文件夹，导入新安装包，点「立即升级」——新版本会写进那个文件夹，扩展自动重启。\nFirefox：运行升级脚本。它每次都装进同一个名为 Kesonode 的文件夹，扩展 ID 和设置都会保留。"
+    "message": "Chromium：首次升级会让你选一次安装目录，之后每次只需点「一键升级」并选择新版 zip。\nFirefox：运行升级脚本，它始终装进同一个 Kesonode 文件夹，扩展 ID 与设置都会保留。"
   },
   "ai_nav": {
     "message": "AI 助手"
@@ -2791,16 +2771,13 @@
     "message": "等待你选择文件夹…"
   },
   "opt_update_dir_unsupported": {
-    "message": "当前浏览器不允许扩展写入本地文件夹（Firefox 没有这个接口），请改用下面的升级脚本。"
+    "message": "当前浏览器（Firefox）不允许扩展写入安装目录，请下载并运行升级脚本。"
   },
   "opt_update_install_label": {
-    "message": "一键升级"
-  },
-  "opt_update_install_desc": {
-    "message": "新版本会写进已绑定的文件夹，然后扩展自动重启。"
+    "message": "当前版本"
   },
   "opt_update_install_go": {
-    "message": "立即升级"
+    "message": "一键升级"
   },
   "opt_update_install_busy": {
     "message": "正在升级…"
@@ -2812,12 +2789,6 @@
         "content": "$1"
       }
     }
-  },
-  "opt_update_install_need_pkg": {
-    "message": "请先导入新的安装包。"
-  },
-  "opt_update_install_need_dir": {
-    "message": "请先绑定安装目录。"
   },
   "opt_update_err_no_folder": {
     "message": "还没有绑定安装目录。"
@@ -2836,5 +2807,17 @@
   },
   "opt_update_err_write": {
     "message": "写入新版本失败。文件夹里仍是旧版本，重新执行升级即可。"
+  },
+  "opt_update_advanced": {
+    "message": "高级选项"
+  },
+  "opt_update_wait_folder": {
+    "message": "首次升级：请在浏览器弹窗中选择 Kesonode 的安装目录，只需选一次。"
+  },
+  "opt_update_wait_package": {
+    "message": "请在弹窗中选择下载好的 zip；若已取消，再点一次「一键升级」。"
+  },
+  "opt_update_check_unavailable": {
+    "message": "暂时无法获取发布信息（仓库可能未公开）；用本地安装包升级不受影响。"
   }
 }

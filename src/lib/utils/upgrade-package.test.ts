@@ -3,6 +3,7 @@ import {
   compareVersions,
   extractPackage,
   inspectUpgradePackage,
+  packageIssueKind,
   type PackageFile,
 } from "@/lib/utils/upgrade-package";
 
@@ -316,5 +317,18 @@ describe("extractPackage", () => {
       { name: "Kesonode/chunks/app.js", data: enc.encode("// chunk") },
     ]);
     expect(await extractPackage(asFile(bytes), CHROMIUM)).toEqual({ ok: false, reason: "zip" });
+  });
+});
+
+describe("packageIssueKind", () => {
+  it("treats a package that is not newer as information, not an error", () => {
+    // Re-selecting v1.5.21 while v1.5.21 is installed is a normal thing to do.
+    expect(packageIssueKind("version")).toBe("no-change");
+  });
+
+  it("treats a damaged, unsafe or wrong-browser package as an error", () => {
+    expect(packageIssueKind("zip")).toBe("bad");
+    expect(packageIssueKind("unsafe")).toBe("bad");
+    expect(packageIssueKind("browser")).toBe("bad");
   });
 });

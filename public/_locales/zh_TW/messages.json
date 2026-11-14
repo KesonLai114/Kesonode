@@ -2515,7 +2515,7 @@
     "message": "軟體更新"
   },
   "opt_update_section_sub": {
-    "message": "升級會把新版本寫進 Kesonode 被載入的那個資料夾，然後重新啟動擴充功能。不允許這樣做的瀏覽器會改為拿到解壓好的安裝包。"
+    "message": "下載新版 zip 後點一次按鈕，自動完成校驗、替換與重啟；Firefox 改為使用升級指令稿。"
   },
   "opt_update_check_label": {
     "message": "檢查更新"
@@ -2549,30 +2549,10 @@
     "message": "下載安裝包"
   },
   "opt_update_failed": {
-    "message": "操作未能完成。可以重試，也可以自行解壓縮安裝包並依照下方步驟載入。"
-  },
-  "opt_update_package_label": {
-    "message": "匯入壓縮包"
+    "message": "這一步沒有完成。使用本機安裝包升級不受影響，也可以稍後重試。"
   },
   "opt_update_package_desc": {
-    "message": "選取下載好的 zip，驗證版本、適用瀏覽器與包內容。不會安裝或變更擴充功能。"
-  },
-  "opt_update_package_pick": {
-    "message": "選取 zip"
-  },
-  "opt_update_package_ok": {
-    "message": "驗證通過：$VERSION$（$TARGET$ 版，共 $COUNT$ 個檔案）。接著執行下方的升級指令稿。",
-    "placeholders": {
-      "version": {
-        "content": "$1"
-      },
-      "target": {
-        "content": "$2"
-      },
-      "count": {
-        "content": "$3"
-      }
-    }
+    "message": "選擇下載好的安裝包 zip：自動校驗版本與內容、寫入安裝目錄並重啟擴充功能。首次升級只需選一次安裝目錄。"
   },
   "opt_update_package_bad": {
     "message": "這個壓縮包無法使用：$REASON$",
@@ -2592,7 +2572,7 @@
     "message": "這是另一個瀏覽器的安裝包"
   },
   "opt_update_bad_version": {
-    "message": "版本未比目前安裝的版本新"
+    "message": "所選安裝包不比目前版本新，無需升級。"
   },
   "opt_update_script_label": {
     "message": "一鍵升級指令稿"
@@ -2604,7 +2584,7 @@
     "message": "下載指令稿"
   },
   "opt_update_steps": {
-    "message": "Chromium：綁定你載入 Kesonode 的那個資料夾，匯入新的安裝包，點「立即升級」——新版本會寫進那個資料夾，擴充功能自動重新啟動。\nFirefox：執行升級指令碼。它每次都裝進同一個名為 Kesonode 的資料夾，擴充功能的 ID 與設定都會保留。"
+    "message": "Chromium：首次升級會讓你選一次安裝目錄，之後每次只需點「一鍵升級」並選擇新版 zip。\nFirefox：執行升級指令稿，它始終裝進同一個 Kesonode 資料夾，擴充功能 ID 與設定都會保留。"
   },
   "ai_nav": {
     "message": "AI 助理"
@@ -2791,16 +2771,13 @@
     "message": "等待你選擇資料夾…"
   },
   "opt_update_dir_unsupported": {
-    "message": "目前的瀏覽器不允許擴充功能寫入本機資料夾（Firefox 沒有這個介面），請改用下面的升級指令碼。"
+    "message": "目前瀏覽器（Firefox）不允許擴充功能寫入安裝目錄，請下載並執行升級指令稿。"
   },
   "opt_update_install_label": {
-    "message": "一鍵升級"
-  },
-  "opt_update_install_desc": {
-    "message": "新版本會寫進已綁定的資料夾，然後擴充功能自動重新啟動。"
+    "message": "目前版本"
   },
   "opt_update_install_go": {
-    "message": "立即升級"
+    "message": "一鍵升級"
   },
   "opt_update_install_busy": {
     "message": "正在升級…"
@@ -2812,12 +2789,6 @@
         "content": "$1"
       }
     }
-  },
-  "opt_update_install_need_pkg": {
-    "message": "請先匯入新的安裝包。"
-  },
-  "opt_update_install_need_dir": {
-    "message": "請先綁定安裝目錄。"
   },
   "opt_update_err_no_folder": {
     "message": "還沒有綁定安裝目錄。"
@@ -2836,5 +2807,17 @@
   },
   "opt_update_err_write": {
     "message": "寫入新版本失敗。資料夾裡仍是舊版本，重新執行升級即可。"
+  },
+  "opt_update_advanced": {
+    "message": "進階選項"
+  },
+  "opt_update_wait_folder": {
+    "message": "首次升級：請在瀏覽器視窗中選擇 Kesonode 的安裝目錄，只需選一次。"
+  },
+  "opt_update_wait_package": {
+    "message": "請在視窗中選擇下載好的 zip；若已取消，再點一次「一鍵升級」。"
+  },
+  "opt_update_check_unavailable": {
+    "message": "暫時無法取得發佈資訊（儲存庫可能未公開）；使用本機安裝包升級不受影響。"
   }
 }

@@ -32,6 +32,17 @@ export type PackageTarget = "chromium" | "firefox" | "unknown";
 /** Why a selected file must not be handed to the upgrade code. */
 export type BadReason = "unsafe" | "zip" | "browser" | "version";
 
+/**
+ * A sound package that is simply not newer is information, not a failure.
+ *
+ * The old settings page ran it through the same "this package cannot be used" message as
+ * a damaged zip, so re-picking the version already installed looked like an error. The
+ * one-button flow shows it as a neutral "nothing to upgrade" instead.
+ */
+export function packageIssueKind(reason: BadReason): "no-change" | "bad" {
+  return reason === "version" ? "no-change" : "bad";
+}
+
 export type UpgradeInspection =
   | { ok: true; version: string; target: PackageTarget; entries: number }
   | { ok: false; reason: BadReason };

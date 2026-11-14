@@ -2753,7 +2753,7 @@
     "message": "Software update"
   },
   "opt_update_section_sub": {
-    "message": "The upgrade writes the new version into the folder Kesonode was loaded from and restarts the extension. Browsers that do not allow that get the unpacked package instead."
+    "message": "Download the new zip, press the button once and Kesonode verifies, replaces and restarts itself. Firefox uses the upgrade script instead."
   },
   "opt_update_check_label": {
     "message": "Check for updates"
@@ -2787,30 +2787,10 @@
     "message": "Download package"
   },
   "opt_update_failed": {
-    "message": "That did not work. Retry, or unpack the zip yourself and follow the steps below."
-  },
-  "opt_update_package_label": {
-    "message": "Import a package"
+    "message": "That did not work. Upgrading from a local package still works, or try again later."
   },
   "opt_update_package_desc": {
-    "message": "Select the zip you downloaded to verify its version, browser and contents. Nothing is installed or changed."
-  },
-  "opt_update_package_pick": {
-    "message": "Select zip"
-  },
-  "opt_update_package_ok": {
-    "message": "Verified: $VERSION$ for $TARGET$ ($COUNT$ files). Run the upgrade script below.",
-    "placeholders": {
-      "version": {
-        "content": "$1"
-      },
-      "target": {
-        "content": "$2"
-      },
-      "count": {
-        "content": "$3"
-      }
-    }
+    "message": "Pick the zip you downloaded: its version and contents are verified, the install folder is updated and the extension restarts. On the first upgrade you choose that folder once."
   },
   "opt_update_package_bad": {
     "message": "This package cannot be used: $REASON$",
@@ -2830,7 +2810,7 @@
     "message": "it was built for a different browser"
   },
   "opt_update_bad_version": {
-    "message": "it is not newer than the installed version"
+    "message": "The package is not newer than the installed version, so there is nothing to upgrade."
   },
   "opt_update_script_label": {
     "message": "One-click upgrade script"
@@ -2842,7 +2822,7 @@
     "message": "Download script"
   },
   "opt_update_steps": {
-    "message": "Chromium: bind the folder Kesonode was loaded from, then import the new package and press \"Upgrade now\" — the new version is written into that folder and the extension restarts.\nFirefox: run the upgrade script. It installs the package into the same folder every time, so the extension ID and your settings are kept."
+    "message": "Chromium: the first upgrade asks once for the folder Kesonode was loaded from. After that, press the button and pick the new zip.\nFirefox: run the upgrade script. It always installs into the same Kesonode folder, so the extension ID and your settings are kept."
   },
   "ai_nav": {
     "message": "AI assistant"
@@ -3029,13 +3009,10 @@
     "message": "Waiting for you to pick a folder…"
   },
   "opt_update_dir_unsupported": {
-    "message": "This browser does not let an extension write to a local folder (Firefox has no such API), so use the upgrade script below instead."
+    "message": "This browser (Firefox) does not let an extension write to a local folder. Download the upgrade script and run it instead."
   },
   "opt_update_install_label": {
-    "message": "One-click upgrade"
-  },
-  "opt_update_install_desc": {
-    "message": "The new version is written into the bound folder and the extension restarts."
+    "message": "Current version"
   },
   "opt_update_install_go": {
     "message": "Upgrade now"
@@ -3050,12 +3027,6 @@
         "content": "$1"
       }
     }
-  },
-  "opt_update_install_need_pkg": {
-    "message": "Import the new package first."
-  },
-  "opt_update_install_need_dir": {
-    "message": "Bind the install folder first."
   },
   "opt_update_err_no_folder": {
     "message": "No install folder is bound."
@@ -3074,5 +3045,17 @@
   },
   "opt_update_err_write": {
     "message": "Writing the new version failed. The folder still holds the old version; run the upgrade again."
+  },
+  "opt_update_advanced": {
+    "message": "Advanced options"
+  },
+  "opt_update_wait_folder": {
+    "message": "First upgrade: pick the folder Kesonode was loaded from in the browser dialog. This is needed once."
+  },
+  "opt_update_wait_package": {
+    "message": "Choose the downloaded zip in the dialog. If you closed it, press the button again."
+  },
+  "opt_update_check_unavailable": {
+    "message": "Release information is unavailable right now (the repository may be private). Upgrading from a local package still works."
   }
 }
