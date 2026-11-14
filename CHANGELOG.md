@@ -10,6 +10,8 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+## [1.5.21] - 2026-11-15
+
 ### Added
 
 - **A one-click upgrade in Chromium.** Settings → Advanced → Software update now lets you
