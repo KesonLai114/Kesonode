@@ -2076,8 +2076,12 @@ export default function OptionsApp() {
   // its one-time replacement yet, which is a fact worth saying rather than leaving the
   // user to wonder why its bookmarks still look different.
   const baselineMine = baseline?.marker != null && baseline.marker.device_id === settings.device_id;
+  // A browser that does not sync bookmarks never aligns with a baseline — that is what
+  // it asked for — so it must not be told it is waiting for one.
+  const baselineSyncsBookmarks = settings.enabled_types.includes("bookmarks");
   const baselineAwaiting = baseline?.marker != null && !baselineMine
-    && baseline.adopted_at !== baseline.marker.at;
+    && baseline.adopted_at !== baseline.marker.at
+    && baselineSyncsBookmarks;
   // Cached means the storage could not answer, so the marker on screen may already have
   // been replaced on another browser. Read is worth showing; acting on it is not.
   const baselineReady = baselineLoad === "ok" && baseline?.cached !== true;
@@ -2098,6 +2102,7 @@ export default function OptionsApp() {
           : t("opt_baseline_other", [isolate(baselineDeviceName), baselineTime]);
   const baselineNote = baselineLoad !== "ok" ? null
     : baseline?.cached ? t("opt_baseline_cached")
+    : baseline?.stale ? t("opt_baseline_stale")
     : baselineAwaiting ? t("opt_baseline_waiting", isolate(baselineDeviceName))
     : null;
 
@@ -3202,7 +3207,7 @@ export default function OptionsApp() {
                       </>
                     ) : (
                       <>
-                        {baselineReady && !baselineMine && (
+                        {baselineReady && (!baselineMine || baseline?.stale) && (
                           <button className="btn-secondary" disabled={baselineBusy}
                             onClick={() => setBaselineConfirm("set")}>
                             <Star size={12} /> {t("opt_baseline_set")}

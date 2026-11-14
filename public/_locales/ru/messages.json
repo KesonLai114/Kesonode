@@ -22,7 +22,7 @@
     "message": "ru"
   },
   "extension_name": {
-    "message": "Kesonode | Синхронизация закладок и вкладок v1.5.19"
+    "message": "Kesonode | Синхронизация закладок и вкладок v1.5.20"
   },
   "extension_description": {
     "message": "Приватная синхронизация браузера с вашим собственным хранилищем: Google Drive, WebDAV, GitHub."
@@ -993,6 +993,9 @@
   },
   "opt_baseline_cached": {
     "message": "· последнее известное значение"
+  },
+  "opt_baseline_stale": {
+    "message": "· в хранилище больше нет этой метки (возможно, её удалили или она не была записана)"
   },
   "opt_baseline_waiting": {
     "message": "Этот браузер ещё не выровнен с $DEVICE$; это произойдёт при следующей синхронизации.",

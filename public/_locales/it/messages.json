@@ -295,7 +295,7 @@
     "message": "Usa il tuo indirizzo Fastmail completo come nome utente e una password per l'app con accesso a Files (WebDAV)."
   },
   "extension_name": {
-    "message": "Kesonode | Sync privata di segnalibri e schede v1.5.19"
+    "message": "Kesonode | Sync privata di segnalibri e schede v1.5.20"
   },
   "popup_setup_title": {
     "message": "Completa la configurazione di Kesonode"
@@ -993,6 +993,9 @@
   },
   "opt_baseline_cached": {
     "message": "· ultimo valore noto"
+  },
+  "opt_baseline_stale": {
+    "message": "· l'archivio non contiene più questo marker (potrebbe essere stato cancellato o mai scritto)"
   },
   "opt_baseline_waiting": {
     "message": "Questo browser non è ancora allineato a $DEVICE$; lo sarà alla prossima sincronizzazione.",

@@ -5,7 +5,9 @@ import {
 } from "@/lib/utils/storage";
 
 import { sha256 } from "@/lib/crypto/encryption";
-import { BASELINE_FILE, readBaselineMarker, writeBaselineMarker } from "@/lib/sync/baseline";
+import {
+  BASELINE_FILE, getCachedBaseline, readBaselineMarker, writeBaselineMarker,
+} from "@/lib/sync/baseline";
 import type { BookmarkPayload, IBackend, SyncBookmark, SyncPacket, SyncSettings } from "@/lib/types";
 
 // The engine builds its own backend from the active config, so createBackend is mocked the
@@ -14,6 +16,8 @@ const h = vi.hoisted(() => ({
   blobs: new Map<string, string>(),
   uploads: [] as string[],
   deleteFails: false,
+  /** The storage accepts the marker and keeps nothing: the write is lost. */
+  dropMarkerWrite: false,
 }));
 
 vi.mock("@/lib/backends/abstract-backend", () => ({
@@ -31,7 +35,10 @@ vi.mock("@/lib/backends/abstract-backend", () => ({
       if (h.deleteFails) throw new Error("HTTP 503");
       h.blobs.delete(name);
     },
-    putFile: async (name: string, content: string) => { h.blobs.set(name, content); },
+    putFile: async (name: string, content: string) => {
+      if (h.dropMarkerWrite && name === "konode_baseline.json") return;
+      h.blobs.set(name, content);
+    },
     upload: async (p: SyncPacket) => {
       h.uploads.push(p.device_id);
       h.blobs.set(`konode_${p.data_type}_${p.device_id}.json`, JSON.stringify(p));
@@ -139,6 +146,7 @@ beforeEach(async () => {
   h.blobs.clear();
   h.uploads.length = 0;
   h.deleteFails = false;
+  h.dropMarkerWrite = false;
   await clearSyncCooldown();
 });
 
@@ -248,6 +256,92 @@ describe("choosing this browser as the baseline", () => {
     expect((await getFirstSync())?.done).toBe(true);
     expect((await getState()).first_sync_pending ?? null).toBeNull();
     expect(await localUrls()).toEqual(["https://local.example/"]);
+  });
+
+  it("refuses to report a baseline the storage did not keep", async () => {
+    await seedLocal();
+    h.dropMarkerWrite = true;
+
+    // The marker file IS the baseline, so a storage that takes the write and loses it
+    // would show "this browser is the baseline" now and "not set" after the next reload,
+    // with nothing in between to say why. The write is checked against the storage.
+    await expect(engine().setBaseline()).rejects.toThrow(/does not hold it/);
+    expect(await getCachedBaseline()).toBeNull();
+  });
+
+  it("keeps the baseline when the storage no longer has the marker", async () => {
+    await seedLocal();
+    const e = engine();
+    await e.setBaseline();
+
+    // The storage lost the file it accepted a minute ago.
+    h.blobs.delete(BASELINE_FILE);
+    const info = await engine().getBaselineInfo();
+
+    expect(info.marker?.device_id).toBe("me");
+    expect(info.stale).toBe(true);
+    expect(await getCachedBaseline()).toMatchObject({ device_id: "me" });
+  });
+
+  it("keeps the baseline through a sync cycle that finds no marker", async () => {
+    await seedLocal();
+    const e = engine();
+    await e.setBaseline();
+    h.blobs.delete(BASELINE_FILE);
+
+    await e.sync(["bookmarks"], { force: true });
+
+    // A cycle runs every minute; it must not take the setting down with it.
+    expect(await getCachedBaseline()).toMatchObject({ device_id: "me" });
+    expect((await engine().getBaselineInfo()).marker?.device_id).toBe("me");
+  });
+
+  it("forgets a baseline set by another browser when the storage clears it", async () => {
+    await seedLocal();
+    putMarker("peer");
+    const e = engine();
+    expect((await e.getBaselineInfo()).marker?.device_id).toBe("peer");
+
+    // The other browser cleared it: that IS news, and the local copy of it goes.
+    h.blobs.delete(BASELINE_FILE);
+    const info = await engine().getBaselineInfo();
+
+    expect(info.marker).toBeNull();
+    expect(await getCachedBaseline()).toBeNull();
+  });
+
+  it("refuses to be the baseline from a browser that does not sync bookmarks", async () => {
+    await seedLocal();
+    // This browser's bookmarks never travel, so they cannot be the group's copy.
+    const e = engine({ enabled_types: ["history"] });
+
+    await expect(e.setBaseline()).rejects.toThrow(/does not sync bookmarks/);
+    expect(marker()).toBeNull();
+    expect(h.uploads).not.toContain("me");
+  });
+
+  it("keeps the marker pointing at the tree this browser publishes", async () => {
+    await seedLocal();
+    const e = engine();
+    await e.setBaseline();
+    const read = () =>
+      JSON.parse((JSON.parse(h.blobs.get(BASELINE_FILE)!).payload as string)) as { checksum: string; at: string };
+    const first = read();
+    const firstChecksum = first.checksum;
+    expect(firstChecksum).toBe(packetChecksum(h.blobs.get("konode_bookmarks_me.json")!));
+
+    // This browser keeps working. Its file is replaced under the same name, so the
+    // marker would name a copy that is no longer on the storage — and every device
+    // that has not aligned yet would wait for it forever.
+    await seedLocal("https://second.example/");
+    await e.sync(["bookmarks"], { force: true });
+
+    const after = read();
+    expect(after.checksum).toBe(packetChecksum(h.blobs.get("konode_bookmarks_me.json")!));
+    expect(after.checksum).not.toBe(firstChecksum);
+    // The baseline is still the same baseline: the devices that already aligned are
+    // not made to align again, they pick the newer tree up through the merge.
+    expect(after.at).toBe(first.at);
   });
 });
 

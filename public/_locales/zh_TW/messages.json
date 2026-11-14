@@ -34,7 +34,7 @@
     "message": "立即同步"
   },
   "extension_name": {
-    "message": "Kesonode | 私人書籤與分頁同步 v1.5.19"
+    "message": "Kesonode | 私人書籤與分頁同步 v1.5.20"
   },
   "extension_description": {
     "message": "隱私優先的瀏覽器同步，資料存放在你自己的空間：Google Drive、WebDAV、GitHub。"
@@ -993,6 +993,9 @@
   },
   "opt_baseline_cached": {
     "message": "· 上次讀取的值"
+  },
+  "opt_baseline_stale": {
+    "message": "· 儲存中已無該標記（可能已被清除，或當時並未寫入成功）"
   },
   "opt_baseline_waiting": {
     "message": "本機尚未與 $DEVICE$ 對齊，將於下次同步時進行。",

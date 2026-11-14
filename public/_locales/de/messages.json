@@ -22,7 +22,7 @@
     "message": "de"
   },
   "extension_name": {
-    "message": "Kesonode | Privater Lesezeichen- und Tab-Sync v1.5.19"
+    "message": "Kesonode | Privater Lesezeichen- und Tab-Sync v1.5.20"
   },
   "extension_description": {
     "message": "Datenschutzfreundliche Browser-Synchronisierung in deinen eigenen Speicher: Google Drive, WebDAV, GitHub."
@@ -993,6 +993,9 @@
   },
   "opt_baseline_cached": {
     "message": "· zuletzt bekannter Wert"
+  },
+  "opt_baseline_stale": {
+    "message": "· der Speicher enthält diese Markierung nicht mehr (sie wurde gelöscht oder nie geschrieben)"
   },
   "opt_baseline_waiting": {
     "message": "Dieser Browser wurde noch nicht an $DEVICE$ ausgerichtet; das geschieht bei der nächsten Synchronisierung.",

@@ -10,6 +10,8 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+## [1.5.20] - 2026-11-14
+
 ### Added
 
 - **Two batch actions on AI search results.** When a question returns more than one
@@ -42,6 +44,32 @@ All notable changes to Konode. Format loosely follows
   `optional: ["bookmarksInfo"]`, Mozilla's own category for bookmark names, websites and
   folder names, which is exactly what a question sends. The switch in Settings is the
   consent in substance. `web-ext lint` accepts it.
+
+### Fixed
+
+- **The bookmark baseline survives a reload.** Setting this browser as the group's
+  bookmark baseline wrote the marker to the storage but showed "not set" again on the next
+  reload. The marker is now read back from the storage, and the local record is kept when
+  the storage no longer holds the marker — the card then says so, instead of quietly
+  claiming there is no baseline.
+- **The baseline keeps pointing at the tree it published.** The marker pinned the exact
+  tree it named, but the baseline browser's own next upload replaced that file under the
+  same name, so the marker named a copy that was no longer there: a browser joining later
+  waited forever, and the baseline stopped reaching it. The marker is now restamped with
+  the checksum of the tree just published, after re-reading it, so a baseline taken over
+  by another browser in between is not quietly undone.
+- **The baseline is verified against the storage before it is reported.** A storage that
+  accepts the marker file and loses it would show "this browser is the baseline" now and
+  "not set" after the next reload, with nothing in between to say why. The write is read
+  back, and the baseline is only reported once the storage actually holds it.
+- **A browser that does not sync bookmarks cannot be the baseline.** Its bookmarks would
+  never keep up with the other browsers. It is refused, with the reason, and nothing is
+  changed.
+- **The baseline handover is atomic.** The other browsers' published copies are removed
+  first and the marker is written afterwards, so a failure in between leaves the group as
+  it was instead of half-replaced. The restore point is taken before anything is removed.
+- **The error message after a failed handover says what actually happened.** It used to
+  claim nothing had changed, although the other browsers' files had already been removed.
 
 ## [1.5.19] - 2026-11-14
 

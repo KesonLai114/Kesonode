@@ -42,6 +42,8 @@ import {
   setBulkDeleteApproval,
   getListFailureNoted,
   setListFailureNoted,
+  getBaselineStaleNoted,
+  setBaselineStaleNoted,
   getGuardSnapshotTaken,
   setGuardSnapshotTaken,
   getDangerSnapshotTaken,
@@ -1493,6 +1495,7 @@ export class SyncEngine {
       if (read.marker?.device_id === deviceId) {
         await setCachedBaseline(null);
         await setAdoptedBaseline(null);
+        await setBaselineStaleNoted(false);
         logger.event("Baseline", `Cleared the bookmark baseline because ${deviceId.slice(0, 8)} was forgotten`);
       }
     } catch (err) {
@@ -1698,9 +1701,17 @@ export class SyncEngine {
    * The group's bookmark baseline, read for the UI. Never throws: inside a rate-limit
    * window (or with an unreadable marker) it answers with the last copy this device read
    * and flags it, which is the difference between "not set" and "not visible right now".
+   *
+   * A storage that answers "there is no marker" may overrule a marker ABOUT ANOTHER
+   * DEVICE — its owner cleared it, and the group merges both ways again. It must not
+   * overrule this device's OWN marker: the storage can lose the file it accepted a
+   * minute ago (a provider that drops it, a folder tidied by hand), and the honest
+   * answer then is "this browser is the baseline, but the storage no longer has the
+   * marker" — not the flat "not set" that made the setting look like it had never
+   * been made.
    */
   async getBaselineInfo(): Promise<{
-    marker: BaselineMarker | null; adopted_at: string | null; cached: boolean;
+    marker: BaselineMarker | null; adopted_at: string | null; cached: boolean; stale?: boolean;
   }> {
     const cached = await getCachedBaseline();
     const adopted = await getAdoptedBaseline();
@@ -1714,12 +1725,35 @@ export class SyncEngine {
         if (b.rateLimited) await this.noteRateLimit();
         return r;
       });
-      if (!read.unreadable) await setCachedBaseline(read.marker);
-      return {
-        marker: read.unreadable ? cached : read.marker,
-        adopted_at: adoptedAt,
-        cached: read.unreadable,
-      };
+      if (read.unreadable) {
+        return { marker: cached, adopted_at: adoptedAt, cached: true };
+      }
+      if (!read.marker) {
+        // Somebody else's baseline is gone: drop the local copy of it, or this browser
+        // would keep naming a baseline the group has already abandoned.
+        if (cached && cached.device_id !== this.settings.device_id) {
+          await setCachedBaseline(null);
+          await setBaselineStaleNoted(false);
+          return { marker: null, adopted_at: adoptedAt, cached: false };
+        }
+        const stale = !!cached;
+        if (stale) {
+          // Once per incident: the same condition is re-read on every page load.
+          if (!(await getBaselineStaleNoted())) {
+            await setBaselineStaleNoted(true);
+            logger.event(
+              "Baseline",
+              "The storage no longer holds the bookmark baseline this browser set. The setting is kept here, but the other browsers cannot see a baseline until it is set again."
+            );
+          }
+        } else {
+          await setBaselineStaleNoted(false);
+        }
+        return { marker: cached, adopted_at: adoptedAt, cached: false, stale };
+      }
+      await setCachedBaseline(read.marker);
+      await setBaselineStaleNoted(false);
+      return { marker: read.marker, adopted_at: adoptedAt, cached: false };
     } catch {
       return { marker: cached, adopted_at: adoptedAt, cached: true };
     }
@@ -1734,6 +1768,16 @@ export class SyncEngine {
    * and the cost of a failed snapshot is one retry, while the cost of no point is theirs.
    */
   async setBaseline(): Promise<{ marker: BaselineMarker; adopted_at: string }> {
+    // A device that does not sync bookmarks is not a candidate: its bookmarks would
+    // never keep up with the rest of the group, and every other device would replace
+    // its tree with whatever this one happened to be holding.
+    if (!this.settings.enabled_types.includes("bookmarks")) {
+      throw new Error(
+        "This browser does not sync bookmarks (Settings → Data types), so it cannot be the group's bookmark baseline: " +
+        "its bookmarks would never keep up with the other browsers. Turn bookmark syncing on for this device first. " +
+        "Nothing was changed."
+      );
+    }
     let marker: BaselineMarker | null = null;
     await this.withMutationLock(async () => {
       try {
@@ -1771,6 +1815,7 @@ export class SyncEngine {
     await this.withBackend((b) => deleteBaselineMarker(b));
     await setCachedBaseline(null);
     await setAdoptedBaseline(null);
+    await setBaselineStaleNoted(false);
     logger.event("Baseline", "Bookmark baseline cleared; devices merge in both directions again");
     return { marker: null, adopted_at: null };
   }
@@ -1825,8 +1870,46 @@ export class SyncEngine {
       checksum: packet.checksum,
     };
     await writeBaselineMarker(backend, this.settings, marker);
+    // Read it back. The marker file IS the baseline — the other browsers have nothing
+    // else to follow — and the Settings card says "this browser is the baseline" the
+    // moment this returns. A storage that accepts the PUT and does not keep the file
+    // (a dropped write, a truncated body, a folder that is not the one being read)
+    // would be reported as "set" here and as "not set" after the next reload, with
+    // nothing in between to say why. So the answer is checked against the storage,
+    // and a storage that did not take the marker is named as such.
+    let verified: BaselineRead | null = null;
+    try {
+      verified = await readBaselineMarker(backend, this.settings);
+    } catch (err) {
+      // The marker was written; the storage just would not answer. Not a reason to
+      // report a failure the user cannot act on — but it is worth saying out loud.
+      logger.warn(
+        "Baseline",
+        `Couldn't read the bookmark baseline back after writing it: ${err instanceof Error ? err.message : err}`
+      );
+    }
+    if (verified) {
+      if (verified.unreadable) {
+        throw new Error(
+          "The storage took the bookmark baseline but the marker on it cannot be read back, so the other browsers could not follow it either. " +
+          "This browser is not the baseline. The other browsers' published copies were removed from the storage, and they publish again on their next sync. " +
+          "Check the sync folder in your storage and try again."
+        );
+      }
+      if (verified.marker?.at !== marker.at) {
+        throw new Error(
+          "The storage took the bookmark baseline but does not hold it: " +
+          (verified.marker
+            ? `it holds a different marker (from ${verified.marker.device_id.slice(0, 8)}).`
+            : "the marker file is not there.") +
+          " This browser is not the baseline. The other browsers' published copies were removed from the storage, and they publish again on their next sync. " +
+          "Check the sync folder in your storage and try again."
+        );
+      }
+    }
     await setCachedBaseline(marker);
     await setAdoptedBaseline({ device_id: marker.device_id, at: marker.at });
+    await setBaselineStaleNoted(false);
     return { removed, failed: 0, rateLimited: backend.rateLimited === true, marker };
   }
 
@@ -1857,8 +1940,30 @@ export class SyncEngine {
       return;
     }
     const marker = read.marker;
+    if (!marker) {
+      // The storage has no marker. Somebody else's baseline is gone — that is news the
+      // group needs (the merge simply carries on) — but this device's OWN marker is
+      // not: the storage can lose the file it accepted a minute ago, and a cycle that
+      // forgets it here would take the Settings card back to "not set" a minute after
+      // the user set it. Keep the local record; the card says the storage has no
+      // marker, and the user can set it again.
+      const cached = await getCachedBaseline();
+      if (cached && cached.device_id === this.settings.device_id) {
+        if (!(await getBaselineStaleNoted())) {
+          await setBaselineStaleNoted(true);
+          logger.event(
+            "Baseline",
+            "The storage no longer holds the bookmark baseline this browser set. The setting is kept here, but the other browsers cannot see a baseline until it is set again."
+          );
+        }
+        return;
+      }
+      await setCachedBaseline(null);
+      await setBaselineStaleNoted(false);
+      return;
+    }
     await setCachedBaseline(marker);
-    if (!marker) return;
+    await setBaselineStaleNoted(false);
 
     if (marker.device_id === this.settings.device_id) {
       await setAdoptedBaseline({ device_id: marker.device_id, at: marker.at });
@@ -2733,10 +2838,50 @@ export class SyncEngine {
     await backend.upload(packet);
     this.bytesThisSync += packet.payload?.length ?? 0; // pushed bytes → transfer stat
     await setLastUploadChecksum(dataType, tag);
+    if (dataType === "bookmarks") await this.restampBaseline(backend, packet.checksum);
     if (dataType === "bookmarks" && !(await getFirstSync())?.done) {
       await setFirstSync({ done: true, at: new Date().toISOString() });
     }
     return true;
+  }
+
+  /**
+   * Keep the marker pointing at the tree this device has just published.
+   *
+   * The marker names the copy to adopt BY CHECKSUM, and this device's file is replaced
+   * every time it publishes. So a marker written once starts naming a copy that is no
+   * longer on the storage — and every device that has not aligned yet waits for it
+   * forever, because nothing else ever writes the marker. The baseline simply stopped
+   * reaching the devices that synced after the next edit: they fell back to the
+   * ordinary merge, or to the first-sync question the baseline was meant to answer.
+   *
+   * The generation (`at`) does NOT change. The baseline is still this device's
+   * baseline, so the devices that already aligned are not made to align again — they
+   * pick the newer tree up through the ordinary merge.
+   */
+  private async restampBaseline(
+    backend: ReturnType<typeof createBackend>, checksum: string,
+  ): Promise<void> {
+    try {
+      const read = await readBaselineMarker(backend, this.settings);
+      if (read.unreadable || !read.marker) return;
+      if (read.marker.device_id !== this.settings.device_id) return;
+      if (read.marker.checksum === checksum) return;
+      // Read again immediately before the write. Another device may have taken the
+      // baseline over in between, and a marker written from a stale read would put
+      // this device back in charge of a baseline it no longer holds.
+      const again = await readBaselineMarker(backend, this.settings);
+      if (again.unreadable || !again.marker) return;
+      if (again.marker.device_id !== this.settings.device_id) return;
+      if (again.marker.at !== read.marker.at) return; // a newer generation took over
+      await writeBaselineMarker(backend, this.settings, { ...again.marker, checksum });
+      logger.event("Baseline", "Updated the bookmark baseline to the tree just published");
+    } catch (err) {
+      logger.warn(
+        "Baseline",
+        `Couldn't update the bookmark baseline to the tree just published: ${err instanceof Error ? err.message : err}`
+      );
+    }
   }
 
   private async buildPacket(dataType: DataType, payload: unknown): Promise<SyncPacket> {
@@ -3062,6 +3207,8 @@ export class SyncEngine {
             // The same tag uploadIfChanged writes (encryption form + destination), so the
             // next periodic sync doesn't see a mismatch and re-upload needlessly.
             await setLastUploadChecksum(conflict.data_type, tag);
+            // This upload replaced the file the marker names, so the marker follows it.
+            if (conflict.data_type === "bookmarks") await this.restampBaseline(backend, packet.checksum);
           } finally {
             await backend.disconnect();
           }

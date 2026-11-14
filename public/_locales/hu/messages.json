@@ -22,7 +22,7 @@
     "message": "hu"
   },
   "extension_name": {
-    "message": "Kesonode | Privát könyvjelző- és lapszinkron v1.5.19"
+    "message": "Kesonode | Privát könyvjelző- és lapszinkron v1.5.20"
   },
   "extension_description": {
     "message": "Adatvédelem-központú böngésző-szinkronizálás a saját tárhelyedre: Google Drive, WebDAV, GitHub."
@@ -993,6 +993,9 @@
   },
   "opt_baseline_cached": {
     "message": "· utolsó ismert érték"
+  },
+  "opt_baseline_stale": {
+    "message": "· a tárhelyen már nincs ez a jelölés (törölve lett vagy soha nem íródott bele)"
   },
   "opt_baseline_waiting": {
     "message": "Ez a böngésző még nem igazodott a következőhöz: $DEVICE$; ez a következő szinkronizáláskor történik meg.",

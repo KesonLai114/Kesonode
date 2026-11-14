@@ -1100,6 +1100,9 @@ export interface BaselineInfo {
   marker: { device_id: string; device_label?: string; at: string } | null;
   adopted_at: string | null;
   cached: boolean;
+  /** The storage holds no marker, but this device set one and keeps its own record of
+   *  it — the marker is gone from the storage, not from this browser's answer. */
+  stale?: boolean;
 }
 
 export type ExtensionResponse =

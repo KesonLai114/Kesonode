@@ -301,6 +301,10 @@ export const KEYS = {
   // a settings import that mints a new identity must not inherit "already aligned", or the
   // browser would keep a tree that was never replaced. Never travels in a SyncPacket.
   BASELINE_ADOPTED: "konode_baseline_adopted",
+  // Once per incident: the user was told that the storage no longer holds the bookmark
+  // baseline this browser set. The condition is re-read on every page load, so the note
+  // would otherwise fill the Activity log (200 entries) with the same sentence.
+  BASELINE_STALE_NOTED: "konode_baseline_stale_noted",
   // Local change guard (lib/sync/change-guard.ts): the last bookmark tree this device
   // published, and a once-per-incident latch for its restore point. Both are per-install
   // working state and never travel in a SyncPacket.
@@ -980,7 +984,7 @@ export async function importSettingsBackup(
     await browser.storage.local.remove(KEYS.UPLOAD_CHECKSUMS);
     // "Already aligned with the group baseline" names the OLD identity's tree. This
     // browser now publishes as someone else, so let it check the shared marker again.
-    await browser.storage.local.remove([KEYS.BASELINE_ADOPTED, KEYS.BASELINE_CACHE]);
+    await browser.storage.local.remove([KEYS.BASELINE_ADOPTED, KEYS.BASELINE_CACHE, KEYS.BASELINE_STALE_NOTED]);
   }
 
   const updated = await saveSettings(partial as Partial<SyncSettings>);
@@ -1726,6 +1730,18 @@ export async function getListFailureNoted(): Promise<boolean> {
 
 export async function setListFailureNoted(noted: boolean): Promise<void> {
   await set(KEYS.LIST_FAILURE_NOTED, noted);
+}
+
+// The baseline marker is re-read on every page load, so "the storage no longer holds the
+// marker this browser set" is one condition, not one per read. Same latch shape as the
+// listing failure above: written once, cleared when the storage has the marker again.
+
+export async function getBaselineStaleNoted(): Promise<boolean> {
+  return get<boolean>(KEYS.BASELINE_STALE_NOTED, false);
+}
+
+export async function setBaselineStaleNoted(noted: boolean): Promise<void> {
+  await set(KEYS.BASELINE_STALE_NOTED, noted);
 }
 
 // ─── Sync lock (CO-4) ─────────────────────────────────────────────────────────

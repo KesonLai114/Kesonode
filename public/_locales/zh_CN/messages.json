@@ -589,7 +589,7 @@
     "message": "扩展列表，显示缺失的扩展及其安装链接。"
   },
   "extension_name": {
-    "message": "Kesonode | 私人书签与标签页同步 v1.5.19"
+    "message": "Kesonode | 私人书签与标签页同步 v1.5.20"
   },
   "onb_err_perms_no_prompt": {
     "message": "此浏览器无法显示权限提示，因此 Kesonode 无法请求所需的访问权限。请在浏览器扩展设置的 Kesonode 权限页面上授予权限，然后再次点击完成。"
@@ -984,6 +984,9 @@
   },
   "opt_baseline_cached": {
     "message": "· 上次读取的值"
+  },
+  "opt_baseline_stale": {
+    "message": "· 存储中已无该标记（可能已被清除，或当时并未写入成功）"
   },
   "opt_baseline_waiting": {
     "message": "本机尚未与 $DEVICE$ 对齐，将在下次同步时进行。",

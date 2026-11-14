@@ -23,7 +23,7 @@
     "description": "NOT a sentence: the BCP 47 tag for THIS catalogue, written into <html lang> so the browser and screen readers know what language the page is in. Replace it with your own tag and nothing else, lowercase language and uppercase region: de, es, pt-BR, zh-CN. Do not translate the word."
   },
   "extension_name": {
-    "message": "Kesonode | Private Bookmark & Tab Sync v1.5.19",
+    "message": "Kesonode | Private Bookmark & Tab Sync v1.5.20",
     "description": "The extension's name. This IS the Chrome Web Store listing title, so it carries the search terms people actually type: bookmark, tab, sync. Keep 'Kesonode' first and keep the whole thing under 45 characters. Translate the part after the bar into what someone would search for in your language; leave 'Kesonode' alone, it is the product name."
   },
   "extension_description": {
@@ -1163,6 +1163,9 @@
   },
   "opt_baseline_cached": {
     "message": "· last known value"
+  },
+  "opt_baseline_stale": {
+    "message": "· the storage no longer holds this marker (it may have been cleared, or never written)"
   },
   "opt_baseline_waiting": {
     "message": "This browser hasn't aligned with $DEVICE$ yet; it will on the next sync.",
