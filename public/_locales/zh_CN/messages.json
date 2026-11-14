@@ -2727,5 +2727,29 @@
   },
   "ai_err_endpoint_credentials": {
     "message": "不要在地址里写用户名或密码，请改用 API Key 输入框。"
+  },
+  "ai_popup_save_all": {
+    "message": "全部加入阅读清单"
+  },
+  "ai_popup_open_all": {
+    "message": "全部打开"
+  },
+  "ai_popup_saved_all_one": {
+    "message": "$COUNT$ 条已加入阅读清单",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "ai_popup_saved_all_other": {
+    "message": "$COUNT$ 条已加入阅读清单",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
+    }
   }
 }

@@ -2727,5 +2727,29 @@
   },
   "ai_err_endpoint_credentials": {
     "message": "No pongas usuario ni contraseña en la dirección; usa el campo de clave API."
+  },
+  "ai_popup_save_all": {
+    "message": "Añadir todo a la lista de lectura"
+  },
+  "ai_popup_open_all": {
+    "message": "Abrir todo"
+  },
+  "ai_popup_saved_all_one": {
+    "message": "$COUNT$ página añadida a la lista de lectura",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "ai_popup_saved_all_other": {
+    "message": "$COUNT$ páginas añadidas a la lista de lectura",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
+    }
   }
 }

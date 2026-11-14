@@ -2727,5 +2727,29 @@
   },
   "ai_err_endpoint_credentials": {
     "message": "Ne tegyél felhasználónevet vagy jelszót a címbe; használd az API-kulcs mezőt."
+  },
+  "ai_popup_save_all": {
+    "message": "Összes hozzáadása az olvasólistához"
+  },
+  "ai_popup_open_all": {
+    "message": "Összes megnyitása"
+  },
+  "ai_popup_saved_all_one": {
+    "message": "$COUNT$ oldal hozzáadva az olvasólistához",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "ai_popup_saved_all_other": {
+    "message": "$COUNT$ oldal hozzáadva az olvasólistához",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
+    }
   }
 }

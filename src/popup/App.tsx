@@ -436,6 +436,30 @@ export default function PopupApp() {
     }
   };
 
+  /**
+   * Batch actions for AI search results. Both are deliberately sequential and quiet: the
+   * popup is small, the list is at most eight rows, and a burst of parallel writes buys
+   * nothing but a race in the reading-list folder.
+   */
+  const saveHitsToReadingList = async (items: { url: string; title: string }[]): Promise<number> => {
+    let added = 0;
+    for (const item of items) {
+      const r = await request({
+        type: "READING_LIST_ADD",
+        payload: { url: item.url, title: item.title },
+      });
+      if (r.ok && r.res.type === "READING_LIST_ADDED" && r.res.payload.added) added += 1;
+    }
+    await loadReadingList();
+    return added;
+  };
+
+  const openHitsInBackground = (urls: string[]) => {
+    for (const url of urls) {
+      if (isSafeBookmarkUrl(url)) void browser.tabs.create({ url, active: false });
+    }
+  };
+
   const removeReading = async (id: string) => {
     const r = await request({ type: "READING_LIST_REMOVE", payload: { id } });
     if (!r.ok) {
@@ -935,7 +959,15 @@ export default function PopupApp() {
       </section>
 
       {/* ── Optional AI panel (off unless enabled in Settings → AI assistant) ── */}
-      {settings ? <AiPanel settings={settings} state={state} onOpen={openUrl} /> : null}
+      {settings ? (
+        <AiPanel
+          settings={settings}
+          state={state}
+          onOpen={openUrl}
+          onSaveAll={saveHitsToReadingList}
+          onOpenAll={openHitsInBackground}
+        />
+      ) : null}
 
       {/* ── Reading list (P1) ── */}
       <section className="mt-4">

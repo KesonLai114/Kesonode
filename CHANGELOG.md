@@ -10,6 +10,14 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **Two batch actions on AI search results.** When a question returns more than one
+  bookmark, the popup offers "save all to the reading list" and "open all". Saving is
+  deduplicated by canonical URL, so a page already in the list is counted as neither
+  added nor lost, and the message reports how many pages were actually new. Opening uses
+  background tabs, so the popup stays where it is.
+
 ### Changed
 
 - **The popup says nothing at all when the AI assistant is off.** It used to print a line

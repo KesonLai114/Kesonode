@@ -2962,5 +2962,29 @@
   },
   "ai_err_endpoint_credentials": {
     "message": "Do not put a username or password in the address — use the API key field instead."
+  },
+  "ai_popup_save_all": {
+    "message": "Save all to the reading list"
+  },
+  "ai_popup_open_all": {
+    "message": "Open all"
+  },
+  "ai_popup_saved_all_one": {
+    "message": "$COUNT$ page added to the reading list",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "ai_popup_saved_all_other": {
+    "message": "$COUNT$ pages added to the reading list",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
+    }
   }
 }

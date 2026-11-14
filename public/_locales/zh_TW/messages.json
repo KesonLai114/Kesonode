@@ -2727,5 +2727,29 @@
   },
   "ai_err_endpoint_credentials": {
     "message": "不要在位址裡寫使用者名稱或密碼，請改用 API 金鑰輸入框。"
+  },
+  "ai_popup_save_all": {
+    "message": "全部加入閱讀清單"
+  },
+  "ai_popup_open_all": {
+    "message": "全部開啟"
+  },
+  "ai_popup_saved_all_one": {
+    "message": "$COUNT$ 條已加入閱讀清單",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "ai_popup_saved_all_other": {
+    "message": "$COUNT$ 條已加入閱讀清單",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
+    }
   }
 }

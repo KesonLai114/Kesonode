@@ -27,12 +27,16 @@ import { aiErrorMessage, isAiCancelled } from "@/lib/ai-errors";
 import type { FlatBookmark } from "@/lib/handlers/reading-list-handler";
 import type { SyncSettings, SyncState } from "@/lib/types";
 import { ensurePermission } from "@/lib/utils/capabilities";
-import { t } from "@/lib/utils/i18n";
+import { plural, t } from "@/lib/utils/i18n";
 
 interface AiPanelProps {
   settings: SyncSettings;
   state: SyncState | null;
   onOpen: (url: string) => void;
+  /** Adds each page to the reading list; resolves to how many were actually new. */
+  onSaveAll: (items: { url: string; title: string }[]) => Promise<number>;
+  /** Opens the pages in the background, so the popup stays put. */
+  onOpenAll: (urls: string[]) => void;
 }
 
 /** Must be the first await in a click handler: permissions.request() needs the gesture. */
@@ -52,7 +56,7 @@ function configOf(settings: SyncSettings): AiConfig {
   };
 }
 
-export function AiPanel({ settings, state, onOpen }: AiPanelProps) {
+export function AiPanel({ settings, state, onOpen, onSaveAll, onOpenAll }: AiPanelProps) {
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
   const [answer, setAnswer] = useState<AiSearchAnswer | null>(null);
@@ -60,6 +64,8 @@ export function AiPanel({ settings, state, onOpen }: AiPanelProps) {
   const [explanation, setExplanation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [coverage, setCoverage] = useState<{ sent: number; total: number } | null>(null);
+  const [savingAll, setSavingAll] = useState(false);
+  const [savedAll, setSavedAll] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   if (settings.ai_enabled !== true) {
@@ -103,6 +109,7 @@ export function AiPanel({ settings, state, onOpen }: AiPanelProps) {
         setAnswer(result);
         setHits(snap.bookmarks.filter((b) => result.ids.includes(b.id)));
         setExplanation(null);
+        setSavedAll(null);
         setCoverage(pool.length < snap.bookmarks.length
           ? { sent: pool.length, total: snap.bookmarks.length }
           : null);
@@ -133,6 +140,28 @@ export function AiPanel({ settings, state, onOpen }: AiPanelProps) {
     setExplanation(null);
     setError(null);
     setCoverage(null);
+    setSavedAll(null);
+  };
+
+  /**
+   * Bookkeeping only: the pages are already bookmarks, so nothing here can fail in a way
+   * the user must act on. A page that is already in the list counts as neither added nor
+   * lost, which is why the message reports how many were new rather than how many were
+   * handed over.
+   */
+  const saveAll = async () => {
+    if (savingAll || !hits.length) return;
+    setSavingAll(true);
+    setSavedAll(null);
+    try {
+      const added = await onSaveAll(hits.map((h) => ({ url: h.url, title: h.title })));
+      setSavedAll(added);
+    } catch {
+      // The batch is best-effort; what failed is the write path, not the search results.
+      setError(t("popup_load_error"));
+    } finally {
+      setSavingAll(false);
+    }
   };
 
   return (
@@ -205,6 +234,31 @@ export function AiPanel({ settings, state, onOpen }: AiPanelProps) {
               </span>
             </button>
           ))}
+          {/* Only worth offering when there is more than one result to act on. */}
+          {hits.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2 px-1 pt-1">
+              <button
+                onClick={() => void saveAll()}
+                disabled={busy || savingAll}
+                className="inline-flex items-center gap-1 rounded-box border border-sk-hairline px-2 py-0.5 text-[12px] text-sk-muted disabled:opacity-60"
+              >
+                {savingAll && <Loader2 size={10} className="animate-spin" />}
+                {t("ai_popup_save_all")}
+              </button>
+              <button
+                onClick={() => onOpenAll(hits.map((h) => h.url))}
+                disabled={busy}
+                className="rounded-box border border-sk-hairline px-2 py-0.5 text-[12px] text-sk-muted disabled:opacity-60"
+              >
+                {t("ai_popup_open_all")}
+              </button>
+              {savedAll !== null && (
+                <span className="text-[11px] text-sk-subtle">
+                  {plural("ai_popup_saved_all", savedAll)}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
 

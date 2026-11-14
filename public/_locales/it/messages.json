@@ -2727,5 +2727,29 @@
   },
   "ai_err_endpoint_credentials": {
     "message": "Non mettere nome utente o password nell'indirizzo: usa il campo chiave API."
+  },
+  "ai_popup_save_all": {
+    "message": "Aggiungi tutto all'elenco di lettura"
+  },
+  "ai_popup_open_all": {
+    "message": "Apri tutto"
+  },
+  "ai_popup_saved_all_one": {
+    "message": "$COUNT$ pagina aggiunta all'elenco di lettura",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "ai_popup_saved_all_other": {
+    "message": "$COUNT$ pagine aggiunte all'elenco di lettura",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
+    }
   }
 }

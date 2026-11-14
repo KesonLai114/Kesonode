@@ -2727,5 +2727,29 @@
   },
   "ai_err_endpoint_credentials": {
     "message": "Не вписывайте имя пользователя и пароль в адрес — используйте поле API-ключа."
+  },
+  "ai_popup_save_all": {
+    "message": "Добавить все в список чтения"
+  },
+  "ai_popup_open_all": {
+    "message": "Открыть все"
+  },
+  "ai_popup_saved_all_one": {
+    "message": "В список чтения добавлена $COUNT$ страница",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "ai_popup_saved_all_other": {
+    "message": "В список чтения добавлено страниц: $COUNT$",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
+    }
   }
 }

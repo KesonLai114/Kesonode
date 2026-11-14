@@ -2727,5 +2727,29 @@
   },
   "ai_err_endpoint_credentials": {
     "message": "Schreibe keinen Benutzernamen und kein Passwort in die Adresse — nimm dafür das API-Schlüssel-Feld."
+  },
+  "ai_popup_save_all": {
+    "message": "Alle zur Leseliste hinzufügen"
+  },
+  "ai_popup_open_all": {
+    "message": "Alle öffnen"
+  },
+  "ai_popup_saved_all_one": {
+    "message": "$COUNT$ Seite zur Leseliste hinzugefügt",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "1"
+      }
+    }
+  },
+  "ai_popup_saved_all_other": {
+    "message": "$COUNT$ Seiten zur Leseliste hinzugefügt",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
+    }
   }
 }
