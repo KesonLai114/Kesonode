@@ -44,3 +44,13 @@ vite.config.ts.timestamp-*.mjs
 # Misc local filesystem / network-volume artifacts that accumulate but carry no source.
 .smbdelete*
 node_modules.finder-alias.bak
+
+# Machine-specific tool workspace and sandbox-test leftovers. These were previously
+# only listed in .git/info/exclude (a LOCAL ignore that does not travel with the repo),
+# so a `git add .` on a fresh clone could have committed them. Keep them in the shared
+# ignore so every checkout is protected. .codebuddy/ is another AI tool's workspace and
+# may hold local paths / conversation data; it must never reach the public repo.
+.codebuddy/
+zz-test.txt
+.rm-test.txt
+node_modules_testlink
