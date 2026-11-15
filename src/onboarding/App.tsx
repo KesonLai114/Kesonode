@@ -25,6 +25,7 @@ import {
   Bookmark,
   Clock, Puzzle, Globe, CheckCircle2, ArrowRight,
   Loader2, XCircle, Eye, EyeOff, Lock, Key, GitMerge,
+  ShieldCheck, Zap, Boxes,
 } from "lucide-react";
 // Kesonode brand mark — the glyph only; the container supplies the blue tile.
 // Mirrors the sync arrows + node in public/icons/icon.svg.
@@ -1165,14 +1166,14 @@ export default function OnboardingApp() {
           <p style={S.subtitle}>{t("onb_welcome_subtitle")}</p>
           <div style={S.featureList}>
             {[
-              ["🔒", "onb_feature_storage"],
-              ["⚡", "onb_feature_instant"],
-              ["🌐", "onb_feature_browsers"],
-              ["📦", "onb_feature_providers"],
-            ].map(([icon, key]) => (
-              <div key={key} style={S.featureRow}>
-                <span>{icon}</span>
-                <span style={{ color: "var(--text-secondary)", fontSize: 14 }}>{t(key)}</span>
+              [ShieldCheck, "onb_feature_storage"],
+              [Zap, "onb_feature_instant"],
+              [Globe, "onb_feature_browsers"],
+              [Boxes, "onb_feature_providers"],
+            ].map(([Icon, key]) => (
+              <div key={key as string} style={S.featureRow}>
+                <span style={{ ...S.featureIcon }}><Icon size={16} color="var(--accent)" /></span>
+                <span style={{ color: "var(--text-secondary)", fontSize: 14 }}>{t(key as string)}</span>
               </div>
             ))}
           </div>
@@ -1769,7 +1770,7 @@ export default function OnboardingApp() {
       {/* ── Done ── */}
       {step === "done" && (
         <div className="onb-card" style={{ ...S.card, textAlign: "center" }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🎉</div>
+          <div style={S.successBadge}><CheckCircle2 size={30} color="#fff" /></div>
           <h1 style={S.h1}>{t("onb_done_title")}</h1>
           <p style={S.subtitle}>
             {doneNote[0]}
@@ -1985,7 +1986,7 @@ export default function OnboardingApp() {
       {/* ── Backup restored, no setup needed ── */}
       {step === "imported" && (
         <div className="onb-card" style={{ ...S.card, textAlign: "center" }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+          <div style={S.successBadge}><CheckCircle2 size={30} color="#fff" /></div>
           <h1 style={S.h1}>{t("onb_import_done_title")}</h1>
           <p style={S.subtitle}>{t("onb_import_done_desc")}</p>
           {importedMissing && importedMissing.length > 0 && (
@@ -2046,10 +2047,26 @@ const S: Record<string, React.CSSProperties> = {
     marginBottom: 22,
     boxShadow: "0 6px 16px -4px rgba(37,99,235,.42)",
   },
+  // A check mark in the brand tile: the "you're set up" / "restore complete" badge,
+  // used in place of an emoji so the finish state matches the product's own glyph.
+  successBadge: {
+    width: 56, height: 56, borderRadius: 16,
+    background: "var(--brand-tile)",
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    margin: "0 auto 22px",
+    boxShadow: "0 6px 16px -4px rgba(37,99,235,.42)",
+  },
   h1: { fontSize: 24, fontWeight: 600, letterSpacing: "-0.02em", color: "var(--text-primary)", margin: "0 0 8px" },
   subtitle: { fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.55, margin: "0 0 24px" },
   featureList: { display: "flex", flexDirection: "column", gap: 12, marginBottom: 28 },
   featureRow: { display: "flex", alignItems: "center", gap: 10, textAlign: "left" },
+  // A soft tinted tile behind each welcome-feature icon, so the row reads as a designed
+  // list item rather than a bare glyph + text.
+  featureIcon: {
+    width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    background: "var(--accent-light)", color: "var(--accent)",
+  },
   btnPrimary: {
     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
     width: "100%", height: 44, padding: "0 20px", borderRadius: 14, border: "none",
@@ -2178,5 +2195,40 @@ const CSS = `
   }
   .spin { animation: spin .8s linear infinite; display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  button:hover { opacity: .9; }
+
+  /* ── Focus visibility (keyboard + click) ─────────────────────────────── */
+  button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+
+  /* ── Button interaction states ───────────────────────────────────────────
+     Inline styles can't express :hover/:active/:disabled, so these refinements live
+     here and key off the existing inline props (colour comes from the theme tokens). */
+  button { transition: transform .06s ease, box-shadow .15s ease, background .15s ease, opacity .15s ease, filter .15s ease; }
+  button:not(:disabled) { cursor: pointer; }
+  button:not(:disabled):hover { filter: brightness(1.06); }
+  button:not(:disabled):active { transform: translateY(0.5px) scale(0.995); }
+  button:disabled { cursor: not-allowed; opacity: .5; }
+
+  /* Clickable cards (backend picker, data-type rows) are <div role="button">, not
+     <button>, so the button rules above skip them. Their background is set inline
+     (backendCard/dataRow), so a background hover can't win the cascade — use a
+     brightness lift instead, which reads the same and never fights the inline tone. */
+  [role="button"] { transition: filter .12s ease; cursor: pointer; }
+  [role="button"]:hover { filter: brightness(1.04); }
+
+  /* Inputs: a visible focus ring and a hover hairline, matching the options page. */
+  input[type="text"], input[type="password"], input[type="url"], input[type="number"] {
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  input[type="text"]:hover, input[type="password"]:hover, input[type="url"]:hover, input[type="number"]:hover {
+    border-color: var(--border-input);
+  }
+  input[type="text"]:focus, input[type="password"]:focus, input[type="url"]:focus, input[type="number"]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+    outline: none;
+  }
 `;

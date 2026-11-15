@@ -4733,9 +4733,9 @@ const STYLES = `
   .field-label .optional { opacity: .7; }
   .field-input { width: 100%; padding: var(--sp-sm) var(--sp-md); background: var(--bg-input); border: 1px solid var(--border-input); border-radius: var(--r-md); font-family: var(--font); font-size: var(--fs-sm); color: var(--text-primary); outline: none; transition: border-color .15s, box-shadow .15s; }
   .field-input.mono { font-family: var(--font-mono); font-size: var(--fs-xs); }
-  .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37,99,235,.18); }
+  .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
   .field-input-inline { padding: var(--sp-sm) var(--sp-ms); width: 180px; background: var(--bg-input); border: 1px solid var(--border-input); border-radius: var(--r-md); font-family: var(--font); font-size: var(--fs-sm); color: var(--text-primary); outline: none; }
-  .field-input-inline:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37,99,235,.18); }
+  .field-input-inline:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
 
   .input-pw-wrap { position: relative; }
   .input-pw-wrap /* Not spacing: room for the icon buttons that sit INSIDE the field (three of them on

@@ -80,6 +80,7 @@
   --text-link: #1d4ed8;
   --nav-active-bg: #f1f3f5; --nav-active-text: #11151a; --nav-active-bar: #2563eb;
   --accent: #2563eb; --accent-hover: #1d4ed8; --accent-light: #dbeafe;
+  --accent-ring: rgba(37, 99, 235, 0.18);
   /* Brand tile: the same gradient as public/icons/icon.svg. Kept separate from
      --accent so the logo carries the icon's full gradient while the UI uses a flat blue. */
   --brand-tile: linear-gradient(135deg, #57a6ff 0%, #2563eb 50%, #12358c 100%);
@@ -105,6 +106,7 @@
     --text-link: #60a5fa;
     --nav-active-bg: #1e232b; --nav-active-text: #e6e9ee; --nav-active-bar: #60a5fa;
     --accent: #60a5fa; --accent-hover: #93c5fd; --accent-light: #15294b;
+    --accent-ring: rgba(96, 165, 250, 0.22);
     --accent-solid: #60a5fa; --accent-solid-hover: #93c5fd; --on-accent: #0a1f44;
     --toggle-off: #353b45; --toggle-on: #60a5fa;
     --info-bg: #11243c; --info-border: #60a5fa; --info-text: #a8cbfb;

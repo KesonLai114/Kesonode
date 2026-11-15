@@ -8,6 +8,24 @@ All notable changes to Konode. Format loosely follows
 > upstream releases, not to this fork's product name. Kesonode-only changes are recorded
 > in the section immediately below and never change the upstream wire contract.
 
+## [1.5.24] - 2026-11-15
+
+### Changed
+
+- **Polish pass on the popup, onboarding and settings UIs.** The onboarding wizard's
+  emoji feature icons and finish badges are replaced with lucide icons — the four
+  welcome features sit on soft tinted tiles, and the "you're set up" / "restore
+  complete" states use a check mark on the brand gradient tile. Buttons, inputs and
+  clickable cards across the wizard gain proper interaction states that inline styles
+  could not express: a visible focus ring, a hover brightness lift, a press animation,
+  a disabled dim, and input focus rings. The popup's search and AI input boxes now
+  focus with the brand blue ring instead of a faint border, its primary buttons lift
+  on hover rather than fading, and the search / reading-list empty states carry an
+  icon so they no longer read as stray text. Icon stroke widths are normalised across
+  all three surfaces. Focus rings now share one `--accent-ring` token (defined once in
+  `theme.css`) instead of hard-coded colour stops, so they stay visible in both light
+  and dark mode.
+
 ## [1.5.23] - 2026-11-15
 
 ### Fixed

@@ -616,7 +616,7 @@ export default function PopupApp() {
             aria-label={t("popup_settings_aria")}
             className="flex h-8 w-8 items-center justify-center rounded-icon text-sk-muted transition-colors hover:bg-sk-raised"
           >
-            <Settings size={18} strokeWidth={1.75} />
+            <Settings size={18} />
           </button>
         </div>
       </div>
@@ -628,7 +628,7 @@ export default function PopupApp() {
           <p className="mt-1 text-[12px] text-sk-muted">{t("popup_setup_body")}</p>
           <button
             onClick={openOnboarding}
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-box bg-sk-signal px-3 py-2 text-[13px] font-medium text-sk-on-signal transition-opacity hover:opacity-90 active:scale-[0.99]"
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-box bg-sk-signal px-3 py-2 text-[13px] font-medium text-sk-on-signal shadow-sm transition-all hover:shadow-md hover:brightness-105 active:scale-[0.99] active:brightness-100"
           >
             {t("popup_setup_cta")}
             <ChevronRight size={14} />
@@ -825,15 +825,15 @@ export default function PopupApp() {
       <button
         onClick={firstSyncPending ? openOnboarding : handleSyncNow}
         disabled={isSyncing || !hasBackend}
-        className={`mt-4 flex h-11 w-full select-none items-center justify-center gap-2 rounded-box text-sm font-medium transition-colors ${
+        className={`mt-4 flex h-11 w-full select-none items-center justify-center gap-2 rounded-box text-sm font-medium transition-all ${
           hasBackend
-            ? "bg-sk-signal text-sk-on-signal hover:opacity-90 active:scale-[0.99]"
+            ? "bg-sk-signal text-sk-on-signal shadow-sm hover:shadow-md hover:brightness-105 active:scale-[0.99] active:brightness-100"
             : "cursor-not-allowed bg-sk-raised text-sk-subtle"
         } disabled:opacity-60`}
       >
         {isSyncing ? <Loader2 size={16} className="animate-spin" />
-          : firstSyncPending ? <GitMerge size={16} strokeWidth={2} />
-          : <RefreshCw size={16} strokeWidth={2} />}
+          : firstSyncPending ? <GitMerge size={16} />
+          : <RefreshCw size={16} />}
         {isSyncing ? t("status_syncing") : firstSyncPending ? t("popup_first_sync_cta") : t("popup_sync_now")}
       </button>
       </div>
@@ -873,7 +873,7 @@ export default function PopupApp() {
                 {ss === "syncing" ? (
                   <Loader2 size={22} className={`animate-spin ${iconColor}`} />
                 ) : (
-                  <Icon size={22} strokeWidth={1.75} className={iconColor} />
+                  <Icon size={22} className={iconColor} />
                 )}
               </div>
             );
@@ -910,7 +910,7 @@ export default function PopupApp() {
 
       {/* ── Search across bookmarks, history and the reading list (P1) ── */}
       <section className="mt-4">
-        <div className="flex items-center gap-2 rounded-box border border-sk-hairline bg-sk-raised px-2.5 py-1.5 focus-within:border-sk-subtle">
+        <div className="flex items-center gap-2 rounded-box border border-sk-hairline bg-sk-raised px-2.5 py-1.5 transition-colors focus-within:border-sk-signal focus-within:ring-2 focus-within:ring-sk-signal/20">
           <Search size={14} className="shrink-0 text-sk-subtle" />
           <input
             value={searchQuery}
@@ -933,7 +933,10 @@ export default function PopupApp() {
         {searchResults !== null && (
           <div className="mt-1.5 space-y-0.5">
             {searchResults.length === 0 ? (
-              <p className="px-1 py-1 text-[12px] text-sk-subtle">{t("popup_search_empty")}</p>
+              <p className="flex items-center gap-1.5 px-1 py-1.5 text-[12px] text-sk-subtle">
+                <Search size={12} className="shrink-0 opacity-70" />
+                {t("popup_search_empty")}
+              </p>
             ) : (
               searchResults.map((hit) => (
                 <button
@@ -993,7 +996,10 @@ export default function PopupApp() {
             <span>{t("popup_reading_error", readingError)}</span>
           </p>
         ) : readingLoaded && readingList.length === 0 ? (
-          <p className="mt-1 px-1 text-[12px] text-sk-subtle">{t("popup_reading_empty")}</p>
+          <p className="mt-1 flex items-center gap-1.5 px-1 text-[12px] text-sk-subtle">
+            <BookmarkPlus size={12} className="shrink-0 opacity-70" />
+            {t("popup_reading_empty")}
+          </p>
         ) : readingList.length > 0 ? (
           <div className="mt-1 max-h-[132px] space-y-0.5 overflow-y-auto">
             {readingList.map((item) => (
@@ -1030,7 +1036,7 @@ export default function PopupApp() {
             className="inline-flex items-center gap-1.5 text-[14px] font-medium text-sk-text hover:underline hover:underline-offset-2"
           >
             {t("popup_open_all")}
-            <ExternalLink size={14} strokeWidth={2} />
+            <ExternalLink size={14} />
           </button>
         </div>
       )}

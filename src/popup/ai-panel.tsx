@@ -166,7 +166,7 @@ export function AiPanel({ settings, state, onOpen, onSaveAll, onOpenAll }: AiPan
 
   return (
     <section className="mt-3">
-      <div className="flex items-center gap-2 rounded-box border border-sk-hairline bg-sk-raised px-2.5 py-1.5">
+      <div className="flex items-center gap-2 rounded-box border border-sk-hairline bg-sk-raised px-2.5 py-1.5 transition-colors focus-within:border-sk-signal focus-within:ring-2 focus-within:ring-sk-signal/20">
         <Sparkles size={14} className="shrink-0 text-sk-subtle" />
         <input
           value={question}
