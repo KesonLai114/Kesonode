@@ -35,3 +35,12 @@ konode-main/
 
 # Local build leftovers embed absolute machine paths and don't belong in the repo.
 vitest.config.ts.timestamp-*.mjs
+vite.config.ts.timestamp-*.mjs
+
+# WorkBuddy project memory embeds absolute local machine paths of the developer's
+# machine. It is local-only working memory and must never be published.
+.workbuddy/
+
+# Misc local filesystem / network-volume artifacts that accumulate but carry no source.
+.smbdelete*
+node_modules.finder-alias.bak
