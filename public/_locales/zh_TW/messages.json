@@ -2530,7 +2530,7 @@
     "message": "軟體更新"
   },
   "opt_update_section_sub": {
-    "message": "下載新版 zip 後點一次按鈕，自動完成校驗、替換與重啟；Firefox 改為使用升級指令稿。"
+    "message": "下載新版 zip → 點「一鍵升級」選取它；首次使用再選一次安裝資料夾，之後自動完成校驗、替換與重啟。Firefox 改為使用升級腳本。"
   },
   "opt_update_check_label": {
     "message": "檢查更新"
@@ -2567,7 +2567,7 @@
     "message": "這一步沒有完成。使用本機安裝包升級不受影響，也可以稍後重試。"
   },
   "opt_update_package_desc": {
-    "message": "選擇下載好的安裝包 zip：自動校驗版本與內容、寫入安裝目錄並重啟擴充功能。首次升級只需選一次安裝目錄。"
+    "message": "點「一鍵升級」後會先讓你選下載好的 zip；首次使用再選一次安裝資料夾，之後校驗、寫入與重啟自動完成。"
   },
   "opt_update_package_bad": {
     "message": "這個壓縮包無法使用：$REASON$",
@@ -2599,7 +2599,7 @@
     "message": "下載指令稿"
   },
   "opt_update_steps": {
-    "message": "Chromium：首次升級會讓你選一次安裝目錄，之後每次只需點「一鍵升級」並選擇新版 zip。\nFirefox：執行升級指令稿，它始終裝進同一個 Kesonode 資料夾，擴充功能 ID 與設定都會保留。"
+    "message": "Chromium：點「一鍵升級」→ 選下載好的 zip → 首次再選一次安裝資料夾 → 自動完成校驗、替換與重啟；之後每次只需選 zip。\nFirefox：執行升級腳本，它始終裝進同一個 Kesonode 資料夾，擴充套件 ID 與設定都會保留。"
   },
   "ai_nav": {
     "message": "AI 助理"
@@ -2794,6 +2794,9 @@
   "opt_update_install_go": {
     "message": "一鍵升級"
   },
+  "opt_update_pick_folder_go": {
+    "message": "選擇資料夾並完成升級"
+  },
   "opt_update_install_busy": {
     "message": "正在升級…"
   },
@@ -2804,9 +2807,6 @@
         "content": "$1"
       }
     }
-  },
-  "opt_update_err_no_folder": {
-    "message": "還沒有綁定安裝目錄。"
   },
   "opt_update_err_no_permission": {
     "message": "瀏覽器不再允許寫入該資料夾，請重新選擇一次。"
@@ -2827,10 +2827,10 @@
     "message": "進階選項"
   },
   "opt_update_wait_folder": {
-    "message": "首次升級：請在瀏覽器視窗中選擇 Kesonode 的安裝目錄，只需選一次。"
+    "message": "安裝包已通過校驗。首次使用還需選一次 Kesonode 的安裝資料夾（直接含 manifest.json 的那一層）——點右側按鈕繼續，選完自動完成升級。"
   },
   "opt_update_wait_package": {
-    "message": "請在視窗中選擇下載好的 zip；若已取消，再點一次「一鍵升級」。"
+    "message": "請在視窗中選取下載好的 zip（檔名含版本號）；若已取消，再點一次「一鍵升級」。"
   },
   "opt_update_check_unavailable": {
     "message": "暫時無法取得發佈資訊（儲存庫可能未公開）；使用本機安裝包升級不受影響。"

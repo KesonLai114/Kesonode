@@ -2530,7 +2530,7 @@
     "message": "软件更新"
   },
   "opt_update_section_sub": {
-    "message": "下载新版 zip 后点一次按钮，自动完成校验、替换与重启；Firefox 改为使用升级脚本。"
+    "message": "下载新版 zip → 点「一键升级」选中它；首次使用再选一次安装文件夹，之后自动完成校验、替换与重启。Firefox 改为使用升级脚本。"
   },
   "opt_update_check_label": {
     "message": "检查更新"
@@ -2567,7 +2567,7 @@
     "message": "这一步没能完成。用本地安装包升级不受影响，也可以稍后重试。"
   },
   "opt_update_package_desc": {
-    "message": "选择下载好的安装包 zip：自动校验版本与内容、写入安装目录并重启扩展。首次升级只需选一次安装目录。"
+    "message": "点「一键升级」后会先让你选下载好的 zip；首次使用再选一次安装文件夹，之后校验、写入与重启自动完成。"
   },
   "opt_update_package_bad": {
     "message": "这个压缩包无法使用：$REASON$",
@@ -2599,7 +2599,7 @@
     "message": "下载脚本"
   },
   "opt_update_steps": {
-    "message": "Chromium：首次升级会让你选一次安装目录，之后每次只需点「一键升级」并选择新版 zip。\nFirefox：运行升级脚本，它始终装进同一个 Kesonode 文件夹，扩展 ID 与设置都会保留。"
+    "message": "Chromium：点「一键升级」→ 选下载好的 zip → 首次再选一次安装文件夹 → 自动完成校验、替换与重启；之后每次只需选 zip。\nFirefox：运行升级脚本，它始终装进同一个 Kesonode 文件夹，扩展 ID 与设置都会保留。"
   },
   "ai_nav": {
     "message": "AI 助手"
@@ -2794,6 +2794,9 @@
   "opt_update_install_go": {
     "message": "一键升级"
   },
+  "opt_update_pick_folder_go": {
+    "message": "选择文件夹并完成升级"
+  },
   "opt_update_install_busy": {
     "message": "正在升级…"
   },
@@ -2804,9 +2807,6 @@
         "content": "$1"
       }
     }
-  },
-  "opt_update_err_no_folder": {
-    "message": "还没有绑定安装目录。"
   },
   "opt_update_err_no_permission": {
     "message": "浏览器不再允许写入该文件夹，请重新选择一次。"
@@ -2827,10 +2827,10 @@
     "message": "高级选项"
   },
   "opt_update_wait_folder": {
-    "message": "首次升级：请在浏览器弹窗中选择 Kesonode 的安装目录，只需选一次。"
+    "message": "安装包已通过校验。首次使用还需选一次 Kesonode 的安装文件夹（直接含 manifest.json 的那一层）——点右侧按钮继续，选完自动完成升级。"
   },
   "opt_update_wait_package": {
-    "message": "请在弹窗中选择下载好的 zip；若已取消，再点一次「一键升级」。"
+    "message": "请在弹窗中选择下载好的 zip（文件名带版本号）；若已取消，再点一次「一键升级」。"
   },
   "opt_update_check_unavailable": {
     "message": "暂时无法获取发布信息（仓库可能未公开）；用本地安装包升级不受影响。"

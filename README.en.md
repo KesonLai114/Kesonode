@@ -209,11 +209,12 @@ named `Kesonode` (no version number in the name), so load that folder in Chromiu
 package, keep that install — a second install joins the sync group as a new device.
 
 **Upgrading.** Download the new zip, then in Chromium go to Settings → Advanced →
-Software update and press "Upgrade now" once: pick the zip in the dialog, and Kesonode
-verifies it, writes the new version into the install folder, removes the leftovers of the
-old one and restarts itself. The first upgrade also asks once which folder Kesonode was
-loaded from and for permission to write to it; later upgrades do not ask again. The
-previous version is kept in `.kesonode-backup/`. Release checking, folder management and
+Software update and press "Upgrade now". The first dialog asks for that zip, and Kesonode
+verifies it. On the first upgrade the same button becomes "Choose folder & finish
+upgrade": one more click picks the folder Kesonode was loaded from (the one that directly
+contains `manifest.json`) and grants write access; the new version is then written, the
+leftovers of the old one removed and the extension restarted automatically. Later upgrades
+only need the zip. The previous version is kept in `.kesonode-backup/`. Release checking, folder management and
 the manual script download live under "Advanced options" on the same page. Firefox has no
 such API — browsers do not let an extension write to a local folder there — so the same
 primary button downloads the upgrade script, which installs the new version into the

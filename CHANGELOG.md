@@ -10,6 +10,19 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The upgrade button now asks for the zip first.** Previous builds opened
+  `showDirectoryPicker()` before the package picker on the first run. macOS titles that
+  dialog "where should this site save changes" and greys out every `.zip`, so pressing
+  "Upgrade now" looked like it refused to let users select the latest package. The first
+  dialog is now the file picker; the folder picker appears only after a package has been
+  chosen and verified, and only on first use or when the browser revoked the grant. The
+  same main button becomes that second step, so there is still only one primary action.
+  Both pickers are opened synchronously inside their click — this also removes a latent
+  failure where Chrome would not open the file picker at the end of the async chain.
+  Cancelling the folder dialog keeps the verified package for a retry.
+
 ## [1.5.23] - 2026-11-15
 
 ### Fixed

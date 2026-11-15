@@ -1,11 +1,12 @@
 /**
  * Settings → Advanced → Software update.
  *
- * One button is the whole feature. On Chromium it does everything the platform allows
- * in a single press: bind the install folder the first time (the browser's own dialog),
- * let the user pick the zip they downloaded, verify it, write the new version into that
- * folder and restart the extension. On Firefox there is no `showDirectoryPicker()`, so
- * the same button hands over the companion script instead.
+ * One button is the whole feature. On Chromium the first dialog is the one people expect
+ * — pick the zip you downloaded. The package is verified, and on an already-bound install
+ * the upgrade writes and restarts with nothing else to do. Only on the first run (or when
+ * the browser dropped the folder grant) does the SAME button become the next step: choose
+ * the folder Kesonode was loaded from, then everything finishes automatically. On Firefox
+ * there is no `showDirectoryPicker()`, so the button hands over the companion script.
  *
  * The old shape of this section was a six-button wizard: check, download, bind, unbind,
  * import, upgrade, download script. Every one of those steps was real, but they were
@@ -13,12 +14,15 @@
  * "do I want the new version, yes or no". Everything that is a diagnostic or a repair
  * tool now lives behind "Advanced options".
  *
- * Two platform rules shape the order inside `startUpgrade()`:
+ * Two platform rules shape the order here:
  *
- *  - `showDirectoryPicker()` needs a live user gesture, so the folder is resolved
- *    BEFORE any network work and before the file dialog is opened.
- *  - A plain `<input type="file">` can be clicked programmatically, so the zip dialog
- *    comes second without needing a second gesture.
+ *  - Both dialogs need a live user gesture. `showDirectoryPicker()` throws a SecurityError
+ *    without one, and Chrome will not open a file picker at the end of a long async chain.
+ *    Each dialog is therefore opened SYNCHRONOUSLY in the click that asks for it.
+ *  - The zip comes first. Opening the folder dialog before the package made the first run
+ *    look broken: the browser's "where should this site save changes" dialog greys out
+ *    every .zip, so users thought they could not pick the new version at all. The folder
+ *    dialog now appears only after a package has actually been chosen and verified.
  */
 
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
@@ -39,6 +43,7 @@ import {
   extractPackage,
   packageIssueKind,
   type BadReason,
+  type ExtractedPackage,
   type PackageTarget,
 } from "@/lib/utils/upgrade-package";
 import {
@@ -48,6 +53,7 @@ import {
   pickInstallFolder,
   saveInstallFolder,
   supportsFolderWrite,
+  type DirectoryHandleLike,
 } from "@/lib/utils/install-dir";
 import { applyPackageToFolder, type ApplyFailure } from "@/lib/utils/apply-package";
 import { KEYS } from "@/lib/utils/storage";
@@ -87,10 +93,14 @@ const FALLBACK_FAILURE: ApplyFailure = "write";
 /** The single action, from the press of the button to the reload. */
 type FlowState =
   | { kind: "idle" }
-  /** First run only: the browser is asking which folder Kesonode was loaded from. */
-  | { kind: "wait-folder" }
   /** The zip picker is open (or was cancelled; pressing the button again reopens it). */
   | { kind: "wait-package" }
+  /**
+   * The package passed every check, but there is no writable folder yet. The main button
+   * becomes the next step: one more click supplies the gesture the folder picker needs.
+   * Keeping the package here means cancelling that dialog does not lose the chosen zip.
+   */
+  | { kind: "need-folder"; package: ExtractedPackage }
   | { kind: "busy" }
   | { kind: "done"; version: string }
   /** The package is sound but not newer — information, not an error. */
@@ -185,38 +195,76 @@ export function UpdateSection() {
   };
 
   /**
-   * The one click. Folder first, because the directory picker is the only step here
-   * that needs a live user gesture; the zip dialog and the file writes do not.
+   * Step 1. This MUST stay synchronous: Chrome only opens a file picker while the
+   * click that requested it is still active. Awaiting anything first can silently
+   * leave the user looking at a button that appears to do nothing.
    */
-  const startUpgrade = async () => {
+  const startUpgrade = () => {
     if (!canWriteFolder) {
-      await downloadScript();
+      void downloadScript();
       return;
     }
-    setFlow({ kind: folder.kind === "bound" ? "wait-package" : "wait-folder" });
-    try {
-      let handle = await loadInstallFolder();
-      if (!handle) {
-        setFlow({ kind: "wait-folder" });
-        handle = await pickInstallFolder();
-        await saveInstallFolder(handle);
-        setFolder({ kind: "bound", name: handle.name });
-      }
-      if (!(await ensureWritePermission(handle))) {
-        setFlow({ kind: "bad", message: t("opt_update_err_no_permission") });
-        return;
-      }
-      setFlow({ kind: "wait-package" });
-      fileRef.current?.click();
-    } catch {
-      // The user closed the folder picker: that is a decision, not a failure. Nothing
-      // has been written, so going back to idle is the whole undo.
-      setFlow({ kind: "idle" });
-    }
+    setFlow({ kind: "wait-package" });
+    fileRef.current?.click();
   };
 
-  /** Verify and install the chosen zip in one pass — no separate "import" step. */
-  const installFile = async (file: File) => {
+  /** Write a verified package into the bound folder, then restart the extension. */
+  const finishInstall = async (handle: DirectoryHandleLike, pkg: ExtractedPackage) => {
+    const outcome = await applyPackageToFolder(handle, pkg);
+    if (!outcome.ok) {
+      setFlow({
+        kind: "bad",
+        message: t(APPLY_FAILURE_KEYS[outcome.failure ?? FALLBACK_FAILURE]),
+      });
+      return;
+    }
+    // The extension is about to restart, and this page goes with it. The flag tells
+    // the service worker to open the settings page again, so the user lands on the
+    // new version instead of on nothing.
+    await browser.storage.local.set({ [KEYS.UPGRADE_PENDING]: true });
+    setFlow({ kind: "done", version: outcome.version ?? pkg.version });
+    setTimeout(() => browser.runtime.reload(), 400);
+  };
+
+  /**
+   * Step 2, first run only. Also synchronous at the call site: `showDirectoryPicker()`
+   * needs the gesture from THIS click, so the promise is created here and the async
+   * continuation waits for it afterwards.
+   */
+  const grantFolderAndInstall = () => {
+    if (flow.kind !== "need-folder") return;
+    const pkg = flow.package;
+    const pending = pickInstallFolder();
+    void (async () => {
+      setFlow({ kind: "busy" });
+      try {
+        const handle = await pending;
+        await saveInstallFolder(handle);
+        setFolder({ kind: "bound", name: handle.name });
+        if (!(await ensureWritePermission(handle))) {
+          setFlow({ kind: "bad", message: t("opt_update_err_no_permission") });
+          return;
+        }
+        await finishInstall(handle, pkg);
+      } catch (error) {
+        // Only a cancelled picker (AbortError) deserves a quiet retry. Anything else
+        // is a real failure and must not be reported as "pick a folder again".
+        const cancelled = error instanceof DOMException && error.name === "AbortError";
+        setFlow(
+          cancelled
+            ? { kind: "need-folder", package: pkg }
+            : { kind: "bad", message: error instanceof Error ? error.message : String(error) }
+        );
+      }
+    })();
+  };
+
+  /** Verify the chosen zip in one pass — no separate "import" step. */
+  const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Clear the input so picking the same file twice still fires onChange.
+    event.target.value = "";
+    if (!file) return;
     setFlow({ kind: "busy" });
     try {
       const extracted = await extractPackage(file, {
@@ -235,38 +283,19 @@ export function UpdateSection() {
         return;
       }
       const handle = await loadInstallFolder();
-      if (!handle) {
-        setFlow({ kind: "bad", message: t("opt_update_err_no_folder") });
+      if (handle && (await ensureWritePermission(handle))) {
+        await finishInstall(handle, extracted.package);
         return;
       }
-      const outcome = await applyPackageToFolder(handle, extracted.package);
-      if (!outcome.ok) {
-        setFlow({
-          kind: "bad",
-          message: t(APPLY_FAILURE_KEYS[outcome.failure ?? FALLBACK_FAILURE]),
-        });
-        return;
-      }
-      // The extension is about to restart, and this page goes with it. The flag tells
-      // the service worker to open the settings page again, so the user lands on the
-      // new version instead of on nothing.
-      await browser.storage.local.set({ [KEYS.UPGRADE_PENDING]: true });
-      setFlow({ kind: "done", version: outcome.version ?? extracted.package.version });
-      setTimeout(() => browser.runtime.reload(), 400);
+      // No remembered folder, or the browser revoked the grant. Asking for a folder
+      // needs a fresh gesture, so hand control back to the (same) main button.
+      setFlow({ kind: "need-folder", package: extracted.package });
     } catch (error) {
       setFlow({
         kind: "bad",
         message: error instanceof Error ? error.message : String(error),
       });
     }
-  };
-
-  const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    // Clear the input so picking the same file twice still fires onChange.
-    event.target.value = "";
-    if (!file) return;
-    await installFile(file);
   };
 
   const bindFolder = async () => {
@@ -287,10 +316,10 @@ export function UpdateSection() {
 
   const statusText = (): string => {
     switch (flow.kind) {
-      case "wait-folder":
-        return t("opt_update_wait_folder");
       case "wait-package":
         return t("opt_update_wait_package");
+      case "need-folder":
+        return t("opt_update_wait_folder");
       case "busy":
         return t("opt_update_install_busy");
       case "done":
@@ -316,6 +345,7 @@ export function UpdateSection() {
   const primaryLabel = (): string => {
     if (!canWriteFolder) return t("opt_update_script_download");
     if (flow.kind === "busy") return t("opt_update_install_busy");
+    if (flow.kind === "need-folder") return t("opt_update_pick_folder_go");
     return t("opt_update_install_go");
   };
 
@@ -324,6 +354,7 @@ export function UpdateSection() {
       return <CheckCircle2 size={14} />;
     }
     if (flow.kind === "bad") return <XCircle size={14} />;
+    if (flow.kind === "need-folder") return <FolderOpen size={14} />;
     return canWriteFolder ? <RefreshCw size={14} /> : <Download size={14} />;
   };
 
@@ -376,6 +407,17 @@ export function UpdateSection() {
             </div>
             <div className="row-desc" style={{ color: statusColor() }}>
               {statusText()}
+              {flow.kind === "need-folder" && (
+                <span
+                  style={{
+                    marginLeft: 8,
+                    fontFamily: "var(--font-mono)",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  v{flow.package.version}
+                </span>
+              )}
             </div>
             <div className="row-desc" style={{ marginTop: 10 }}>
               <button
@@ -392,7 +434,7 @@ export function UpdateSection() {
         </div>
         <button
           className="btn-save"
-          onClick={startUpgrade}
+          onClick={flow.kind === "need-folder" ? grantFolderAndInstall : startUpgrade}
           disabled={flow.kind === "busy"}
         >
           {primaryIcon()}

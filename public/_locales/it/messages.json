@@ -2530,7 +2530,7 @@
     "message": "Aggiornamento software"
   },
   "opt_update_section_sub": {
-    "message": "Scarica il nuovo zip, premi una volta il pulsante e Kesonode verifica, sostituisce e si riavvia. Firefox usa invece lo script di aggiornamento."
+    "message": "Scarica il nuovo zip, premi il pulsante e selezionalo. Al primo utilizzo scegli una volta anche la cartella di installazione; poi verifica, sostituzione e riavvio avvengono automaticamente. Firefox usa lo script di aggiornamento."
   },
   "opt_update_check_label": {
     "message": "Controlla aggiornamenti"
@@ -2567,7 +2567,7 @@
     "message": "Non è riuscito. L'aggiornamento da un pacchetto locale funziona comunque; in alternativa riprova più tardi."
   },
   "opt_update_package_desc": {
-    "message": "Scegli lo zip scaricato: versione e contenuto vengono verificati, la cartella di installazione aggiornata e l'estensione riavviata. Al primo aggiornamento scegli quella cartella una sola volta."
+    "message": "Il pulsante chiede prima lo zip scaricato. Al primo utilizzo chiede poi una volta la cartella di installazione; verifica, scrittura e riavvio sono automatici."
   },
   "opt_update_package_bad": {
     "message": "Questo pacchetto non può essere usato: $REASON$",
@@ -2599,7 +2599,7 @@
     "message": "Scarica script"
   },
   "opt_update_steps": {
-    "message": "Chromium: il primo aggiornamento chiede una volta la cartella da cui è stato caricato Kesonode. In seguito bastano il pulsante e la scelta del nuovo zip.\nFirefox: esegui lo script di aggiornamento. Installa sempre nella stessa cartella Kesonode, quindi l'ID dell'estensione e le impostazioni restano invariati."
+    "message": "Chromium: premi il pulsante → scegli lo zip scaricato → al primo utilizzo scegli una volta la cartella di installazione → verifica, sostituzione e riavvio sono automatici. In seguito basta lo zip.\nFirefox: esegui lo script di aggiornamento. Installa sempre nella stessa cartella Kesonode, quindi l'ID dell'estensione e le impostazioni si conservano."
   },
   "ai_nav": {
     "message": "Assistente AI"
@@ -2794,6 +2794,9 @@
   "opt_update_install_go": {
     "message": "Aggiorna ora"
   },
+  "opt_update_pick_folder_go": {
+    "message": "Scegli cartella e completa"
+  },
   "opt_update_install_busy": {
     "message": "Aggiornamento…"
   },
@@ -2804,9 +2807,6 @@
         "content": "$1"
       }
     }
-  },
-  "opt_update_err_no_folder": {
-    "message": "Nessuna cartella di installazione collegata."
   },
   "opt_update_err_no_permission": {
     "message": "Il browser non permette più di scrivere in quella cartella. Sceglila di nuovo."
@@ -2827,10 +2827,10 @@
     "message": "Opzioni avanzate"
   },
   "opt_update_wait_folder": {
-    "message": "Primo aggiornamento: nella finestra del browser scegli la cartella da cui è stato caricato Kesonode. Serve una sola volta."
+    "message": "Il pacchetto ha superato tutti i controlli. Al primo utilizzo devi scegliere anche la cartella di installazione di Kesonode (quella che contiene direttamente manifest.json) — premi il pulsante e l'aggiornamento si completa da solo."
   },
   "opt_update_wait_package": {
-    "message": "Scegli lo zip scaricato nella finestra. Se l'hai chiusa, premi di nuovo il pulsante."
+    "message": "Scegli nella finestra lo zip scaricato (il nome del file contiene la versione). Se l'hai chiusa, premi di nuovo il pulsante."
   },
   "opt_update_check_unavailable": {
     "message": "Le informazioni sulla versione non sono disponibili (il repository potrebbe essere privato). L'aggiornamento da un pacchetto locale funziona comunque."

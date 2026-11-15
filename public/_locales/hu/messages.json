@@ -2530,7 +2530,7 @@
     "message": "Szoftverfrissítés"
   },
   "opt_update_section_sub": {
-    "message": "Töltsd le az új ZIP-et, nyomd meg egyszer a gombot, és a Kesonode ellenőrzi, lecseréli és újraindítja magát. A Firefox ehelyett a frissítő szkriptet használja."
+    "message": "Töltsd le az új zipet, nyomd meg a gombot és válaszd ki. Első használatkor egyszer még kiválasztod a telepítési mappát; utána az ellenőrzés, a csere és az újraindulás automatikus. A Firefox a frissítő szkriptet használja."
   },
   "opt_update_check_label": {
     "message": "Frissítések keresése"
@@ -2567,7 +2567,7 @@
     "message": "Ez nem sikerült. A helyi csomagból történő frissítés továbbra is működik, vagy próbáld újra később."
   },
   "opt_update_package_desc": {
-    "message": "Válaszd ki a letöltött ZIP-et: a verziót és a tartalmat ellenőrizzük, a telepítési mappa frissül, a bővítmény újraindul. Az első frissítéskor ezt a mappát egyszer kell kiválasztani."
+    "message": "A gomb először a letöltött zipet kéri. Első alkalommal utána egyszer a telepítési mappát is; az ellenőrzés, az írás és az újraindulás automatikus."
   },
   "opt_update_package_bad": {
     "message": "Ez a csomag nem használható: $REASON$",
@@ -2599,7 +2599,7 @@
     "message": "Szkript letöltése"
   },
   "opt_update_steps": {
-    "message": "Chromium: az első frissítéskor egyszer meg kell adni a mappát, ahonnan a Kesonode betöltődött. Utána elég a gomb és az új ZIP kiválasztása.\nFirefox: futtasd a frissítő szkriptet. Mindig ugyanabba a Kesonode mappába telepít, így a bővítmény azonosítója és a beállítások megmaradnak."
+    "message": "Chromium: gomb → letöltött zip kiválasztása → első alkalommal a telepítési mappa egyszeri kiválasztása → az ellenőrzés, a csere és az újraindulás automatikus. Később csak a zip kell.\nFirefox: futtasd a frissítő szkriptet. Mindig ugyanabba a Kesonode mappába telepít, így a bővítmény azonosítója és a beállítások megmaradnak."
   },
   "ai_nav": {
     "message": "AI-asszisztens"
@@ -2794,6 +2794,9 @@
   "opt_update_install_go": {
     "message": "Frissítés most"
   },
+  "opt_update_pick_folder_go": {
+    "message": "Mappa kiválasztása és befejezés"
+  },
   "opt_update_install_busy": {
     "message": "Frissítés…"
   },
@@ -2804,9 +2807,6 @@
         "content": "$1"
       }
     }
-  },
-  "opt_update_err_no_folder": {
-    "message": "Nincs megadva telepítési mappa."
   },
   "opt_update_err_no_permission": {
     "message": "A böngésző már nem engedi az írást ebbe a mappába. Válaszd ki újra."
@@ -2827,10 +2827,10 @@
     "message": "Speciális beállítások"
   },
   "opt_update_wait_folder": {
-    "message": "Első frissítés: a böngésző ablakában válaszd ki azt a mappát, ahonnan a Kesonode betöltődött. Erre csak egyszer van szükség."
+    "message": "A csomag minden ellenőrzésen átment. Első alkalommal még ki kell választanod a Kesonode telepítési mappáját (amely közvetlenül tartalmazza a manifest.json fájlt) — nyomd meg a gombot, utána a frissítés magától befejeződik."
   },
   "opt_update_wait_package": {
-    "message": "Válaszd ki a letöltött ZIP-fájlt az ablakban. Ha bezártad, nyomd meg újra a gombot."
+    "message": "Válaszd ki a letöltött zipet az ablakban (a fájlnév tartalmazza a verziót). Ha bezártad, nyomd meg újra a gombot."
   },
   "opt_update_check_unavailable": {
     "message": "A kiadási adatok jelenleg nem elérhetők (lehet, hogy a tároló privát). A helyi csomagból történő frissítés továbbra is működik."
