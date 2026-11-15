@@ -10,6 +10,8 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+## [1.5.22] - 2026-11-15
+
 ### Changed
 
 - **Software update is one button.** Settings → Advanced → Software update now shows a
