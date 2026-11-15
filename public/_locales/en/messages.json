@@ -1122,6 +1122,26 @@
   "opt_bulk_delete_desc": {
     "message": "A safety net: if a peer's deletions would remove more than this share of your local bookmarks, the merge skips them (guards against a corrupt sync wiping your tree). Raise it if you routinely delete in bulk."
   },
+  "opt_baseline_current": {
+    "message": "Current baseline",
+    "description": "Caption above the baseline value in Settings → Device. Makes it explicit that the value is the committed state, not the pending action in the buttons beside it."
+  },
+  "opt_baseline_pending_hint": {
+    "message": "Not applied yet. The value on the left is the current state and changes only after you confirm. This takes effect immediately — you do not need to save.",
+    "description": "Shown in the tinted confirmation block. Explains why the status still reads 'Not set' while the confirmation button is on screen."
+  },
+  "opt_baseline_setting": {
+    "message": "Setting this browser as the baseline…",
+    "description": "Status shown while SET_BASELINE is in flight; the worker also publishes this browser's bookmark tree, so this can take a moment."
+  },
+  "opt_baseline_clearing": {
+    "message": "Clearing the baseline…",
+    "description": "Status shown while CLEAR_BASELINE is in flight."
+  },
+  "opt_baseline_busy": {
+    "message": "Working…",
+    "description": "Disabled confirm-button label while a baseline change is being applied. Keeps the confirmation on screen instead of reverting to the button that opened it."
+  },
   "opt_baseline_label": {
     "message": "Bookmark baseline",
     "description": "Section heading in Settings → Device and the status label in Activity. Names the browser whose bookmarks the group was aligned to."

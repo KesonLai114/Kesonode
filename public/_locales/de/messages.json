@@ -954,6 +954,21 @@
   "opt_bulk_delete_desc": {
     "message": "Ein Sicherheitsnetz: Würden die Löschungen eines anderen Geräts mehr als diesen Anteil deiner lokalen Lesezeichen entfernen, überspringt die Zusammenführung sie (das schützt deinen Baum vor einer fehlerhaften Synchronisierung). Erhöhe den Wert, wenn du regelmäßig in großen Mengen löschst."
   },
+  "opt_baseline_current": {
+    "message": "Aktuelle Basis"
+  },
+  "opt_baseline_pending_hint": {
+    "message": "Noch nicht angewendet: Links steht der aktuelle Zustand, er ändert sich erst nach der Bestätigung. Die Änderung gilt sofort, ein Speichern ist nicht nötig."
+  },
+  "opt_baseline_setting": {
+    "message": "Dieser Browser wird als Basis festgelegt…"
+  },
+  "opt_baseline_clearing": {
+    "message": "Basis wird entfernt…"
+  },
+  "opt_baseline_busy": {
+    "message": "In Arbeit…"
+  },
   "opt_baseline_label": {
     "message": "Lesezeichen-Basis"
   },

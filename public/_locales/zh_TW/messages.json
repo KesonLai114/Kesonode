@@ -954,6 +954,21 @@
   "opt_bulk_delete_desc": {
     "message": "一道安全防線：如果某台裝置要刪掉的書籤超過你本機書籤的這個比例，合併時就會跳過它們（避免一次壞掉的同步清空你的書籤樹）。如果你本來就常常大量刪除，可以調高。"
   },
+  "opt_baseline_current": {
+    "message": "目前基準"
+  },
+  "opt_baseline_pending_hint": {
+    "message": "尚未生效：左側顯示的是操作前的目前狀態，按「確定」後才會改變。此操作立即生效，不需要按「儲存變更」。"
+  },
+  "opt_baseline_setting": {
+    "message": "正在設為本機基準並上傳書籤…"
+  },
+  "opt_baseline_clearing": {
+    "message": "正在清除基準…"
+  },
+  "opt_baseline_busy": {
+    "message": "正在處理…"
+  },
   "opt_baseline_label": {
     "message": "書籤基準"
   },

@@ -546,7 +546,13 @@ export default function OptionsApp() {
   const [baseline, setBaseline] = useState<BaselineInfo | null>(null);
   const [baselineLoad, setBaselineLoad] = useState<"loading" | "ok" | string>("loading");
   const [baselineBusy, setBaselineBusy] = useState(false);
+  // Which action is in flight. Kept apart from `baselineConfirm` so the confirmation
+  // row can stay on screen (disabled, with a spinner) while the worker publishes the
+  // tree. It used to snap back to "Use this browser as baseline" next to a status line
+  // that still read "Not set", which looks exactly like the click was undone.
+  const [baselineAction, setBaselineAction] = useState<"set" | "clear" | null>(null);
   const [baselineMsg, setBaselineMsg] = useState<string | null>(null);
+  const [baselineMsgTone, setBaselineMsgTone] = useState<"ok" | "warn" | "error">("ok");
   const [baselineConfirm, setBaselineConfirm] = useState<"set" | "clear" | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -1334,32 +1340,38 @@ export default function OptionsApp() {
   // removes the peers' bookmark files and publishes the marker before answering, so the
   // spinner covers the whole operation and the status row updates from its reply.
   const setBaselineHere = async () => {
-    setBaselineBusy(true); setBaselineMsg(null); setBaselineConfirm(null);
+    setBaselineBusy(true); setBaselineMsg(null); setBaselineAction("set");
     try {
       const r = await request({ type: "SET_BASELINE" });
-      if (!r.ok) setBaselineMsg(r.error);
+      if (!r.ok) { setBaselineMsg(r.error); setBaselineMsgTone("error"); }
       else if (r.res.type === "BASELINE") {
         setBaseline(r.res.payload);
         setBaselineLoad("ok");
         setBaselineMsg(t("opt_baseline_set_done"));
-      }
+        setBaselineMsgTone("ok");
+      } else { setBaselineMsg(t("opt_devices_bad_reply")); setBaselineMsgTone("error"); }
     } finally {
       setBaselineBusy(false);
+      setBaselineAction(null);
+      setBaselineConfirm(null);
     }
   };
 
   const clearBaselineHere = async () => {
-    setBaselineBusy(true); setBaselineMsg(null); setBaselineConfirm(null);
+    setBaselineBusy(true); setBaselineMsg(null); setBaselineAction("clear");
     try {
       const r = await request({ type: "CLEAR_BASELINE" });
-      if (!r.ok) setBaselineMsg(r.error);
+      if (!r.ok) { setBaselineMsg(r.error); setBaselineMsgTone("error"); }
       else if (r.res.type === "BASELINE") {
         setBaseline(r.res.payload);
         setBaselineLoad("ok");
         setBaselineMsg(t("opt_baseline_cleared"));
-      }
+        setBaselineMsgTone("ok");
+      } else { setBaselineMsg(t("opt_devices_bad_reply")); setBaselineMsgTone("error"); }
     } finally {
       setBaselineBusy(false);
+      setBaselineAction(null);
+      setBaselineConfirm(null);
     }
   };
 
@@ -1462,8 +1474,9 @@ export default function OptionsApp() {
     // then Save changes, then reload" is exactly what a user does — and Save does not
     // apply it, so the reload showed "Not set" with nothing anywhere to say why. Said
     // before any validation: the confirmation is still open whatever this save answers.
-    if (baselineConfirm) {
+    if (baselineConfirm && !baselineBusy) {
       setBaselineMsg(t("opt_baseline_save_pending"));
+      setBaselineMsgTone("warn");
       document.getElementById("baseline-card")?.scrollIntoView({ block: "center", behavior: "smooth" });
     }
     if (passTooShort) {
@@ -2113,6 +2126,19 @@ export default function OptionsApp() {
     : baseline?.stale ? t("opt_baseline_stale")
     : baselineAwaiting ? t("opt_baseline_waiting", isolate(baselineDeviceName))
     : null;
+
+  // The Device card has two states the Activity summary does not: an unaccepted
+  // confirmation and the round trip that applies it. `baselineValue` is deliberately
+  // the *committed* state — printing the pending action there is what made the card
+  // read as contradictory ("Not set" beside "Yes, set this browser"). The card labels
+  // that value "current", says the action has not run, and shows its own progress
+  // while the worker is busy.
+  const baselineConfirmKind = baselineConfirm ?? baselineAction;
+  const baselineCardValue = baselineAction === "set" ? t("opt_baseline_setting")
+    : baselineAction === "clear" ? t("opt_baseline_clearing")
+      : baselineValue;
+  const baselineMsgColor = baselineMsgTone === "ok" ? "var(--success)"
+    : baselineMsgTone === "warn" ? "var(--warn-text)" : "var(--danger)";
 
   // The receipt the user is most likely asking about: what the last completed cycle did.
   const latestReport = syncState?.sync_report ?? reports[0] ?? null;
@@ -3180,8 +3206,12 @@ export default function OptionsApp() {
                 <div className="settings-row">
                   <div className="settings-row-left">
                     <div>
-                      <div className="row-label">{baselineValue}</div>
-                      {baselineNote && <div className="row-desc">{baselineNote}</div>}
+                      {/* A caption, not part of the value: the buttons to the right are an
+                          action that has NOT run yet. Without "current" the two halves read
+                          as one contradiction — "Not set" beside "set this browser". */}
+                      <div className="row-caption">{t("opt_baseline_current")}</div>
+                      <div className="row-label">{baselineCardValue}</div>
+                      {!baselineBusy && baselineNote && <div className="row-desc">{baselineNote}</div>}
                       {/* A failed read keeps its diagnostic here, the way the device list
                           does: the sentence above says what it means, this says why. */}
                       {baselineLoad !== "loading" && baselineLoad !== "ok" && (
@@ -3189,41 +3219,41 @@ export default function OptionsApp() {
                       )}
                       {/* The outcome has to be SAID: the marker lives in the storage and
                           the reply can carry a refused delete or a failed restore point. */}
-                      {baselineMsg && <div className="row-desc">{baselineMsg}</div>}
+                      {baselineMsg && <div className="row-desc" style={{ color: baselineMsgColor }}>{baselineMsg}</div>}
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                    {baselineConfirm === "set" ? (
+                    {baselineConfirmKind === "set" ? (
                       <>
                         <button className="btn-secondary" onClick={() => { setBaselineConfirm(null); setBaselineMsg(null); }} disabled={baselineBusy}>
                           {t("opt_cancel")}
                         </button>
                         <button className="btn-secondary" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}
                           onClick={setBaselineHere} disabled={baselineBusy}>
-                          {baselineBusy ? <Loader2 size={12} className="spin" /> : <Star size={12} />} {t("opt_baseline_set_confirm")}
+                          {baselineBusy ? <Loader2 size={12} className="spin" /> : <Star size={12} />} {baselineBusy ? t("opt_baseline_busy") : t("opt_baseline_set_confirm")}
                         </button>
                       </>
-                    ) : baselineConfirm === "clear" ? (
+                    ) : baselineConfirmKind === "clear" ? (
                       <>
                         <button className="btn-secondary" onClick={() => { setBaselineConfirm(null); setBaselineMsg(null); }} disabled={baselineBusy}>
                           {t("opt_cancel")}
                         </button>
                         <button className="btn-secondary" style={{ color: "var(--danger)" }}
                           onClick={clearBaselineHere} disabled={baselineBusy}>
-                          {baselineBusy ? <Loader2 size={12} className="spin" /> : null} {t("opt_baseline_clear_confirm")}
+                          {baselineBusy ? <Loader2 size={12} className="spin" /> : null} {baselineBusy ? t("opt_baseline_busy") : t("opt_baseline_clear_confirm")}
                         </button>
                       </>
                     ) : (
                       <>
                         {baselineReady && (!baselineMine || baseline?.stale) && (
                           <button className="btn-secondary" disabled={baselineBusy}
-                            onClick={() => setBaselineConfirm("set")}>
+                            onClick={() => { setBaselineMsg(null); setBaselineConfirm("set"); }}>
                             <Star size={12} /> {t("opt_baseline_set")}
                           </button>
                         )}
                         {baselineReady && baseline?.marker && (
                           <button className="btn-secondary" disabled={baselineBusy}
-                            onClick={() => setBaselineConfirm("clear")}>
+                            onClick={() => { setBaselineMsg(null); setBaselineConfirm("clear"); }}>
                             {t("opt_baseline_clear")}
                           </button>
                         )}
@@ -3231,17 +3261,23 @@ export default function OptionsApp() {
                     )}
                   </div>
                 </div>
-                {baselineConfirm === "set" && (
-                  <div className="settings-row">
+                {/* The confirmation is a distinct, tinted block — a pending operation, not
+                    a second reading of the status above. It stays put while the request is
+                    in flight so the card never appears to revert to "not set". */}
+                {baselineConfirmKind && (
+                  <div className="settings-row" style={{ background: "var(--warn-bg)" }}>
                     <div className="settings-row-left">
-                      <div className="row-desc">{t("opt_baseline_confirm_set")}</div>
-                    </div>
-                  </div>
-                )}
-                {baselineConfirm === "clear" && (
-                  <div className="settings-row">
-                    <div className="settings-row-left">
-                      <div className="row-desc">{t("opt_baseline_confirm_clear")}</div>
+                      <AlertTriangle size={14} className="row-icon" style={{ color: "var(--warn-border)" }} />
+                      <div>
+                        {!baselineBusy && (
+                          <div className="row-desc" style={{ color: "var(--warn-text)", fontWeight: 600 }}>
+                            {t("opt_baseline_pending_hint")}
+                          </div>
+                        )}
+                        <div className="row-desc" style={{ color: "var(--warn-text)" }}>
+                          {baselineConfirmKind === "set" ? t("opt_baseline_confirm_set") : t("opt_baseline_confirm_clear")}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -4658,6 +4694,9 @@ const STYLES = `
   .row-icon { color: var(--text-secondary); margin-top: 1px; flex-shrink: 0; }
   .row-label { font-size: var(--fs-sm); color: var(--text-primary); }
   .row-desc { font-size: var(--fs-xs); color: var(--text-secondary); margin-top: var(--sp-3xs); line-height: 1.45; }
+  /* Names the value below it so a pending action on the right cannot be mistaken for
+     the current state (Settings → Device, bookmark baseline card). */
+  .row-caption { font-size: var(--fs-xs); color: var(--text-secondary); margin-bottom: var(--sp-3xs); line-height: 1.3; }
 
     /* Same radius and the same bottom gap as .settings-section: it IS one of these groups,
      it just happens to hold provider cards. It was the only 16px corner on the page, and

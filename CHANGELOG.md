@@ -10,6 +10,18 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The bookmark baseline card no longer reads as a contradiction.** Settings → Device
+  now labels the status value as "Current baseline". Opening the confirmation shows a
+  tinted block that says the change has not been applied yet: the value on the left is
+  the state *before* the pending action, and it changes only after the second click.
+  While the worker publishes the bookmark tree the confirmation stays on screen
+  (disabled, with a spinner) and the status reads "Setting this browser as the
+  baseline…" — it no longer snaps back to "Not set" beside a disabled "Use this browser
+  as baseline" button, which looked like the click had been undone. Success, warning
+  and failure messages are colour-coded instead of all being grey.
+
 ## [1.5.22] - 2026-11-15
 
 ### Changed

@@ -954,6 +954,21 @@
   "opt_bulk_delete_desc": {
     "message": "Una rete di sicurezza: se le eliminazioni di un altro dispositivo dovessero rimuovere più di questa percentuale dei tuoi segnalibri locali, l'unione le ignora (protegge da una sincronizzazione corrotta che cancellerebbe il tuo albero). Aumentala se elimini spesso in blocco."
   },
+  "opt_baseline_current": {
+    "message": "Base attuale"
+  },
+  "opt_baseline_pending_hint": {
+    "message": "Non ancora applicato: a sinistra è mostrato lo stato attuale, che cambia solo dopo la conferma. L'operazione ha effetto immediato e non richiede il salvataggio."
+  },
+  "opt_baseline_setting": {
+    "message": "Impostazione di questo browser come base…"
+  },
+  "opt_baseline_clearing": {
+    "message": "Rimozione della base…"
+  },
+  "opt_baseline_busy": {
+    "message": "In corso…"
+  },
   "opt_baseline_label": {
     "message": "Base dei segnalibri"
   },

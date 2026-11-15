@@ -47,12 +47,13 @@ const readCard = (page) => page.evaluate(() => {
     (s.querySelector(".settings-card-head")?.textContent ?? "").trim().startsWith(label));
   if (!section) return null;
   const value = section.querySelector(".row-label");
+  const caption = section.querySelector(".row-caption");
   const notes = value?.parentElement
     ? [...value.parentElement.querySelectorAll(":scope > .row-desc")].map((n) => n.textContent.trim())
     : [];
   const buttons = [...section.querySelectorAll("button")].map((b) => b.textContent.trim());
   const msg = [...section.querySelectorAll(".row-desc")].map((n) => n.textContent.trim());
-  return { value: (value?.textContent ?? "").trim(), notes, buttons, all: msg };
+  return { value: (value?.textContent ?? "").trim(), caption: (caption?.textContent ?? "").trim(), notes, buttons, all: msg };
 });
 
 const strings = (page) => page.evaluate(() => ({
@@ -62,6 +63,8 @@ const strings = (page) => page.evaluate(() => ({
   stale: chrome.i18n.getMessage("opt_baseline_stale"),
   mine: chrome.i18n.getMessage("opt_baseline_mine").split("$")[0].trim(),
   setConfirm: chrome.i18n.getMessage("opt_baseline_set_confirm"),
+  pendingHint: chrome.i18n.getMessage("opt_baseline_pending_hint"),
+  current: chrome.i18n.getMessage("opt_baseline_current"),
   savePending: chrome.i18n.getMessage("opt_baseline_save_pending"),
   save: chrome.i18n.getMessage("opt_save_changes"),
   saved: chrome.i18n.getMessage("opt_saved"),
@@ -99,10 +102,21 @@ try {
   await setButton.click();
   await page.waitForTimeout(400);
 
+  // The confirmation is a pending action, not a second reading of the status. The value
+  // has to be labelled "current" and the block has to say nothing was applied yet —
+  // otherwise "Not set" beside the confirm button reads as a contradiction.
+  const confirming = await readCard(page);
+  console.log("  confirming :", JSON.stringify(confirming));
+  check("the status value is labelled as the current state",
+    !!s.current && !!confirming && confirming.caption === s.current, JSON.stringify(confirming));
+  check("the confirmation says the change has not been applied yet",
+    !!s.pendingHint && !!confirming && confirming.all.some((n) => n.includes(s.pendingHint)),
+    JSON.stringify(confirming));
+
   if (process.env.E2E_SCENARIO === "save-without-confirm") {
     // The reported sequence taken literally: "click set, then click Save". The first click
-    // only opens the confirmation, whose action carries the SAME label, and the page's
-    // Save button sits right below — so a user can believe Save committed the choice.
+    // only opens the confirmation, and the page's Save button sits right below — so a user
+    // can believe Save committed the choice, even though the baseline takes effect at once.
     console.log("  confirm row:", JSON.stringify(await readCard(page)));
     await page.getByRole("button", { name: s.save }).first().click();
     await page.waitForTimeout(2000);

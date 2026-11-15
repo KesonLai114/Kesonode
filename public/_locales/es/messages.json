@@ -1574,6 +1574,21 @@
   "opt_bulk_delete_desc": {
     "message": "Una red de seguridad: si las eliminaciones de otro dispositivo borran más de esta proporción de tus marcadores locales, la fusión las omitirá (protege contra una sincronización corrupta que borre tu árbol de marcadores). Aumenta este valor si sueles eliminar marcadores de forma masiva."
   },
+  "opt_baseline_current": {
+    "message": "Base actual"
+  },
+  "opt_baseline_pending_hint": {
+    "message": "Aún no aplicado: el valor de la izquierda es el estado actual y solo cambia al confirmar. El cambio es inmediato; no hace falta guardar los cambios."
+  },
+  "opt_baseline_setting": {
+    "message": "Estableciendo este navegador como base…"
+  },
+  "opt_baseline_clearing": {
+    "message": "Eliminando la base…"
+  },
+  "opt_baseline_busy": {
+    "message": "Procesando…"
+  },
   "opt_baseline_label": {
     "message": "Base de marcadores"
   },

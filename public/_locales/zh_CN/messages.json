@@ -945,6 +945,21 @@
   "opt_bulk_delete_desc": {
     "message": "安全机制：如果来自节点的删除操作影响到超过此比例的本地书签，合并过程将跳过这些删除（防止因同步异常而清空您的书签树）。如果您经常批量删除，可调高此数值。"
   },
+  "opt_baseline_current": {
+    "message": "当前基准"
+  },
+  "opt_baseline_pending_hint": {
+    "message": "尚未生效：左侧显示的是操作前的当前状态，点「确定」后才会改变。该操作立即生效，不需要点「保存更改」。"
+  },
+  "opt_baseline_setting": {
+    "message": "正在设为本机基准并上传书签…"
+  },
+  "opt_baseline_clearing": {
+    "message": "正在清除基准…"
+  },
+  "opt_baseline_busy": {
+    "message": "正在处理…"
+  },
   "opt_baseline_label": {
     "message": "书签基准"
   },

@@ -954,6 +954,21 @@
   "opt_bulk_delete_desc": {
     "message": "Védőháló: ha egy másik eszköz törlései a helyi könyvjelzőidnek ennél nagyobb részét vinnék el, az összefésülés kihagyja őket (ez védi a könyvjelzőfádat egy hibás szinkronizálástól). Növeld, ha rendszeresen törölsz nagy tételben."
   },
+  "opt_baseline_current": {
+    "message": "Jelenlegi alap"
+  },
+  "opt_baseline_pending_hint": {
+    "message": "Még nincs alkalmazva: bal oldalon a jelenlegi állapot látható, amely csak a megerősítés után változik. A művelet azonnal érvényesül, nem kell menteni."
+  },
+  "opt_baseline_setting": {
+    "message": "A böngésző beállítása alapként…"
+  },
+  "opt_baseline_clearing": {
+    "message": "Az alap törlése…"
+  },
+  "opt_baseline_busy": {
+    "message": "Folyamatban…"
+  },
   "opt_baseline_label": {
     "message": "Könyvjelző-alap"
   },
