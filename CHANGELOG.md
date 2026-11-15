@@ -10,6 +10,8 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+## [1.5.23] - 2026-11-15
+
 ### Fixed
 
 - **The bookmark baseline card no longer reads as a contradiction.** Settings → Device
