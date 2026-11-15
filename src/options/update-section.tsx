@@ -55,7 +55,7 @@ import {
   supportsFolderWrite,
   type DirectoryHandleLike,
 } from "@/lib/utils/install-dir";
-import { applyPackageToFolder, type ApplyFailure } from "@/lib/utils/apply-package";
+import { applyPackageToFolder, type ApplyFailure, type ApplyProgress } from "@/lib/utils/apply-package";
 import { KEYS } from "@/lib/utils/storage";
 import { checkLatestRelease, type LatestRelease } from "@/lib/utils/release-check";
 
@@ -101,7 +101,7 @@ type FlowState =
    * Keeping the package here means cancelling that dialog does not lose the chosen zip.
    */
   | { kind: "need-folder"; package: ExtractedPackage }
-  | { kind: "busy" }
+  | { kind: "busy"; progress?: ApplyProgress }
   | { kind: "done"; version: string }
   /** The package is sound but not newer — information, not an error. */
   | { kind: "no-change" }
@@ -208,9 +208,23 @@ export function UpdateSection() {
     fileRef.current?.click();
   };
 
-  /** Write a verified package into the bound folder, then restart the extension. */
+  /**
+   * Write a verified package into the bound folder, then restart the extension.
+   *
+   * `applyPackageToFolder` reports its progress back so the button can show a bar
+   * instead of an indeterminate spinner. The callback is throttled: a release has
+   * hundreds of files, and re-rendering on every single one would compete with the
+   * writes we are trying to finish.
+   */
   const finishInstall = async (handle: DirectoryHandleLike, pkg: ExtractedPackage) => {
-    const outcome = await applyPackageToFolder(handle, pkg);
+    let lastReported = -1;
+    const onProgress = (p: ApplyProgress) => {
+      const step = Math.max(1, Math.ceil((p.total || 1) / 20));
+      if (p.phase !== "cleanup" && p.done !== p.total && p.done - lastReported < step) return;
+      lastReported = p.done;
+      setFlow((prev) => (prev.kind === "busy" ? { kind: "busy", progress: p } : prev));
+    };
+    const outcome = await applyPackageToFolder(handle, pkg, onProgress);
     if (!outcome.ok) {
       setFlow({
         kind: "bad",
@@ -321,6 +335,12 @@ export function UpdateSection() {
       case "need-folder":
         return t("opt_update_wait_folder");
       case "busy":
+        if (flow.progress) {
+          const p = flow.progress;
+          if (p.phase === "backup") return t("opt_update_phase_backup", [String(p.done), String(p.total)]);
+          if (p.phase === "write") return t("opt_update_phase_write", [String(p.done), String(p.total)]);
+          return t("opt_update_phase_cleanup");
+        }
         return t("opt_update_install_busy");
       case "done":
         return t("opt_update_install_done", flow.version);
@@ -419,6 +439,28 @@ export function UpdateSection() {
                 </span>
               )}
             </div>
+            {flow.kind === "busy" && flow.progress && (
+              <div
+                style={{
+                  marginTop: 8,
+                  height: 6,
+                  background: "var(--bg-secondary, #e6e6ef)",
+                  borderRadius: 4,
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${Math.round(
+                      (flow.progress.done / Math.max(1, flow.progress.total)) * 100
+                    )}%`,
+                    background: "var(--accent, #6c5ce7)",
+                    transition: "width 120ms linear",
+                  }}
+                />
+              </div>
+            )}
             <div className="row-desc" style={{ marginTop: 10 }}>
               <button
                 type="button"

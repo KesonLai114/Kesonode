@@ -3043,6 +3043,31 @@
   "opt_update_install_busy": {
     "message": "Upgrading…"
   },
+  "opt_update_phase_backup": {
+    "message": "Backing up $DONE$ / $TOTAL$",
+    "placeholders": {
+      "DONE": {
+        "content": "$1"
+      },
+      "TOTAL": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_update_phase_write": {
+    "message": "Writing $DONE$ / $TOTAL$",
+    "placeholders": {
+      "DONE": {
+        "content": "$1"
+      },
+      "TOTAL": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_update_phase_cleanup": {
+    "message": "Cleaning up old files"
+  },
   "opt_update_install_done": {
     "message": "Version $VERSION$ is installed. The extension is restarting.",
     "placeholders": {

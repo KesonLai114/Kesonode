@@ -104,6 +104,23 @@ class MemDir implements DirectoryHandleLike {
   }
 }
 
+/**
+ * A directory that also supports `moveEntry`, mirroring the File System Access API on
+ * Chrome 113+. Used to exercise the rename backup path, which the plain `MemDir` cannot.
+ */
+class MoveDir extends MemDir {
+  async moveEntry(
+    name: string,
+    destination: MoveDir,
+    options?: { name?: string }
+  ): Promise<void> {
+    const child = this.children.get(name);
+    if (!child) throw new DOMException("no such entry", "NotFoundError");
+    this.children.delete(name);
+    destination.children.set(options?.name ?? name, child);
+  }
+}
+
 const enc = new TextEncoder();
 
 function manifest(version: string, key?: string): Uint8Array {
@@ -241,5 +258,49 @@ describe("applyPackageToFolder", () => {
     file.data = enc.encode("{ not json");
     const outcome = await applyPackageToFolder(dir, release("1.5.19", "the-key"));
     expect(outcome).toMatchObject({ ok: false, failure: "read", written: 0 });
+  });
+});
+
+describe("applyPackageToFolder backup strategy", () => {
+  it("backs up by renaming top-level entries when the folder supports moveEntry", async () => {
+    const log: string[] = [];
+    const dir = new MoveDir("Kesonode", log);
+    dir.children.set("manifest.json", new MemFile("manifest.json", manifest("1.5.18", "the-key"), log));
+    dir.children.set("popup.html", new MemFile("popup.html", enc.encode("<html>old</html>"), log));
+    const chunks = new MemDir("chunks", log);
+    chunks.children.set("old-abc.js", new MemFile("old-abc.js", enc.encode("// old"), log));
+    dir.children.set("chunks", chunks);
+
+    const outcome = await applyPackageToFolder(dir, release("1.5.19", "the-key"));
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.backup).toBe(`${BACKUP_DIR}/1.5.18`);
+    expect(outcome.written).toBe(3);
+    // The previous version's files are in the backup folder...
+    expect(textOf(dir, `${BACKUP_DIR}/1.5.18/manifest.json`)).toContain('"1.5.18"');
+    expect(textOf(dir, `${BACKUP_DIR}/1.5.18/chunks/old-abc.js`)).toContain("// old");
+    // ...and the new version is in place.
+    expect(textOf(dir, "manifest.json")).toContain('"1.5.19"');
+    expect(textOf(dir, "chunks/new-def.js")).toBe("// new");
+  });
+
+  it("still keeps the old manifest loadable if a write fails after a rename backup", async () => {
+    const log: string[] = [];
+    const dir = new MoveDir("Kesonode", log);
+    dir.children.set("manifest.json", new MemFile("manifest.json", manifest("1.5.18", "the-key"), log));
+    dir.children.set("popup.html", new MemFile("popup.html", enc.encode("<html>old</html>"), log));
+    const chunks = new MemDir("chunks", log);
+    chunks.children.set("old-abc.js", new MemFile("old-abc.js", enc.encode("// old"), log));
+    dir.children.set("chunks", chunks);
+    // A top-level file keeps the same parent after a rename backup, so failing it here
+    // exercises a mid-upgrade write error on the rename path.
+    dir.failWrites.add("popup.html");
+
+    const outcome = await applyPackageToFolder(dir, release("1.5.19", "the-key"));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.failure).toBe("write");
+    // The rename moved the old chunks/popup away first, but the manifest is moved LAST,
+    // so it is still the old one after a failed write.
+    expect(textOf(dir, "manifest.json")).toContain('"1.5.18"');
   });
 });

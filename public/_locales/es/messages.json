@@ -2800,6 +2800,31 @@
   "opt_update_install_busy": {
     "message": "Actualizando…"
   },
+  "opt_update_phase_backup": {
+    "message": "Respaldando $DONE$ / $TOTAL$",
+    "placeholders": {
+      "DONE": {
+        "content": "$1"
+      },
+      "TOTAL": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_update_phase_write": {
+    "message": "Escribiendo $DONE$ / $TOTAL$",
+    "placeholders": {
+      "DONE": {
+        "content": "$1"
+      },
+      "TOTAL": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_update_phase_cleanup": {
+    "message": "Eliminando archivos antiguos"
+  },
   "opt_update_install_done": {
     "message": "La versión $VERSION$ está instalada. La extensión se está reiniciando.",
     "placeholders": {

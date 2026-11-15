@@ -2800,6 +2800,31 @@
   "opt_update_install_busy": {
     "message": "Frissítés…"
   },
+  "opt_update_phase_backup": {
+    "message": "Biztonsági mentés $DONE$ / $TOTAL$",
+    "placeholders": {
+      "DONE": {
+        "content": "$1"
+      },
+      "TOTAL": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_update_phase_write": {
+    "message": "Írás $DONE$ / $TOTAL$",
+    "placeholders": {
+      "DONE": {
+        "content": "$1"
+      },
+      "TOTAL": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_update_phase_cleanup": {
+    "message": "Régi fájlok eltávolítása"
+  },
   "opt_update_install_done": {
     "message": "A(z) $VERSION$ verzió telepítve. A kiegészítő újraindul.",
     "placeholders": {

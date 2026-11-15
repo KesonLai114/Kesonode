@@ -2800,6 +2800,31 @@
   "opt_update_install_busy": {
     "message": "Wird aktualisiert …"
   },
+  "opt_update_phase_backup": {
+    "message": "Sichern $DONE$ / $TOTAL$",
+    "placeholders": {
+      "DONE": {
+        "content": "$1"
+      },
+      "TOTAL": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_update_phase_write": {
+    "message": "Schreiben $DONE$ / $TOTAL$",
+    "placeholders": {
+      "DONE": {
+        "content": "$1"
+      },
+      "TOTAL": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_update_phase_cleanup": {
+    "message": "Alte Dateien werden entfernt"
+  },
   "opt_update_install_done": {
     "message": "Version $VERSION$ ist installiert. Die Erweiterung startet neu.",
     "placeholders": {

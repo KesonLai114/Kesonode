@@ -2800,6 +2800,31 @@
   "opt_update_install_busy": {
     "message": "正在升级…"
   },
+  "opt_update_phase_backup": {
+    "message": "正在备份 $DONE$ / $TOTAL$",
+    "placeholders": {
+      "DONE": {
+        "content": "$1"
+      },
+      "TOTAL": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_update_phase_write": {
+    "message": "正在写入 $DONE$ / $TOTAL$",
+    "placeholders": {
+      "DONE": {
+        "content": "$1"
+      },
+      "TOTAL": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_update_phase_cleanup": {
+    "message": "正在清理旧文件"
+  },
   "opt_update_install_done": {
     "message": "版本 $VERSION$ 已安装，扩展正在重启。",
     "placeholders": {

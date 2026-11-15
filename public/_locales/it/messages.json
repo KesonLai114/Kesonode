@@ -2800,6 +2800,31 @@
   "opt_update_install_busy": {
     "message": "Aggiornamento…"
   },
+  "opt_update_phase_backup": {
+    "message": "Backup $DONE$ / $TOTAL$",
+    "placeholders": {
+      "DONE": {
+        "content": "$1"
+      },
+      "TOTAL": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_update_phase_write": {
+    "message": "Scrittura $DONE$ / $TOTAL$",
+    "placeholders": {
+      "DONE": {
+        "content": "$1"
+      },
+      "TOTAL": {
+        "content": "$2"
+      }
+    }
+  },
+  "opt_update_phase_cleanup": {
+    "message": "Rimozione dei vecchi file"
+  },
   "opt_update_install_done": {
     "message": "La versione $VERSION$ è installata. L'estensione si sta riavviando.",
     "placeholders": {

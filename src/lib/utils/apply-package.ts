@@ -21,6 +21,21 @@
  *     use. Leaving them costs disk and, worse, makes "what is in this folder" a
  *     question with several answers.
  *
+ * Performance notes (why an upgrade used to feel stuck):
+ *
+ *  - The folder is typically an SMB-mounted directory, so every `getFileHandle`,
+ *    `createWritable`, `write` and `close` is a network round-trip. Doing them one
+ *    at a time serialises all that latency. Writes now run with bounded concurrency
+ *    and reuse already-resolved parent-directory handles, which removes most of the
+ *    per-file round-trips.
+ *  - The backup used to COPY every installed file (read + write) before writing the
+ *    new ones — that doubles the I/O. When the folder supports `moveEntry` (Chrome
+ *    113+) the backup instead RENAMES the top-level entries into the backup folder,
+ *    which is a handful of metadata operations instead of hundreds of file copies.
+ *    Where `moveEntry` is missing, the copy backup remains as a fallback.
+ *  - A progress callback reports the phase and a `done/total` count so the UI can
+ *    show a bar instead of an indeterminate spinner.
+ *
  * If a write fails half-way, the extension is NOT reloaded: the browser keeps running
  * the code it already loaded, and the folder is a mixture. The upgrade can simply be
  * run again — it writes the same files — and the backup is there if the folder has to
@@ -41,6 +56,18 @@ export type ApplyFailure =
   /** A file could not be written, or the backup could not be made. */
   | "write";
 
+/** Which stage of the install the progress callback is reporting. */
+export type ApplyPhase = "backup" | "write" | "cleanup";
+
+/** Progress for one stage of the install. */
+export interface ApplyProgress {
+  phase: ApplyPhase;
+  /** Items finished in this stage. */
+  done: number;
+  /** Items expected in this stage. */
+  total: number;
+}
+
 export interface ApplyOutcome {
   ok: boolean;
   failure?: ApplyFailure;
@@ -59,9 +86,21 @@ export interface ApplyOutcome {
 /** The folder inside the install folder that holds the previous version. */
 export const BACKUP_DIR = ".kesonode-backup";
 
+/** How many file writes run at once. Latency on a remote folder is the bottleneck. */
+const WRITE_CONCURRENCY = 8;
+
 function isMissing(error: unknown): boolean {
   return error instanceof DOMException && error.name === "NotFoundError";
 }
+
+/** A directory handle that may support moving a child entry (Chrome 113+). */
+type MovableDir = DirectoryHandleLike & {
+  moveEntry?: (
+    name: string,
+    destination: DirectoryHandleLike,
+    options?: { name?: string }
+  ) => Promise<void>;
+};
 
 /** Every file in the folder, as paths relative to it. Skips the backup folder. */
 async function listFiles(
@@ -81,28 +120,62 @@ async function listFiles(
   return out;
 }
 
-/** The folder a path lives in, created if it is not there yet. */
-async function ensureFolder(
-  dir: DirectoryHandleLike,
-  segments: string[]
-): Promise<DirectoryHandleLike> {
-  let current = dir;
-  for (const segment of segments) {
-    current = await current.getDirectoryHandle(segment, { create: true });
-  }
-  return current;
+/**
+ * A short-lived cache of directory handles, keyed by their path from the install root.
+ *
+ * `writeFile` used to call `getDirectoryHandle(segment, { create: true })` for every
+ * segment of every file, so files in the same directory re-resolved the same parent
+ * dozens of times — and each resolution is a round-trip on a remote folder. Resolving
+ * a path once and remembering it removes almost all of that.
+ */
+function makeDirCache(dir: DirectoryHandleLike) {
+  const cache = new Map<string, DirectoryHandleLike>();
+  cache.set("", dir);
+  return {
+    async get(segments: string[]): Promise<DirectoryHandleLike> {
+      let current = dir;
+      let path = "";
+      for (const segment of segments) {
+        path = path ? `${path}/${segment}` : segment;
+        const hit = cache.get(path);
+        if (hit) {
+          current = hit;
+          continue;
+        }
+        current = await current.getDirectoryHandle(segment, { create: true });
+        cache.set(path, current);
+      }
+      return current;
+    },
+  };
 }
 
-/** Write one file, creating the folders above it. */
+/** Run `worker` over `items` with at most `limit` in flight at once. */
+async function mapWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  let index = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const i = index++;
+      await worker(items[i]);
+    }
+  });
+  await Promise.all(runners);
+}
+
+/** Write one file, creating the folders above it via the shared cache. */
 async function writeFile(
-  dir: DirectoryHandleLike,
+  cache: ReturnType<typeof makeDirCache>,
   path: string,
   bytes: Uint8Array
 ): Promise<void> {
   const parts = path.split("/");
   const name = parts.pop();
   if (!name) throw new Error(`bad path ${path}`);
-  const folder = await ensureFolder(dir, parts);
+  const folder = await cache.get(parts);
   const handle = await folder.getFileHandle(name, { create: true });
   const writable = await handle.createWritable();
   try {
@@ -112,19 +185,58 @@ async function writeFile(
   }
 }
 
-/** Copy every installed file into the backup folder, keeping the layout. */
-async function makeBackup(
+/**
+ * Back up by RENAMING the install's top-level entries into the backup folder.
+ *
+ * Returns null when the folder cannot move entries, so the caller falls back to a copy.
+ * The manifest is deliberately left in place here and moved LAST (after the new files
+ * are written) so that a write failure mid-upgrade still leaves the old manifest
+ * loadable — the same guarantee the copy backup gives by overwriting it last.
+ */
+async function makeBackupByMove(
   dir: DirectoryHandleLike,
   version: string
+): Promise<{ backup: string; target: DirectoryHandleLike; count: number } | null> {
+  const movable = dir as MovableDir;
+  if (typeof movable.moveEntry !== "function") return null;
+  const cache = makeDirCache(dir);
+  const target = await cache.get([BACKUP_DIR, version]);
+  const names: string[] = [];
+  for await (const [name] of dir.entries()) {
+    if (name === BACKUP_DIR || name === "manifest.json") continue;
+    names.push(name);
+  }
+  let count = 0;
+  for (const name of names) {
+    await movable.moveEntry(name, target, { name });
+    count += 1;
+  }
+  return { backup: `${BACKUP_DIR}/${version}`, target, count };
+}
+
+/**
+ * Fallback backup: copy every installed file into the backup folder.
+ *
+ * Slower than the rename path, but works everywhere. Runs concurrently with the
+ * shared directory cache so it is still far cheaper than the original serial copy.
+ */
+async function makeBackupCopy(
+  dir: DirectoryHandleLike,
+  version: string,
+  onProgress?: (progress: ApplyProgress) => void
 ): Promise<{ backup: string; count: number }> {
-  const backup = `${BACKUP_DIR}/${version}`;
+  const cache = makeDirCache(dir);
   const files = await listFiles(dir);
-  for (const file of files) {
+  onProgress?.({ phase: "backup", done: 0, total: files.length });
+  let count = 0;
+  await mapWithConcurrency(files, WRITE_CONCURRENCY, async (file) => {
     const source = await file.handle.getFile();
     const bytes = new Uint8Array(await source.arrayBuffer());
-    await writeFile(dir, `${backup}/${file.path}`, bytes);
-  }
-  return { backup, count: files.length };
+    await writeFile(cache, `${BACKUP_DIR}/${version}/${file.path}`, bytes);
+    count += 1;
+    onProgress?.({ phase: "backup", done: count, total: files.length });
+  });
+  return { backup: `${BACKUP_DIR}/${version}`, count };
 }
 
 /**
@@ -136,7 +248,8 @@ async function makeBackup(
  */
 export async function applyPackageToFolder(
   dir: DirectoryHandleLike,
-  pkg: ExtractedPackage
+  pkg: ExtractedPackage,
+  onProgress?: (progress: ApplyProgress) => void
 ): Promise<ApplyOutcome> {
   let installedRaw: string;
   try {
@@ -185,11 +298,19 @@ export async function applyPackageToFolder(
   const previousVersion = typeof installed.version === "string" ? installed.version : undefined;
 
   let backup: string | undefined;
-  let written = 0;
+  let backupTarget: DirectoryHandleLike | undefined;
+  let backupByMove = false;
   try {
     if (previousVersion) {
-      const made = await makeBackup(dir, previousVersion);
-      backup = made.backup;
+      const moved = await makeBackupByMove(dir, previousVersion);
+      if (moved) {
+        backup = moved.backup;
+        backupTarget = moved.target;
+        backupByMove = true;
+      } else {
+        const made = await makeBackupCopy(dir, previousVersion, onProgress);
+        backup = made.backup;
+      }
     }
   } catch (error) {
     // No backup, no upgrade: the point of the copy is to be able to undo this.
@@ -203,17 +324,32 @@ export async function applyPackageToFolder(
     };
   }
 
+  const cache = makeDirCache(dir);
+  const manifestEntry = pkg.entries.find((e) => e.path === "manifest.json");
+  const others = pkg.entries.filter((e) => e.path !== "manifest.json");
+
+  // Create every parent directory once, up front, so the concurrent writes below only
+  // open files — never race on directory creation.
+  const parentPaths = new Set(
+    others.map((entry) => {
+      const segments = entry.path.split("/");
+      segments.pop();
+      return segments.join("/");
+    })
+  );
+  for (const parent of parentPaths) {
+    if (parent) await cache.get(parent.split("/"));
+  }
+
+  let written = 0;
+  const total = pkg.entries.length;
+  onProgress?.({ phase: "write", done: 0, total });
   try {
-    // The manifest goes last, on purpose — see the note at the top of this file.
-    const manifestEntry = pkg.entries.find((e) => e.path === "manifest.json");
-    for (const entry of pkg.entries) {
-      if (entry.path === "manifest.json") continue;
-      await writeFile(dir, entry.path, entry.bytes);
+    await mapWithConcurrency(others, WRITE_CONCURRENCY, async (entry) => {
+      await writeFile(cache, entry.path, entry.bytes);
       written += 1;
-    }
-    if (!manifestEntry) throw new Error("the package has no manifest.json");
-    await writeFile(dir, "manifest.json", manifestEntry.bytes);
-    written += 1;
+      onProgress?.({ phase: "write", done: written, total });
+    });
   } catch (error) {
     return {
       ok: false,
@@ -227,22 +363,53 @@ export async function applyPackageToFolder(
     };
   }
 
+  // With a rename backup the old manifest is still in place; move it now, after the new
+  // code is on disk and before the new manifest overwrites it.
+  if (backupByMove && backupTarget) {
+    try {
+      const movable = dir as MovableDir;
+      if (typeof movable.moveEntry === "function") {
+        await movable.moveEntry("manifest.json", backupTarget, { name: "manifest.json" });
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        failure: "write",
+        reason: `manifest backup failed: ${error instanceof Error ? error.message : String(error)}`,
+        previousVersion,
+        version: pkg.version,
+        written,
+        removed: 0,
+        backup,
+      };
+    }
+  }
+
+  if (!manifestEntry) throw new Error("the package has no manifest.json");
+  await writeFile(cache, "manifest.json", manifestEntry.bytes);
+  written += 1;
+  onProgress?.({ phase: "write", done: written, total });
+
   // Now the leftovers. A file the new package does not have is a chunk from an older
-  // release: nothing loads it, and every one of them makes the folder bigger.
+  // release: nothing loads it, and every one of them makes the folder bigger. With a
+  // rename backup there are none (the old entries were moved away), so this is mostly a
+  // no-op there; with a copy backup it removes the previous release's stale chunks.
   let removed = 0;
   const wanted = new Set(pkg.entries.map((e) => e.path));
   try {
     const stale = await listFiles(dir);
+    onProgress?.({ phase: "cleanup", done: 0, total: stale.length });
     for (const file of stale) {
       if (wanted.has(file.path)) continue;
       if (file.path.startsWith(`${BACKUP_DIR}/`)) continue;
       const parts = file.path.split("/");
       const name = parts.pop();
       if (!name) continue;
-      const folder = await ensureFolder(dir, parts);
+      const folder = await cache.get(parts);
       await folder.removeEntry(name);
       removed += 1;
     }
+    onProgress?.({ phase: "cleanup", done: removed, total: stale.length });
   } catch (error) {
     // Leftovers are untidy, not fatal: the new version is in place and reloads fine.
     return {
