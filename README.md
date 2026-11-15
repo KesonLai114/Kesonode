@@ -203,6 +203,29 @@ npm run package:source:pinned  # → web-ext-artifacts/source/ 下两个带固�
 - 自己构建 Google Drive 后端需要自己的 Google OAuth 客户端（`drive.file` 权限）；
   GitHub 与 WebDAV 只需填自己的凭据。
 
+### 发布新版本（维护者）
+
+打包只是发版的一半：**GitHub Release 只有在推送 `v*` 标签后才会出现**（`.github/workflows/release.yml`
+由标签触发）。过去版本号打进 zip、提交进 `插件版本/`、推到 main，却漏了打标签，结果 Releases
+页面停在旧版本、每次都要手动补。现在这一步由脚本收口：
+
+```bash
+npm run version:patch          # 1) 显式 +1（如已在目标版本可跳过）
+npm run package:source:pinned  # 2) 产出两个带固定 ID 的 zip
+#    把两个 zip + 安装说明.md 放进 插件版本/vX.Y.Z/ 并提交
+npm run release                # 3) 打标签 + 推标签 + 建 Release（可重复执行）
+npm run release:dry            #    预览第 3 步会做什么，不改任何东西
+```
+
+`npm run release` 读取 `package.json` 的版本，校验 `插件版本/vX.Y.Z/` 下两个 zip 齐全、工作树干净，
+然后用**已提交的那两个 zip**（与历史发布物逐字节一致、已核对固定 ID、无内置密钥）打 `vX.Y.Z`
+标签、推送，并用 `gh release create` 创建 Release。它是**幂等**的：标签已存在且指向当前提交就复用，
+Release 已存在就不动它的附件，所以重跑安全。正文会从 `CHANGELOG.md` 对应版本段落自动生成；也可
+`npm run release -- --notes-file path.md` 手写。建好后到 GitHub 上按需补一句「哪个包给哪个浏览器」
+和升级说明。需要本机已登录 `gh auth login`（repo 权限）。
+
+> 推标签也会触发 `release.yml`，它会重新构建 pinned 包；其建 Release 步骤同样是幂等的，两条路径不会冲突。
+
 `npm run checksum` 会对构建出的 `dist/` 计算确定性的 SHA-256 指纹，用于验证可复现构建。
 注意：带 Google OAuth 密钥的构建与不带密钥的 source 构建指纹不同；Release 说明目前还不附带该指纹。
 

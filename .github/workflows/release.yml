@@ -52,22 +52,39 @@ jobs:
       # web-ext-artifacts/chrome/ (the Web Store and Edge take the same file) and
       # .../firefox/ instead.
       #
-      # `package:source` does not merely rely on CI having no .env. It builds through
-      # `--mode source`, which blanks the secret via .env.source, and then reads the built
-      # bundle back and refuses to zip if a secret is in there after all. That check is the
-      # point: the two variants are otherwise indistinguishable once zipped.
-      - name: Package (source builds, both browsers)
-        run: npm run package:source
+      # PINNED source builds, for both browsers, into web-ext-artifacts/source/.
+      #
+      # `--mode source` blanks Kesonode's own Google OAuth secret via .env.source and
+      # reads the built bundle back to refuse a zip that still contains it — so the page
+      # stays safe to publish. `--keep-key` (package:source:PINNED) additionally retains
+      # the manifest `key` from public/manifest.json. That key is not a secret: it pins
+      # the extension ID of an unpacked install. Every zip ever published on the releases
+      # page was built this way (verified byte-for-byte against 插件版本/). Without it a
+      # download from here would get a DIFFERENT extension ID than the one-click upgrade
+      # expects, and the upgrade would be refused for changing the ID. Plain
+      # `package:source` strips the key — never use it for a release asset.
+      - name: Package (pinned source builds, both browsers)
+        run: npm run package:source:pinned
 
+      # Idempotent: a release may already exist because `scripts/release.mjs` published
+      # the committed 插件版本/ zips locally, or because this job was re-run. `gh release
+      # create` fails outright if the tag already has a release, which used to turn an
+      # otherwise-correct re-run red. Upload only when there is no release yet; keep the
+      # local script's assets as-is otherwise so a re-run cannot silently overwrite a
+      # known-good, already-downloaded package with a freshly built one.
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "$GITHUB_REF_NAME"
-          web-ext-artifacts/source/kesonode-chrome-*.zip
-          web-ext-artifacts/source/kesonode-firefox-*.zip
-          --title "$GITHUB_REF_NAME"
-          --generate-notes
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; leaving its assets untouched."
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              web-ext-artifacts/source/kesonode-chrome-*.zip \
+              web-ext-artifacts/source/kesonode-firefox-*.zip \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
 
       # The site renders a strip of store version numbers, and it has to be told to go and
       # look again. The obvious place for that was a `release: published` trigger in

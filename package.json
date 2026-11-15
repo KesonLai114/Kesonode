@@ -10,6 +10,8 @@
   "type": "module",
   "scripts": {
     "sync-version": "node scripts/sync-version.mjs",
+    "release": "node scripts/release.mjs",
+    "release:dry": "node scripts/release.mjs --dry-run",
     "version:patch": "node scripts/sync-version.mjs --bump",
     "version:minor": "node scripts/sync-version.mjs --minor",
     "version:major": "node scripts/sync-version.mjs --major",

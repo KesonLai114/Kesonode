@@ -1,5 +1,4 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,18 +25,42 @@ function build(): { buildDir: string; out: string } {
   return { buildDir, out: join(root, "package.zip") };
 }
 
+/**
+ * List zip entry names by reading the archive's central directory directly.
+ *
+ * No external tool: macOS `zip -Z1` works, but the old fallback `tar -tf` only
+ * happens to read zip with BSD tar — GNU tar on the Ubuntu CI runner rejects it
+ * ("This does not look like a tar archive"), so the whole Check step failed and
+ * no release workflow could ever finish. Parsing the format in-process is the
+ * same on every platform and keeps CI green.
+ */
 function zipEntries(path: string): string[] {
-  try {
-    return execFileSync("zip", ["-Z1", path], { encoding: "utf8" })
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-  } catch {
-    return execFileSync("tar", ["-tf", path], { encoding: "utf8" })
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
+  const buf = readFileSync(path);
+  // End of central directory record: signature 0x06054b50, searched from the end
+  // (a trailing comment can make its position variable). Min record size is 22.
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
   }
+  if (eocd < 0) throw new Error(`${path}: not a zip (no end-of-central-directory)`);
+
+  const count = buf.readUInt16LE(eocd + 10);
+  let off = buf.readUInt32LE(eocd + 16); // central directory offset
+  const names: string[] = [];
+  for (let n = 0; n < count; n++) {
+    if (buf.readUInt32LE(off) !== 0x02014b50) {
+      throw new Error(`${path}: bad central-directory entry at ${off}`);
+    }
+    const nameLen = buf.readUInt16LE(off + 28);
+    const extraLen = buf.readUInt16LE(off + 30);
+    const commentLen = buf.readUInt16LE(off + 32);
+    names.push(buf.toString("utf8", off + 46, off + 46 + nameLen));
+    off += 46 + nameLen + extraLen + commentLen;
+  }
+  return names;
 }
 
 afterEach(() => {

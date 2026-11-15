@@ -242,6 +242,32 @@ pick `dist-firefox/manifest.json`.
 > Building the Google Drive backend yourself requires your own Google OAuth client
 > (scope `drive.file`). GitHub and WebDAV need no setup beyond your own credentials.
 
+### Publishing a release (maintainers)
+
+Packaging is only half of shipping: a **GitHub Release appears only after a `v*` tag is
+pushed** (`.github/workflows/release.yml` is tag-triggered). In the past a version was
+zipped, committed under `插件版本/` and pushed to main, but the tag was forgotten — leaving
+the Releases page stale and requiring a manual fix every time. That step is now centralized:
+
+```bash
+npm run version:patch          # 1) bump explicitly (skip if already on the target version)
+npm run package:source:pinned  # 2) produce the two fixed-ID zips
+#    copy both zips + 安装说明.md into 插件版本/vX.Y.Z/ and commit
+npm run release                # 3) tag + push tag + create the Release (re-runnable)
+npm run release:dry            #    preview step 3 without changing anything
+```
+
+`npm run release` reads the version from `package.json`, verifies both zips exist under
+`插件版本/vX.Y.Z/` and the working tree is clean, then tags `vX.Y.Z`, pushes it and creates
+the Release from the **committed zips** (byte-identical to past release assets, pinned ID
+verified, no built-in secret). It is **idempotent**: an existing tag on HEAD is reused and an
+existing Release keeps its assets, so re-running is safe. The body is generated from the
+matching `CHANGELOG.md` section, or pass `npm run release -- --notes-file path.md`. Requires
+`gh auth login` with repo scope.
+
+> Pushing the tag also triggers `release.yml`, which rebuilds the pinned package; its
+> create step is idempotent too, so the two paths cannot conflict.
+
 ## Verifying a build
 
 `npm run checksum` prints a **build fingerprint**, a deterministic SHA-256 over the built
