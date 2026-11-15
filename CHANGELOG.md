@@ -8,21 +8,6 @@ All notable changes to Konode. Format loosely follows
 > upstream releases, not to this fork's product name. Kesonode-only changes are recorded
 > in the section immediately below and never change the upstream wire contract.
 
-## [Unreleased]
-
-### Fixed
-
-- **The upgrade button now asks for the zip first.** Previous builds opened
-  `showDirectoryPicker()` before the package picker on the first run. macOS titles that
-  dialog "where should this site save changes" and greys out every `.zip`, so pressing
-  "Upgrade now" looked like it refused to let users select the latest package. The first
-  dialog is now the file picker; the folder picker appears only after a package has been
-  chosen and verified, and only on first use or when the browser revoked the grant. The
-  same main button becomes that second step, so there is still only one primary action.
-  Both pickers are opened synchronously inside their click — this also removes a latent
-  failure where Chrome would not open the file picker at the end of the async chain.
-  Cancelling the folder dialog keeps the verified package for a retry.
-
 ## [1.5.23] - 2026-11-15
 
 ### Fixed
@@ -36,6 +21,17 @@ All notable changes to Konode. Format loosely follows
   baseline…" — it no longer snaps back to "Not set" beside a disabled "Use this browser
   as baseline" button, which looked like the click had been undone. Success, warning
   and failure messages are colour-coded instead of all being grey.
+
+- **The upgrade button now asks for the zip first.** Previous builds opened
+  `showDirectoryPicker()` before the package picker on the first run. macOS titles that
+  dialog "where should this site save changes" and greys out every `.zip`, so pressing
+  "Upgrade now" looked like it refused to let users select the latest package. The first
+  dialog is now the file picker; the folder picker appears only after a package has been
+  chosen and verified, and only on first use or when the browser revoked the grant. The
+  same main button becomes that second step, so there is still only one primary action.
+  Both pickers are opened synchronously inside their click — this also removes a latent
+  failure where Chrome would not open the file picker at the end of the async chain.
+  Cancelling the folder dialog keeps the verified package for a retry.
 
 ## [1.5.22] - 2026-11-15
 
