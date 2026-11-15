@@ -26,6 +26,14 @@ All notable changes to Konode. Format loosely follows
   `theme.css`) instead of hard-coded colour stops, so they stay visible in both light
   and dark mode.
 
+- **One-click upgrade now reports progress and writes faster.** The install step writes
+  files with bounded concurrency (8 at a time) and caches resolved parent directory
+  handles, removing the per-file round-trips that made upgrades slow on network-mounted
+  install folders. Backups now rename the top-level directory into
+  `.kesonode-backup/<version>` (falling back to a concurrent copy when the browser lacks
+  `moveEntry`) instead of copying every file. The settings UI shows "Backing up X / Y" /
+  "Writing X / Y" with a progress bar rather than a spinner-only "Upgrading…".
+
 ## [1.5.23] - 2026-11-15
 
 ### Fixed
