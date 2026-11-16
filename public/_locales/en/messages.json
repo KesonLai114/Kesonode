@@ -829,23 +829,23 @@
     "message": "Save changes"
   },
   "opt_nav_backend": {
-    "message": "Storage",
+    "message": "Cloud & encryption",
     "description": "Tab in the Settings navigation strip. Keep every nav label short: the strip has to stay legible when the window is narrow. The section heading is a separate key (opt_backend_head), so you can be shorter here than there."
   },
   "opt_nav_data": {
-    "message": "Data Types",
+    "message": "Synced content",
     "description": "Tab in the Settings navigation strip. Keep it short, see opt_nav_backend."
   },
   "opt_nav_device": {
-    "message": "Device",
+    "message": "This device",
     "description": "Tab in the Settings navigation strip. Keep it short, see opt_nav_backend."
   },
   "opt_nav_activity": {
-    "message": "Activity",
+    "message": "Sync history",
     "description": "Tab in the Settings navigation strip. Keep it short, see opt_nav_backend."
   },
   "opt_nav_advanced": {
-    "message": "Advanced",
+    "message": "Tools & diagnostics",
     "description": "Tab in the Settings navigation strip. Keep it short, see opt_nav_backend."
   },
   "opt_setup_title": {
@@ -859,7 +859,7 @@
     "message": "Pick what to sync"
   },
   "opt_backend_head": {
-    "message": "Storage",
+    "message": "Cloud storage & encryption",
     "description": "Heading of the Storage section. Separate from the nav label opt_nav_backend, which has to fit a narrow strip, so this one can be as long as it needs to be."
   },
   "opt_backend_head_sub": {
@@ -927,7 +927,7 @@
     "message": "Kesonode syncs your browser to storage you own. There's no Kesonode server. Two quick steps and you're done. (If the setup wizard never opened on your browser, you can do everything right here.)"
   },
   "opt_data_head": {
-    "message": "Data Types",
+    "message": "Synced content",
     "description": "Heading of the Data Types tab. Separate from the nav label opt_nav_data, which has to fit a narrow strip."
   },
   "opt_data_head_sub": {
@@ -1019,11 +1019,11 @@
     "description": "Joins two alternatives that are each their own link, so they cannot be part of one translatable sentence."
   },
   "opt_device_head": {
-    "message": "Device",
-    "description": "Heading of the Device tab. Separate from the nav label opt_nav_device, which has to fit a narrow strip."
+    "message": "This device & sync",
+    "description": "Heading of the device tab. Separate from the nav label opt_nav_device, which has to fit a narrow strip."
   },
   "opt_device_head_sub": {
-    "message": "Identify this device in the sync network."
+    "message": "This device's identity, sync behavior, conflict handling and safety guards."
   },
   "opt_identity_section": {
     "message": "Identity"
@@ -1469,7 +1469,7 @@
     "description": "Under the bookmark tree, when nothing is ticked."
   },
   "opt_activity_head": {
-    "message": "Activity",
+    "message": "Sync history",
     "description": "Heading of the Activity tab. Separate from the nav label opt_nav_activity, which has to fit a narrow strip."
   },
   "opt_activity_head_sub": {
@@ -1988,11 +1988,11 @@
     }
   },
   "opt_advanced_head": {
-    "message": "Advanced",
-    "description": "Heading of the Advanced tab. Separate from the nav label opt_nav_advanced, which has to fit a narrow strip."
+    "message": "Tools & diagnostics",
+    "description": "Heading of the tools tab. Separate from the nav label opt_nav_advanced, which has to fit a narrow strip."
   },
   "opt_advanced_head_sub": {
-    "message": "Backups, feedback and developer options."
+    "message": "Backups, feedback, diagnostics, software updates and developer options."
   },
   "opt_impexp_section": {
     "message": "Import / Export"

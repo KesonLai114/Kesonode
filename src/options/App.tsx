@@ -336,7 +336,8 @@ const DATA_TYPES: DataType[] = ["bookmarks", "sessions", "history", "extensions"
 
 export default function OptionsApp() {
   const [settings, setSettings]   = useState<SyncSettings | null>(null);
-  // The popup deep-links here with #activity; otherwise start on Storage.
+  // The popup deep-links here with #activity (log) or #device (conflicts); otherwise
+  // start on the cloud tab. These ids are stable — only the translated labels change.
   const [activeNav, setActiveNav] = useState<NavSection>(() => {
     const hash = window.location.hash.replace("#", "");
     return NAV.some((n) => n.id === hash) ? (hash as NavSection) : "backend";
@@ -760,7 +761,7 @@ export default function OptionsApp() {
   }, []);
 
   useEffect(() => {
-    if (activeNav !== "activity") return;
+    if (activeNav !== "device") return;
     void loadDevices();
   }, [activeNav, loadDevices]);
 
@@ -894,7 +895,7 @@ export default function OptionsApp() {
   }, []);
 
   const lastStatus = useRef<SyncState["status"] | null>(null);
-  // A sync that finished while Activity was open but hidden, owed a re-read on the way back.
+  // A sync that finished while a live settings tab was hidden owed a re-read on the way back.
   // Skipping the read while hidden is what keeps a background tab from spending requests; not
   // making it up afterwards is what left the device list quoting a peer's old upload time,
   // with the page in plain view, until the next sync or a reload. Seen with Settings behind
@@ -913,8 +914,8 @@ export default function OptionsApp() {
     if (activeNav === "data") void loadAutosaved();
     if (activeNav !== "activity" && activeNav !== "device") return;
     if (document.visibilityState !== "visible") { missedWhileHidden.current = true; return; }
+    if (activeNav === "device") void loadDevices();
     if (activeNav === "activity") {
-      void loadDevices();
       void loadSnapshots(true);
       void loadReports(true);
     }
@@ -928,10 +929,8 @@ export default function OptionsApp() {
       if (document.visibilityState !== "visible" || !missedWhileHidden.current) return;
       if (activeNav !== "activity" && activeNav !== "device") return; // opening the tab reads anyway
       missedWhileHidden.current = false;
-      if (activeNav === "activity") {
-        void loadDevices();
-        void loadSnapshots(true);
-      }
+      if (activeNav === "device") void loadDevices();
+      if (activeNav === "activity") void loadSnapshots(true);
       void loadBaseline();
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -2646,6 +2645,45 @@ export default function OptionsApp() {
                 )}
               </div>
 
+              {/* Folder layout decides where the files land, so it sits beside the
+                  provider and encryption cards instead of in a drawer with Feedback
+                  and About — the two answers belong to the same question. */}
+              <div className="settings-section">
+                <div className="settings-card-head">{t("opt_compat_section")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_compat_mode_label")}</div>
+                      <div className="row-desc">{t("opt_compat_mode_desc")}</div>
+                    </div>
+                  </div>
+                </div>
+                {([
+                  { value: "upstream",   labelKey: "opt_compat_mode_upstream" },
+                  { value: "isolated",   labelKey: "opt_compat_mode_isolated" },
+                  { value: "standalone", labelKey: "opt_compat_mode_standalone" },
+                ] as const).map(({ value, labelKey }) => (
+                  <label key={value} className="settings-row radio-row">
+                    <div className="settings-row-left">
+                      <div><div className="row-label">{t(labelKey)}</div></div>
+                    </div>
+                    <input type="radio" name="compat" className="radio-input"
+                      value={value} checked={(settings.compat_mode ?? "upstream") === value}
+                      onChange={() => update({ compat_mode: value })} />
+                    <span className="radio-circle" aria-hidden="true" />
+                  </label>
+                ))}
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_compat_folder_label")}</div>
+                      <div className="row-desc">{t("opt_compat_folder_desc")}</div>
+                    </div>
+                  </div>
+                  <span className="mono-value">{folderPathFor(settings.compat_mode)}</span>
+                </div>
+              </div>
+
             </div>
           )}
 
@@ -3152,6 +3190,118 @@ export default function OptionsApp() {
                 </div>
               </div>
 
+              {/* Replaces the "Devices: 3" and "Peer sessions" tiles. A count answered the
+                  wrong question: with two Windows laptops both on Brave, knowing there are
+                  three of them doesn't tell you WHICH is which, and that is exactly what
+                  cost half a day on a field report. */}
+              <div className="settings-section">
+                <div className="settings-card-head">
+                  {t("opt_devices_section")}
+                  <span className="head-sub">{t("opt_devices_section_sub")}</span>
+                </div>
+                {forgetResult && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div className="row-desc">
+                        {plural("opt_forget_result", forgetResult.removed, [String(forgetResult.removed), isolate(forgetResult.label)])}
+                      </div>
+                    </div>
+                    <button className="btn-secondary" style={{ flexShrink: 0 }}
+                      onClick={() => setForgetResult(null)}>{t("opt_dismiss")}</button>
+                  </div>
+                )}
+                {devicesError && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div className="row-desc" style={{ color: "var(--danger)" }}>
+                        {t("opt_devices_error", devicesError)}
+                        {!devicesError.startsWith(PERMISSION_LOST_PREFIX) && <> {t("opt_error_check_connection")}</>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {devices === null && !devicesError && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div className="row-desc"><Loader2 size={12} className="spin" /> {t("opt_devices_loading")}</div>
+                    </div>
+                  </div>
+                )}
+                {devices?.length === 0 && !devicesError && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div className="row-desc">{t("opt_devices_empty")}</div>
+                    </div>
+                  </div>
+                )}
+                {devices?.map((d) => (
+                  <Fragment key={d.device_id}>
+                    <div className="settings-row">
+                      <div className="settings-row-left">
+                        <div>
+                          <div className="row-label">
+                            {d.label != null ? <bdi>{d.label}</bdi> : t("opt_device_unnamed", d.device_id.slice(0, 8))}
+                            {/* The 8-char id, next to the name rather than inside it. It is
+                                what a restore point's name ends with, so this is the row that
+                                answers "which device made 451dbeb9". Kept out of the label
+                                itself: the label is the user's words, and a machine half
+                                glued onto it survived every edit. */}
+                            {d.label != null && !d.label.includes(d.device_id.replace(/-/g, "").slice(0, 8))
+                              && <span className="device-short-id">{d.device_id.replace(/-/g, "").slice(0, 8)}</span>}
+                            {/* What the device runs, from its own packets (#10). It tells the
+                                Chrome build and the Firefox build on one machine apart; two
+                                identical machines it cannot, which the time below does. */}
+                            {d.browser && <span className="device-browser">{browserText(d.browser)}</span>}
+                            {d.isSelf && <span className="badge-active" style={{ marginLeft: 8 }}>{t("opt_this_device")}</span>}
+                            {isDormant(d.lastSeen, d.isSelf, Date.now()) && <span className="badge-quiet">{t("opt_device_dormant")}</span>}
+                          </div>
+                          <div className="row-desc">
+                            {typeList(d.types)}
+                            {/* "39 days ago" is what tells a ghost from a live device at a
+                                glance; the exact time stays one hover away. */}
+                            {d.lastSeen && <> <span title={new Date(d.lastSeen).toLocaleString()}>
+                              {t("opt_last_upload_ago", relativeTime(d.lastSeen, Date.now(), catalogueLocale()))}
+                            </span></>}
+                          </div>
+                          {/* A mark, never an action: the files are in the user's own storage,
+                              so Forget stays theirs to press (#10, open question 3). */}
+                          {isDormant(d.lastSeen, d.isSelf, Date.now()) && (
+                            <div className="row-desc">{plural("opt_device_dormant_note", DORMANT_DEVICE_DAYS)}</div>
+                          )}
+                        </div>
+                      </div>
+                      {/* No trash can. The icon did more of the work than the word did: a bin
+                          next to "Forget" reads as "your bookmarks are about to go", when what
+                          goes is a few files in your own storage folder. */}
+                      {!d.isSelf && confirmForget !== d.device_id && (
+                        <button className="btn-secondary" disabled={forgetting !== null}
+                          onClick={() => setConfirmForget(d.device_id)}>
+                          {forgetting === d.device_id && <Loader2 size={12} className="spin" />} {t("opt_forget")}
+                        </button>
+                      )}
+                    </div>
+                    {/* The confirm carries the facts, because this is where the decision is
+                        made — a line in the section header above is read once, if at all. */}
+                    {confirmForget === d.device_id && (
+                      <div className="settings-row">
+                        <div className="settings-row-left">
+                          <div className="row-desc">
+                            {plural("opt_forget_confirm", d.types.length, [String(d.types.length), typeList(d.types)])}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                          <button className="btn-secondary" onClick={() => setConfirmForget(null)}>{t("opt_cancel")}</button>
+                          <button className="btn-secondary" style={{ color: "var(--danger)" }}
+                            onClick={() => void forgetDevice(d.device_id, d.label ?? t("opt_that_device"))}>
+                            {t("opt_forget_it")}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </Fragment>
+                ))}
+              </div>
+
               <div className="settings-section">
                 <div className="settings-card-head">{t("opt_behavior_section")}</div>
                 <div className="settings-row">
@@ -3352,6 +3502,18 @@ export default function OptionsApp() {
                 })}
               </div>
 
+              {/* ── Conflicts (#35) ──
+                  Right after the strategy that produced them: choosing "manual" and
+                  answering a manual conflict are one task, so they live together. The
+                  popup's Resolve button deep-links here. */}
+              <ConflictsSection
+                conflicts={syncState?.pending_conflicts ?? []}
+                onResolved={async () => {
+                  const after = await request({ type: "GET_STATE" });
+                  if (after.ok && after.res.type === "STATE") setSyncState(after.res.payload);
+                }}
+              />
+
               <div className="settings-section">
                 <div className="settings-card-head">{t("opt_safety_section")}</div>
                 <div className="settings-row">
@@ -3400,6 +3562,42 @@ export default function OptionsApp() {
                 </div>
               </div>
 
+              {/* Another guard against a peer wiping its tree: it belongs with the
+                  bulk-delete threshold above, not in the tools drawer. */}
+              <div className="settings-section">
+                <div className="settings-card-head">{t("opt_guard_section")}</div>
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div>
+                      <div className="row-label">{t("opt_guard_label")}</div>
+                      <div className="row-desc">{t("opt_guard_desc")}</div>
+                    </div>
+                  </div>
+                  <label className="toggle-wrap">
+                    <input type="checkbox" className="toggle-input"
+                      checked={settings.guard_enabled ?? true}
+                      onChange={(e) => update({ guard_enabled: e.target.checked })} />
+                    <span className="toggle-track"><span className="toggle-thumb" /></span>
+                  </label>
+                </div>
+                {(settings.guard_enabled ?? true) && (
+                  <div className="settings-row">
+                    <div className="settings-row-left">
+                      <div>
+                        <div className="row-label">{t("opt_guard_cap_label")}</div>
+                        <div className="row-desc">{t("opt_guard_cap_desc")}</div>
+                      </div>
+                    </div>
+                    <div className="slider-wrap">
+                      <input type="range" min={5} max={200} step={5}
+                        value={settings.guard_cap ?? 20}
+                        onChange={(e) => update({ guard_cap: Number(e.target.value) })} className="slider" />
+                      <span className="slider-val">{settings.guard_cap ?? 20}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
             </div>
           )}
 
@@ -3425,17 +3623,6 @@ export default function OptionsApp() {
               <div className="section-wrap">
                 <h1 className="page-title">{t("opt_activity_head")}</h1>
                 <p className="page-subtitle">{t("opt_activity_head_sub")}</p>
-
-                {/* ── Conflicts (#35) ──
-                    First on the tab, because the popup's Resolve button lands here and a
-                    question waiting for an answer should not sit below the device list. */}
-                <ConflictsSection
-                  conflicts={syncState?.pending_conflicts ?? []}
-                  onResolved={async () => {
-                    const after = await request({ type: "GET_STATE" });
-                    if (after.ok && after.res.type === "STATE") setSyncState(after.res.payload);
-                  }}
-                />
 
                 <div className="settings-section">
                   <div className="settings-card-head">{t("opt_sync_activity_section")}</div>
@@ -3524,118 +3711,6 @@ export default function OptionsApp() {
                     <div className="stat-tile"><div className="stat-value">{totalSyncRuns}</div><div className="stat-label">{t("opt_stat_runs")}</div></div>
                     <div className="stat-tile"><div className="stat-value stat-value-sm">{lastSyncLabel}</div><div className="stat-label">{t("opt_stat_last_sync")}</div></div>
                   </div>
-                </div>
-
-                {/* Replaces the "Devices: 3" and "Peer sessions" tiles. A count answered the
-                    wrong question: with two Windows laptops both on Brave, knowing there are
-                    three of them doesn't tell you WHICH is which, and that is exactly what
-                    cost half a day on a field report. */}
-                <div className="settings-section">
-                  <div className="settings-card-head">
-                    {t("opt_devices_section")}
-                    <span className="head-sub">{t("opt_devices_section_sub")}</span>
-                  </div>
-                  {forgetResult && (
-                    <div className="settings-row">
-                      <div className="settings-row-left">
-                        <div className="row-desc">
-                          {plural("opt_forget_result", forgetResult.removed, [String(forgetResult.removed), isolate(forgetResult.label)])}
-                        </div>
-                      </div>
-                      <button className="btn-secondary" style={{ flexShrink: 0 }}
-                        onClick={() => setForgetResult(null)}>{t("opt_dismiss")}</button>
-                    </div>
-                  )}
-                  {devicesError && (
-                    <div className="settings-row">
-                      <div className="settings-row-left">
-                        <div className="row-desc" style={{ color: "var(--danger)" }}>
-                          {t("opt_devices_error", devicesError)}
-                          {!devicesError.startsWith(PERMISSION_LOST_PREFIX) && <> {t("opt_error_check_connection")}</>}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {devices === null && !devicesError && (
-                    <div className="settings-row">
-                      <div className="settings-row-left">
-                        <div className="row-desc"><Loader2 size={12} className="spin" /> {t("opt_devices_loading")}</div>
-                      </div>
-                    </div>
-                  )}
-                  {devices?.length === 0 && !devicesError && (
-                    <div className="settings-row">
-                      <div className="settings-row-left">
-                        <div className="row-desc">{t("opt_devices_empty")}</div>
-                      </div>
-                    </div>
-                  )}
-                  {devices?.map((d) => (
-                    <Fragment key={d.device_id}>
-                      <div className="settings-row">
-                        <div className="settings-row-left">
-                          <div>
-                            <div className="row-label">
-                              {d.label != null ? <bdi>{d.label}</bdi> : t("opt_device_unnamed", d.device_id.slice(0, 8))}
-                              {/* The 8-char id, next to the name rather than inside it. It is
-                                  what a restore point's name ends with, so this is the row that
-                                  answers "which device made 451dbeb9". Kept out of the label
-                                  itself: the label is the user's words, and a machine half
-                                  glued onto it survived every edit. */}
-                              {d.label != null && !d.label.includes(d.device_id.replace(/-/g, "").slice(0, 8))
-                                && <span className="device-short-id">{d.device_id.replace(/-/g, "").slice(0, 8)}</span>}
-                              {/* What the device runs, from its own packets (#10). It tells the
-                                  Chrome build and the Firefox build on one machine apart; two
-                                  identical machines it cannot, which the time below does. */}
-                              {d.browser && <span className="device-browser">{browserText(d.browser)}</span>}
-                              {d.isSelf && <span className="badge-active" style={{ marginLeft: 8 }}>{t("opt_this_device")}</span>}
-                              {isDormant(d.lastSeen, d.isSelf, Date.now()) && <span className="badge-quiet">{t("opt_device_dormant")}</span>}
-                            </div>
-                            <div className="row-desc">
-                              {typeList(d.types)}
-                              {/* "39 days ago" is what tells a ghost from a live device at a
-                                  glance; the exact time stays one hover away. */}
-                              {d.lastSeen && <> <span title={new Date(d.lastSeen).toLocaleString()}>
-                                {t("opt_last_upload_ago", relativeTime(d.lastSeen, Date.now(), catalogueLocale()))}
-                              </span></>}
-                            </div>
-                            {/* A mark, never an action: the files are in the user's own storage,
-                                so Forget stays theirs to press (#10, open question 3). */}
-                            {isDormant(d.lastSeen, d.isSelf, Date.now()) && (
-                              <div className="row-desc">{plural("opt_device_dormant_note", DORMANT_DEVICE_DAYS)}</div>
-                            )}
-                          </div>
-                        </div>
-                        {/* No trash can. The icon did more of the work than the word did: a bin
-                            next to "Forget" reads as "your bookmarks are about to go", when what
-                            goes is a few files in your own storage folder. */}
-                        {!d.isSelf && confirmForget !== d.device_id && (
-                          <button className="btn-secondary" disabled={forgetting !== null}
-                            onClick={() => setConfirmForget(d.device_id)}>
-                            {forgetting === d.device_id && <Loader2 size={12} className="spin" />} {t("opt_forget")}
-                          </button>
-                        )}
-                      </div>
-                      {/* The confirm carries the facts, because this is where the decision is
-                          made — a line in the section header above is read once, if at all. */}
-                      {confirmForget === d.device_id && (
-                        <div className="settings-row">
-                          <div className="settings-row-left">
-                            <div className="row-desc">
-                              {plural("opt_forget_confirm", d.types.length, [String(d.types.length), typeList(d.types)])}
-                            </div>
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                            <button className="btn-secondary" onClick={() => setConfirmForget(null)}>{t("opt_cancel")}</button>
-                            <button className="btn-secondary" style={{ color: "var(--danger)" }}
-                              onClick={() => void forgetDevice(d.device_id, d.label ?? t("opt_that_device"))}>
-                              {t("opt_forget_it")}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </Fragment>
-                  ))}
                 </div>
 
                 {/* ── Blocked deletion ──
@@ -4433,40 +4508,6 @@ export default function OptionsApp() {
                 </div>
               )}
 
-              <div className="settings-section">
-                <div className="settings-card-head">{t("opt_guard_section")}</div>
-                <div className="settings-row">
-                  <div className="settings-row-left">
-                    <div>
-                      <div className="row-label">{t("opt_guard_label")}</div>
-                      <div className="row-desc">{t("opt_guard_desc")}</div>
-                    </div>
-                  </div>
-                  <label className="toggle-wrap">
-                    <input type="checkbox" className="toggle-input"
-                      checked={settings.guard_enabled ?? true}
-                      onChange={(e) => update({ guard_enabled: e.target.checked })} />
-                    <span className="toggle-track"><span className="toggle-thumb" /></span>
-                  </label>
-                </div>
-                {(settings.guard_enabled ?? true) && (
-                  <div className="settings-row">
-                    <div className="settings-row-left">
-                      <div>
-                        <div className="row-label">{t("opt_guard_cap_label")}</div>
-                        <div className="row-desc">{t("opt_guard_cap_desc")}</div>
-                      </div>
-                    </div>
-                    <div className="slider-wrap">
-                      <input type="range" min={5} max={200} step={5}
-                        value={settings.guard_cap ?? 20}
-                        onChange={(e) => update({ guard_cap: Number(e.target.value) })} className="slider" />
-                      <span className="slider-val">{settings.guard_cap ?? 20}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
               {/* Sync doctor (P0): a health summary in plain words, plus a bundle that is
                   safe to paste into an issue — no passphrase, token, password or full
                   storage URL survives redact(). */}
@@ -4533,42 +4574,6 @@ export default function OptionsApp() {
                       onChange={(e) => update({ debug_mode: e.target.checked })} />
                     <span className="toggle-track"><span className="toggle-thumb" /></span>
                   </label>
-                </div>
-              </div>
-
-              <div className="settings-section">
-                <div className="settings-card-head">{t("opt_compat_section")}</div>
-                <div className="settings-row">
-                  <div className="settings-row-left">
-                    <div>
-                      <div className="row-label">{t("opt_compat_mode_label")}</div>
-                      <div className="row-desc">{t("opt_compat_mode_desc")}</div>
-                    </div>
-                  </div>
-                </div>
-                {([
-                  { value: "upstream",   labelKey: "opt_compat_mode_upstream" },
-                  { value: "isolated",   labelKey: "opt_compat_mode_isolated" },
-                  { value: "standalone", labelKey: "opt_compat_mode_standalone" },
-                ] as const).map(({ value, labelKey }) => (
-                  <label key={value} className="settings-row radio-row">
-                    <div className="settings-row-left">
-                      <div><div className="row-label">{t(labelKey)}</div></div>
-                    </div>
-                    <input type="radio" name="compat" className="radio-input"
-                      value={value} checked={(settings.compat_mode ?? "upstream") === value}
-                      onChange={() => update({ compat_mode: value })} />
-                    <span className="radio-circle" aria-hidden="true" />
-                  </label>
-                ))}
-                <div className="settings-row">
-                  <div className="settings-row-left">
-                    <div>
-                      <div className="row-label">{t("opt_compat_folder_label")}</div>
-                      <div className="row-desc">{t("opt_compat_folder_desc")}</div>
-                    </div>
-                  </div>
-                  <span className="mono-value">{folderPathFor(settings.compat_mode)}</span>
                 </div>
               </div>
 

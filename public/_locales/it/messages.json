@@ -694,19 +694,19 @@
     "message": "Salva modifiche"
   },
   "opt_nav_backend": {
-    "message": "Archiviazione"
+    "message": "Cloud e crittografia"
   },
   "opt_nav_data": {
-    "message": "Tipi di dati"
+    "message": "Contenuti sincronizzati"
   },
   "opt_nav_device": {
-    "message": "Dispositivo"
+    "message": "Questo dispositivo"
   },
   "opt_nav_activity": {
-    "message": "Attività"
+    "message": "Cronologia sincronizzazione"
   },
   "opt_nav_advanced": {
-    "message": "Avanzate"
+    "message": "Strumenti e diagnostica"
   },
   "opt_setup_title": {
     "message": "Completa la configurazione di Kesonode"
@@ -718,7 +718,7 @@
     "message": "Scegli cosa sincronizzare"
   },
   "opt_backend_head": {
-    "message": "Spazio di archiviazione"
+    "message": "Cloud e crittografia"
   },
   "opt_backend_head_sub": {
     "message": "Scegli dove archiviare i dati di sincronizzazione. I tuoi dati non passano mai dai nostri server."
@@ -778,7 +778,7 @@
     "message": "Kesonode sincronizza il tuo browser con uno spazio di archiviazione di tua proprietà. Non c'è nessun server di Kesonode. Due passaggi veloci e hai finito. (Se la procedura guidata di configurazione non si è mai aperta nel tuo browser, puoi fare tutto da qui.)"
   },
   "opt_data_head": {
-    "message": "Tipi di dati"
+    "message": "Contenuti sincronizzati"
   },
   "opt_data_head_sub": {
     "message": "Scegli cosa sincronizzare tra i tuoi dispositivi."
@@ -859,7 +859,7 @@
     "message": "o"
   },
   "opt_device_head": {
-    "message": "Dispositivo"
+    "message": "Questo dispositivo"
   },
   "opt_device_head_sub": {
     "message": "Identifica questo dispositivo nella rete di sincronizzazione."
@@ -1258,7 +1258,7 @@
     "message": "Ancora nulla è escluso."
   },
   "opt_activity_head": {
-    "message": "Attività"
+    "message": "Cronologia sincronizzazione"
   },
   "opt_activity_head_sub": {
     "message": "Cosa ha fatto Kesonode su questo dispositivo e con quali dati lavora. Tutto viene calcolato qui: i numeri, i punti di ripristino e le ultime 200 voci del registro sono locali, e nulla di questa pagina viene mai caricato."
@@ -1734,7 +1734,7 @@
     }
   },
   "opt_advanced_head": {
-    "message": "Impostazioni avanzate"
+    "message": "Strumenti e diagnostica"
   },
   "opt_advanced_head_sub": {
     "message": "Backup, feedback e opzioni per sviluppatori."

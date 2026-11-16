@@ -685,19 +685,19 @@
     "message": "Guardar cambios"
   },
   "opt_nav_backend": {
-    "message": "Almacenamiento"
+    "message": "Nube y cifrado"
   },
   "opt_nav_data": {
-    "message": "Tipos de datos"
+    "message": "Contenido sincronizado"
   },
   "opt_nav_device": {
-    "message": "Dispositivo"
+    "message": "Este dispositivo"
   },
   "opt_nav_activity": {
-    "message": "Actividad"
+    "message": "Historial de sincronización"
   },
   "opt_nav_advanced": {
-    "message": "Avanzado"
+    "message": "Herramientas y diagnóstico"
   },
   "opt_setup_title": {
     "message": "Finaliza la configuración de Kesonode"
@@ -709,7 +709,7 @@
     "message": "Elige qué quieres sincronizar"
   },
   "opt_backend_head": {
-    "message": "Almacenamiento"
+    "message": "Nube y cifrado"
   },
   "opt_backend_head_sub": {
     "message": "Elige dónde se almacenan tus datos de sincronización. Tus datos nunca pasan por nuestros servidores."
@@ -769,7 +769,7 @@
     "message": "Kesonode sincroniza tu navegador con el espacio de almacenamiento de tu propiedad. No hay ningún servidor de Kesonode. Dos pasos rápidos y ya está. (Si el asistente de configuración nunca se abrió en tu navegador, puedes hacer todo desde aquí mismo.)"
   },
   "opt_data_head": {
-    "message": "Tipos de datos"
+    "message": "Contenido sincronizado"
   },
   "opt_data_head_sub": {
     "message": "Elige qué deseas que se sincronice entre tus dispositivos."
@@ -850,7 +850,7 @@
     "message": "o"
   },
   "opt_device_head": {
-    "message": "Dispositivo"
+    "message": "Este dispositivo"
   },
   "opt_device_head_sub": {
     "message": "Identifica este dispositivo en la red de sincronización."
@@ -943,7 +943,7 @@
     "message": "Límite de eliminación masiva desde otro dispositivo"
   },
   "opt_activity_head": {
-    "message": "Actividad"
+    "message": "Historial de sincronización"
   },
   "opt_sync_activity_section": {
     "message": "Actividad de sincronización"
@@ -1366,7 +1366,7 @@
     }
   },
   "opt_advanced_head": {
-    "message": "Avanzado"
+    "message": "Herramientas y diagnóstico"
   },
   "opt_advanced_head_sub": {
     "message": "Copias de seguridad, comentarios y opciones de desarrollador."

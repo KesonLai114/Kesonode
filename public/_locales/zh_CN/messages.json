@@ -685,19 +685,19 @@
     "message": "保存更改"
   },
   "opt_nav_backend": {
-    "message": "存储"
+    "message": "云端与加密"
   },
   "opt_nav_data": {
-    "message": "数据类型"
+    "message": "同步内容"
   },
   "opt_nav_device": {
-    "message": "设备"
+    "message": "本机与同步"
   },
   "opt_nav_activity": {
-    "message": "活动"
+    "message": "同步记录"
   },
   "opt_nav_advanced": {
-    "message": "高级"
+    "message": "工具与诊断"
   },
   "opt_setup_title": {
     "message": "完成 Kesonode 设置"
@@ -709,7 +709,7 @@
     "message": "选择要同步的内容"
   },
   "opt_backend_head": {
-    "message": "存储"
+    "message": "云端与加密"
   },
   "opt_backend_head_sub": {
     "message": "选择同步数据的存储位置。您的数据永不触及我们的服务器。"
@@ -769,7 +769,7 @@
     "message": "Kesonode 将您的浏览器同步至您自己的存储空间。不存在 Kesonode 服务器。只需简单两步即可完成。（如果设置向导未在您的浏览器中打开，您可以在此处完成所有设置。）"
   },
   "opt_data_head": {
-    "message": "数据类型"
+    "message": "同步内容"
   },
   "opt_data_head_sub": {
     "message": "选择在设备之间同步的内容。"
@@ -850,10 +850,10 @@
     "message": "或"
   },
   "opt_device_head": {
-    "message": "设备"
+    "message": "本机与同步"
   },
   "opt_device_head_sub": {
-    "message": "在同步网络中标识此设备。"
+    "message": "此设备的身份、同步行为、冲突处理与安全护栏。"
   },
   "opt_identity_section": {
     "message": "身份"
@@ -1249,7 +1249,7 @@
     "message": "尚未排除任何内容。"
   },
   "opt_activity_head": {
-    "message": "活动"
+    "message": "同步记录"
   },
   "opt_activity_head_sub": {
     "message": "Kesonode 在此设备上所执行的操作，以及它所依赖的内容。所有数据均在本地计算：数字、还原点以及最近 200 条日志条目都只存放在本地，此页面上的任何信息都不会被上传。"
@@ -1932,10 +1932,10 @@
     }
   },
   "opt_advanced_head": {
-    "message": "高级"
+    "message": "工具与诊断"
   },
   "opt_advanced_head_sub": {
-    "message": "备份、反馈和开发者选项。"
+    "message": "备份、反馈、诊断、软件更新与开发者选项。"
   },
   "opt_impexp_section": {
     "message": "导入/导出"

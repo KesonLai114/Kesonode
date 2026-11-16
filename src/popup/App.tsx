@@ -360,15 +360,16 @@ export default function PopupApp() {
   const openOnboarding = () =>
     void browser.tabs.create({ url: browser.runtime.getURL("onboarding.html") });
 
-  // The audit log lives in Settings → Activity (a popup is too cramped to scan a
-  // long history). The hash selects that tab on load.
+  // The audit log lives in Settings → Sync history (a popup is too cramped to scan a
+  // long history). The hash is the stable tab id, independent of the translated label.
   const openActivityLog = () =>
     void browser.tabs.create({ url: browser.runtime.getURL("options.html#activity") });
 
   // What differs on a conflict does not fit in 360px, so the card's Resolve button opens
-  // the full list in Settings → Activity, where the same two answers are given (#35).
+  // the full list in Settings → This device, next to the strategy that chose "manual"
+  // (#35). The hash is the stable tab id; only the label was renamed.
   const openConflicts = () =>
-    void browser.tabs.create({ url: browser.runtime.getURL("options.html#activity") });
+    void browser.tabs.create({ url: browser.runtime.getURL("options.html#device") });
 
   const openDataTypes = () =>
     void browser.tabs.create({ url: browser.runtime.getURL("options.html#data") });

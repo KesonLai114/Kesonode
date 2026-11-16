@@ -694,19 +694,19 @@
     "message": "儲存變更"
   },
   "opt_nav_backend": {
-    "message": "儲存空間"
+    "message": "雲端與加密"
   },
   "opt_nav_data": {
-    "message": "資料類型"
+    "message": "同步內容"
   },
   "opt_nav_device": {
-    "message": "裝置"
+    "message": "本機與同步"
   },
   "opt_nav_activity": {
-    "message": "活動"
+    "message": "同步記錄"
   },
   "opt_nav_advanced": {
-    "message": "進階"
+    "message": "工具與診斷"
   },
   "opt_setup_title": {
     "message": "完成 Kesonode 的設定"
@@ -718,7 +718,7 @@
     "message": "選擇要同步的內容"
   },
   "opt_backend_head": {
-    "message": "儲存空間"
+    "message": "雲端與加密"
   },
   "opt_backend_head_sub": {
     "message": "選擇你的同步資料存放在哪裡。你的資料絕不會經過我們的伺服器。"
@@ -778,7 +778,7 @@
     "message": "Kesonode 會把你的瀏覽器同步到你自己的儲存空間。沒有 Kesonode 伺服器。兩個步驟就好。（如果設定精靈沒有在你的瀏覽器裡開啟，在這裡也能把全部設定做完。）"
   },
   "opt_data_head": {
-    "message": "資料類型"
+    "message": "同步內容"
   },
   "opt_data_head_sub": {
     "message": "選擇哪些東西要在你的裝置之間同步。"
@@ -859,7 +859,7 @@
     "message": "或"
   },
   "opt_device_head": {
-    "message": "裝置"
+    "message": "本機與同步"
   },
   "opt_device_head_sub": {
     "message": "在同步網路中標示這台裝置。"
@@ -1258,7 +1258,7 @@
     "message": "目前沒有排除任何項目。"
   },
   "opt_activity_head": {
-    "message": "活動"
+    "message": "同步記錄"
   },
   "opt_activity_head_sub": {
     "message": "Kesonode 在這台裝置上做過什麼，以及它手上有什麼。全部都在本機算出來：數字、還原點和最近 200 筆紀錄都只在本機，這個頁面上的任何東西都不會被上傳。"
@@ -1734,7 +1734,7 @@
     }
   },
   "opt_advanced_head": {
-    "message": "進階"
+    "message": "工具與診斷"
   },
   "opt_advanced_head_sub": {
     "message": "備份、意見回饋和開發者選項。"

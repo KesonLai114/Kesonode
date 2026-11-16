@@ -694,19 +694,19 @@
     "message": "Változások mentése"
   },
   "opt_nav_backend": {
-    "message": "Tárhely"
+    "message": "Felhő és titkosítás"
   },
   "opt_nav_data": {
-    "message": "Adattípusok"
+    "message": "Szinkronizált tartalmak"
   },
   "opt_nav_device": {
-    "message": "Eszköz"
+    "message": "Ez az eszköz"
   },
   "opt_nav_activity": {
-    "message": "Aktivitás"
+    "message": "Szinkronizációs előzmények"
   },
   "opt_nav_advanced": {
-    "message": "Haladó"
+    "message": "Eszközök és diagnosztika"
   },
   "opt_setup_title": {
     "message": "Fejezd be a Kesonode beállítását"
@@ -718,7 +718,7 @@
     "message": "Válaszd ki, mi szinkronizálódjon"
   },
   "opt_backend_head": {
-    "message": "Tárhely"
+    "message": "Felhő és titkosítás"
   },
   "opt_backend_head_sub": {
     "message": "Válaszd ki, hol szeretnéd tárolni a szinkronizált adataidat. Az adataid soha nem érintik a szervereinket."
@@ -778,7 +778,7 @@
     "message": "A Kesonode a böngésződet a saját tárhelyedre szinkronizálja. Nincs Kesonode-szerver. Két gyors lépés, és készen vagy. (Ha a beállítás-varázsló nem nyílt meg a böngésződben, itt is el tudsz mindent végezni.)"
   },
   "opt_data_head": {
-    "message": "Adattípusok"
+    "message": "Szinkronizált tartalmak"
   },
   "opt_data_head_sub": {
     "message": "Válaszd ki, mi szinkronizálódjon az eszközeid között."
@@ -859,7 +859,7 @@
     "message": "vagy"
   },
   "opt_device_head": {
-    "message": "Eszköz"
+    "message": "Ez az eszköz"
   },
   "opt_device_head_sub": {
     "message": "Így azonosíthatod ezt az eszközt a szinkronizálásban."
@@ -1258,7 +1258,7 @@
     "message": "Még semmi sincs kizárva."
   },
   "opt_activity_head": {
-    "message": "Aktivitás"
+    "message": "Szinkronizációs előzmények"
   },
   "opt_activity_head_sub": {
     "message": "Mit tett a Kesonode ezen az eszközön, és mivel dolgozik. Minden itt készül: a számok, a visszaállítási pontok és a legutóbbi 200 naplóbejegyzés helyi, és erről az oldalról semmi nem kerül feltöltésre."
@@ -1734,7 +1734,7 @@
     }
   },
   "opt_advanced_head": {
-    "message": "Haladó"
+    "message": "Eszközök és diagnosztika"
   },
   "opt_advanced_head_sub": {
     "message": "Biztonsági mentések, visszajelzés és fejlesztői beállítások."

@@ -694,19 +694,19 @@
     "message": "Änderungen speichern"
   },
   "opt_nav_backend": {
-    "message": "Speicher"
+    "message": "Cloud & Verschlüsselung"
   },
   "opt_nav_data": {
-    "message": "Datentypen"
+    "message": "Synchronisierte Inhalte"
   },
   "opt_nav_device": {
-    "message": "Gerät"
+    "message": "Dieses Gerät"
   },
   "opt_nav_activity": {
-    "message": "Aktivität"
+    "message": "Sync-Verlauf"
   },
   "opt_nav_advanced": {
-    "message": "Erweitert"
+    "message": "Tools & Diagnose"
   },
   "opt_setup_title": {
     "message": "Kesonode-Einrichtung abschließen"
@@ -718,7 +718,7 @@
     "message": "Wähle aus, was synchronisiert wird"
   },
   "opt_backend_head": {
-    "message": "Speicher"
+    "message": "Cloud & Verschlüsselung"
   },
   "opt_backend_head_sub": {
     "message": "Wähle, wo deine Synchronisierungsdaten gespeichert werden. Deine Daten berühren unsere Server nie."
@@ -778,7 +778,7 @@
     "message": "Kesonode synchronisiert deinen Browser mit einem Speicher, der dir gehört. Es gibt keinen Kesonode-Server. Zwei kurze Schritte und du bist fertig. (Falls der Einrichtungsassistent in deinem Browser nie geöffnet wurde, kannst du alles direkt hier erledigen.)"
   },
   "opt_data_head": {
-    "message": "Datentypen"
+    "message": "Synchronisierte Inhalte"
   },
   "opt_data_head_sub": {
     "message": "Wähle aus, was zwischen deinen Geräten synchronisiert wird."
@@ -859,7 +859,7 @@
     "message": "oder"
   },
   "opt_device_head": {
-    "message": "Gerät"
+    "message": "Dieses Gerät"
   },
   "opt_device_head_sub": {
     "message": "So identifizierst du dieses Gerät in der Synchronisierung."
@@ -1258,7 +1258,7 @@
     "message": "Noch ist nichts ausgeschlossen."
   },
   "opt_activity_head": {
-    "message": "Aktivität"
+    "message": "Sync-Verlauf"
   },
   "opt_activity_head_sub": {
     "message": "Was Kesonode auf diesem Gerät getan hat und womit es arbeitet. Alles wird hier berechnet: die Zahlen, die Wiederherstellungspunkte und die letzten 200 Protokolleinträge sind lokal, und von dieser Seite wird nie etwas hochgeladen."
@@ -1734,7 +1734,7 @@
     }
   },
   "opt_advanced_head": {
-    "message": "Erweitert"
+    "message": "Tools & Diagnose"
   },
   "opt_advanced_head_sub": {
     "message": "Backups, Feedback und Entwickleroptionen."

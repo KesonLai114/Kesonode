@@ -12,13 +12,13 @@ type DiffLoad =
   | { status: "error"; message: string };
 
 /**
- * Settings → Activity: the pending Manual conflicts, each with what differs (#35).
+ * Settings → This device: the pending Manual conflicts, each with what differs (#35).
  *
  * The popup card asked "Keep local or Use remote?" with nothing on it about either version,
- * in a 360px window with no room to say. Its Resolve button brings you here, next to the
- * other decision Kesonode asks for about data you otherwise cannot see, the blocked deletion
- * (#23). Same buttons, same messages, so an answer given here is exactly the one the popup
- * would have given.
+ * in a 360px window with no room to say. Its Resolve button brings you here, directly below
+ * the conflict strategy that chose Manual — configuring the policy and answering its
+ * conflicts are one task. Same buttons, same messages, so an answer given here is exactly
+ * the one the popup would have given.
  *
  * The lists are asked for when the screen shows a card, not stored with it: they come from
  * opening the parked peer packet (a decrypt, with E2EE on) and from this device's data as
