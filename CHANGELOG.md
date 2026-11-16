@@ -8,6 +8,20 @@ All notable changes to Konode. Format loosely follows
 > upstream releases, not to this fork's product name. Kesonode-only changes are recorded
 > in the section immediately below and never change the upstream wire contract.
 
+## [1.5.25] - 2026-11-16
+
+### Changed
+
+- **Settings tabs are named after the job, not the storage layer.** Storage, Data Types,
+  Device, Advanced and Activity become Cloud & encryption, Synced content, This device,
+  Tools & diagnostics and Sync history, in every shipped language. The device list and
+  manual conflict answers now sit beside the device identity and conflict strategy;
+  upstream compatibility sits with the cloud folder and encryption settings; the local
+  change guard sits with the other bulk-delete safety limits. The popup's Resolve button
+  opens the device tab, where conflicts are answered. Tab hash ids are unchanged, so
+  existing deep links keep working. In-product hints and documentation that named the
+  old tabs are updated.
+
 ## [1.5.24] - 2026-11-15
 
 ### Changed
