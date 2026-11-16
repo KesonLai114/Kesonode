@@ -82,7 +82,7 @@
     "message": "A Kesonode nem érhető el. Kattints az újrapróbálkozáshoz."
   },
   "popup_recovery_notice": {
-    "message": "Egy szokatlan törlést ($COUNT$ könyvjelző) letiltottunk, és mentettünk egy visszaállítási pontot. Alkalmazd vagy tartsd meg őket: Beállítások → Aktivitás.",
+    "message": "Egy szokatlan törlést ($COUNT$ könyvjelző) letiltottunk, és mentettünk egy visszaállítási pontot. Alkalmazd vagy tartsd meg őket: Beállítások → Szinkronizációs előzmények.",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -91,7 +91,7 @@
     }
   },
   "popup_guard_notice": {
-    "message": "Közzététel szünetel: ezen az eszközön a könyvjelzők folyamatosan változnak ($COUNT$ bejegyzés ebben a ciklusban). Semmi sem veszett el, visszaállítási pont készült; a közzététel magától folytatódik, amint a fa változatlan marad. Lásd: Beállítások → Aktivitás.",
+    "message": "Közzététel szünetel: ezen az eszközön a könyvjelzők folyamatosan változnak ($COUNT$ bejegyzés ebben a ciklusban). Semmi sem veszett el, visszaállítási pont készült; a közzététel magától folytatódik, amint a fa változatlan marad. Lásd: Beállítások → Szinkronizációs előzmények.",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -250,7 +250,7 @@
     "message": "Beállítás →"
   },
   "popup_activity_log": {
-    "message": "Tevékenységnapló →"
+    "message": "Szinkronizációs előzmények →"
   },
   "common_back": {
     "message": "Vissza"
@@ -1343,7 +1343,7 @@
     }
   },
   "opt_error_check_connection": {
-    "message": "Ellenőrizd a kapcsolatot a Tárhely fülön, és nyisd meg újra ezt a fület."
+    "message": "Ellenőrizd a kapcsolatot a Felhő és titkosítás fülön, és nyisd meg újra ezt a fület."
   },
   "opt_devices_loading": {
     "message": "Szinkronizálási mappa beolvasása…"
@@ -1913,7 +1913,7 @@
     "message": "Hibakeresési mód"
   },
   "opt_debug_desc": {
-    "message": "Részletes naplózás a böngésző konzoljába és az Aktivitás fülön, hogy meg tudd osztani. Kapcsold ki, ha végeztél."
+    "message": "Részletes naplózás a böngésző konzoljába és a Szinkronizációs előzmények fülön, hogy meg tudd osztani. Kapcsold ki, ha végeztél."
   },
   "opt_about_section": {
     "message": "Névjegy"
@@ -1945,7 +1945,7 @@
     }
   },
   "popup_guard_coexist": {
-    "message": "Ez általában azt jelenti, hogy a Kesonode a böngésző saját könyvjelző-szinkronizálása mellett fut. Használjon egyetlen szinkronizáló rendszert a könyvjelzőkhöz, vagy zárja ki a könyvjelzőket a szinkronizálásból (Beállítások → Adattípusok), hogy egy másik eszköz tulajdonában lévő mappa kimaradjon a Kesonode-ból."
+    "message": "Ez általában azt jelenti, hogy a Kesonode a böngésző saját könyvjelző-szinkronizálása mellett fut. Használjon egyetlen szinkronizáló rendszert a könyvjelzőkhöz, vagy zárja ki a könyvjelzőket a szinkronizálásból (Beállítások → Szinkronizált tartalmak), hogy egy másik eszköz tulajdonában lévő mappa kimaradjon a Kesonode-ból."
   },
   "popup_guard_dismiss": {
     "message": "Ne jelenjen meg újra"
@@ -2403,7 +2403,7 @@
     "message": "Visszaállítási pont kockázatos egyesítés előtt"
   },
   "opt_auto_snapshot_desc": {
-    "message": "Ha egy egyesítés az eszköz könyvjelzőinek nagy részét eltávolítaná, előbb visszaállítási pont készül, amely a Tevékenység lapon Visszavonásként jelenik meg."
+    "message": "Ha egy egyesítés az eszköz könyvjelzőinek nagy részét eltávolítaná, előbb visszaállítási pont készül, amely a Szinkronizációs előzmények lapon Visszavonásként jelenik meg."
   },
   "opt_order_label": {
     "message": "Könyvjelzők sorrendje"

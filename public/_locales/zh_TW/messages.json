@@ -79,7 +79,7 @@
     "message": "無法連線至 Kesonode。點一下重試。"
   },
   "popup_recovery_notice": {
-    "message": "已攔下一次異常刪除（$COUNT$ 個書籤），並先儲存了還原點。可以在「設定 → 活動」中套用或保留它們。",
+    "message": "已攔下一次異常刪除（$COUNT$ 個書籤），並先儲存了還原點。可以在「設定 → 同步記錄」中套用或保留它們。",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -88,7 +88,7 @@
     }
   },
   "popup_guard_notice": {
-    "message": "本機書籤持續大幅變動（本輪 $COUNT$ 處），已暫停發佈到其它裝置。未刪除任何內容，已儲存還原點，書籤穩定後會自動恢復。詳見「設定 → 活動」。",
+    "message": "本機書籤持續大幅變動（本輪 $COUNT$ 處），已暫停發佈到其它裝置。未刪除任何內容，已儲存還原點，書籤穩定後會自動恢復。詳見「設定 → 同步記錄」。",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -250,7 +250,7 @@
     "message": "設定 →"
   },
   "popup_activity_log": {
-    "message": "活動紀錄 →"
+    "message": "同步記錄 →"
   },
   "common_back": {
     "message": "返回"
@@ -1343,7 +1343,7 @@
     }
   },
   "opt_error_check_connection": {
-    "message": "請檢查「儲存空間」裡的連線，然後重新開啟這個分頁。"
+    "message": "請檢查「雲端與加密」裡的連線，然後重新開啟這個分頁。"
   },
   "opt_devices_loading": {
     "message": "正在讀取你的同步資料夾…"
@@ -1872,7 +1872,7 @@
     "message": "繼續"
   },
   "opt_cfg_import_missing": {
-    "message": "此備份不含登入憑證，因此在你登入以下帳戶前無法開始同步：$ACCOUNTS$。請開啟「設定 → 儲存」，填寫後儲存。",
+    "message": "此備份不含登入憑證，因此在你登入以下帳戶前無法開始同步：$ACCOUNTS$。請開啟「設定 → 雲端與加密」，填寫後儲存。",
     "placeholders": {
       "accounts": {
         "content": "$1"
@@ -1913,7 +1913,7 @@
     "message": "偵錯模式"
   },
   "opt_debug_desc": {
-    "message": "詳細紀錄，輸出到瀏覽器主控台和「活動」，方便你分享。用完請把它關掉。"
+    "message": "詳細紀錄，輸出到瀏覽器主控台和「同步記錄」，方便你分享。用完請把它關掉。"
   },
   "opt_about_section": {
     "message": "關於"
@@ -1945,7 +1945,7 @@
     }
   },
   "popup_guard_coexist": {
-    "message": "這通常表示 Kesonode 正與瀏覽器自帶的同步一起執行。書籤請只用一套同步；或在「設定 → 資料類型」中把書籤排除出同步，讓另一套工具擁有的資料夾不進入 Kesonode。"
+    "message": "這通常表示 Kesonode 正與瀏覽器自帶的同步一起執行。書籤請只用一套同步；或在「設定 → 同步內容」中把書籤排除出同步，讓另一套工具擁有的資料夾不進入 Kesonode。"
   },
   "popup_guard_dismiss": {
     "message": "不再提示"
@@ -2403,7 +2403,7 @@
     "message": "風險合併前儲存還原點"
   },
   "opt_auto_snapshot_desc": {
-    "message": "當一次合併會刪除本裝置很大一部分書籤時，先儲存還原點，並在活動頁提供復原。"
+    "message": "當一次合併會刪除本裝置很大一部分書籤時，先儲存還原點，並在同步記錄頁提供復原。"
   },
   "opt_order_label": {
     "message": "書籤順序"

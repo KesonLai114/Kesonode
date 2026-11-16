@@ -3697,7 +3697,7 @@ export default function OptionsApp() {
                   {/* Which browser the group's bookmarks were aligned to. A one-time
                       "use this copy" answer is otherwise invisible afterwards, which made
                       it look like the choice had been ignored. Changing it lives in
-                      Settings → Device, where the rest of the identity is. */}
+                      Settings → This device, where the rest of the identity is. */}
                   <div className="sync-baseline">
                     <span className="sync-types-label">{t("opt_baseline_label")}</span>
                     <span className="sync-baseline-value">
@@ -4700,7 +4700,7 @@ const STYLES = `
   .row-label { font-size: var(--fs-sm); color: var(--text-primary); }
   .row-desc { font-size: var(--fs-xs); color: var(--text-secondary); margin-top: var(--sp-3xs); line-height: 1.45; }
   /* Names the value below it so a pending action on the right cannot be mistaken for
-     the current state (Settings → Device, bookmark baseline card). */
+     the current state (Settings → This device, bookmark baseline card). */
   .row-caption { font-size: var(--fs-xs); color: var(--text-secondary); margin-bottom: var(--sp-3xs); line-height: 1.3; }
 
     /* Same radius and the same bottom gap as .settings-section: it IS one of these groups,

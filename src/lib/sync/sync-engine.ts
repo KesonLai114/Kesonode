@@ -308,7 +308,7 @@ export async function explainSyncFailure(err: unknown, cfg: BackendConfig | unde
     : "your storage provider";
   // Cause and cure FIRST, original last. The popup clamps this to two lines, and it was
   // clamping away the half that says what to do about it.
-  return `${PERMISSION_LOST_PREFIX}${where}. Open Settings → Storage and press Save to grant it again. The request never left the browser: ${msg}`;
+  return `${PERMISSION_LOST_PREFIX}${where}. Open Settings → Cloud & encryption and press Save to grant it again. The request never left the browser: ${msg}`;
 }
 
 export function statusAfterSync(problems: number, pendingConflicts: number): SyncState["status"] {
@@ -386,7 +386,7 @@ export class SyncEngine {
   private ownFilesMissing = new Set<DataType>();
   // What the mass-delete guard refused this sync, and which peer asked (recovery
   // signal). Non-null → an unusual deletion was blocked; sync() saves an auto-snapshot
-  // and flags state.recovery_notice so the popup can surface it and Settings → Activity
+  // and flags state.recovery_notice so the popup can surface it and Settings → Sync history
   // can offer to apply it.
   //
   // Two devices can each ask on the same cycle, and what is kept is the LARGEST single
@@ -515,7 +515,7 @@ export class SyncEngine {
     if (packet.encrypted && !this.e2eeActive) {
       return (
         "Some of your devices are end-to-end encrypted. Enable E2EE with the same " +
-        "passphrase here (Settings → Advanced) to sync with them."
+        "passphrase here (Settings → Cloud & encryption) to sync with them."
       );
     }
     return null;
@@ -735,11 +735,11 @@ export class SyncEngine {
       // the exact "both browsers mind their own business" report. Surface it as an error.
       // Not in a metered window, though: those files were refused for the same reason the
       // sentence above names, and "couldn't read" turned a quota problem into a file
-      // problem. The per-file "Couldn't download" lines stay in Settings → Activity.
+      // problem. The per-file "Couldn't download" lines stay in Settings → Sync history.
       const unreadable = [...new Set(backend.failedPeers ?? [])];
       if (unreadable.length && !backend.rateLimited) {
         problems.push(
-          `Couldn't read ${unreadable.length} device file(s) from the storage (${unreadable.slice(0, 2).join(", ")}${unreadable.length > 2 ? ", …" : ""}). Their data was NOT merged this sync — Settings → Activity names each file and why.`
+          `Couldn't read ${unreadable.length} device file(s) from the storage (${unreadable.slice(0, 2).join(", ")}${unreadable.length > 2 ? ", …" : ""}). Their data was NOT merged this sync — Settings → Sync history names each file and why.`
         );
       }
       const prevState = await getState();
@@ -891,7 +891,7 @@ export class SyncEngine {
     }
     this.rateLimitedThisSync = true;
     if (!(await startSyncCooldown())) return;
-    logger.warn("SyncEngine", `Automatic sync paused for ${SYNC_COOLDOWN_MS / 60000} minutes: the storage is refusing requests for a rate-limit window. "Sync now" still works; raise Sync interval in Settings → Device so the next window stays clear.`);
+    logger.warn("SyncEngine", `Automatic sync paused for ${SYNC_COOLDOWN_MS / 60000} minutes: the storage is refusing requests for a rate-limit window. "Sync now" still works; raise Sync interval in Settings → This device so the next window stays clear.`);
   }
 
   private async finishSync(backend: ReturnType<typeof createBackend>): Promise<void> {
@@ -958,7 +958,7 @@ export class SyncEngine {
         // "any more" was a guess: on QuarkPC the permission was never granted at all,
         // and no amount of toggling produced a prompt. Name the button that re-asks,
         // and warn ONCE per incident rather than every minute for as long as it lasts.
-        const msg = `${t}: Kesonode doesn't have the "${state.permission}" permission, so this can't sync. Open Settings → Data Types and press "Grant access"; if no prompt appears, grant it in your browser's extension settings.`;
+        const msg = `${t}: Kesonode doesn't have the "${state.permission}" permission, so this can't sync. Open Settings → Synced content and press "Grant access"; if no prompt appears, grant it in your browser's extension settings.`;
         if (!this.permissionWarned.has(t)) {
           this.permissionWarned.add(t);
           logger.warn("SyncEngine", msg);
@@ -1097,7 +1097,7 @@ export class SyncEngine {
   /**
    * The mass-delete guard refused a peer's deletions this sync — the tree is still
    * intact, so preserve it as a restore point and flag the event for the popup
-   * ("unusual deletion blocked", with a pointer to Settings → Activity).
+   * ("unusual deletion blocked", with a pointer to Settings → Sync history).
    *
    * At most ONE restore point per incident. The guard re-evaluates the same peer
    * deletions on every merge (their tombstones live for 90 days and the local
@@ -1145,7 +1145,7 @@ export class SyncEngine {
         "mergeBookmarks",
         `Blocked a deletion of ${blocked.blocked} of your ${blocked.localTotal} bookmarks` +
           `${who} (cap ${blocked.cap}, ${blocked.pct}% of the tree${recent}). Nothing was removed and a ` +
-          "restore point was saved. Apply it or keep them in Settings → Activity."
+          "restore point was saved. Apply it or keep them in Settings → Sync history."
       );
       try {
         // The pre-apply danger point describes the same tree this block is about; writing a
@@ -1191,7 +1191,7 @@ export class SyncEngine {
         await setGuardSnapshotTaken(false);
       }
       // The hold just lifted on its own: one quiet cycle cleared the streak. A short, ok-level
-      // line so the user can see in Settings → Activity that publishing is flowing again — not
+      // line so the user can see in Settings → Sync history that publishing is flowing again — not
       // a warning, because nothing was wrong that needed action.
       if (cleared) {
         logger.event("changeGuard", "Publishing resumed: this device's bookmark tree settled after the local change guard held it. Nothing was lost.");
@@ -1206,7 +1206,7 @@ export class SyncEngine {
           "Nothing was removed or reverted, and a restore point was saved. " +
           "Publishing resumes on its own once the tree stops changing. " +
           "If you did not make this change, check whether your browser's own bookmark " +
-          "sync is running alongside Kesonode. See Settings → Activity."
+          "sync is running alongside Kesonode. See Settings → Sync history."
       );
       try {
         await this.snapshotNow({ origin: "auto" }, open);
@@ -1283,7 +1283,7 @@ export class SyncEngine {
     const cfg = this.activeBackendConfig();
     if (!cfg) return [];
     // A cooldown means the storage is refusing every request in this window. Opening
-    // Settings → Activity during one used to show a wall of 403 text where the device
+    // Settings → Sync history during one used to show a wall of 403 text where the device
     // list belongs, and each attempt spent quota the next window needs. The local view
     // is the same list the fallback below shows, for free.
     if ((await syncCooldownRemaining()) > 0) return this.knownDevices();
@@ -1423,7 +1423,7 @@ export class SyncEngine {
         }
         // This device's name lives here, in settings, and is always the freshest thing we
         // have: the list reads a packet off the backend, which can be days old or written
-        // by a build that never sent a name. What the user typed in Settings → Device is
+        // by a build that never sent a name. What the user typed in Settings → This device is
         // the answer for this machine, whatever its files happen to say.
         if (isSelf) label = this.settings.device_label || null;
         const uploadedAt = newestUpload.get(device_id);
@@ -1681,7 +1681,7 @@ export class SyncEngine {
           (rateLimited
             ? "The storage is refusing requests for now (quota or rate limit), so choosing again will not help until that window passes."
             : "Check the connection and choose again.") +
-          " Settings → Activity has the details."
+          " Settings → Sync history has the details."
         );
       }
       // designateBaselineOn() published this tree and recorded its checksum in the
@@ -1795,7 +1795,7 @@ export class SyncEngine {
           (result.rateLimited
             ? "The storage is refusing requests for now (quota or rate limit), so trying again will not help until that window passes."
             : "Check the connection and try again.") +
-          " Settings → Activity has the details."
+          " Settings → Sync history has the details."
         );
       }
       marker = result.marker;
@@ -2069,7 +2069,7 @@ export class SyncEngine {
         : "The sync folder no longer holds another device's bookmark file, so there is no copy to take.";
     const next = read.rateLimited
       ? "The storage is refusing requests for now (quota or rate limit), so choosing again will not help until that window passes."
-      : "Settings → Activity has the log lines for the failed read (\"Couldn't download\", or \"Skipping peer file\") — check the folder and the connection against those.";
+      : "Settings → Sync history has the log lines for the failed read (\"Couldn't download\", or \"Skipping peer file\") — check the folder and the connection against those.";
     return `${detail} Nothing was changed: this device's bookmarks are untouched and the question stays open. ${next}`;
   }
 
@@ -2786,7 +2786,7 @@ export class SyncEngine {
     // The name rides on the envelope, so renaming the device in Settings leaves the
     // payload untouched and used to leave every file on the backend with the OLD name
     // (or none at all, for a file written by a build that predates names) until some
-    // bookmark happened to change. Settings → Activity then read that stale file and
+    // bookmark happened to change. Settings → Sync history then read that stale file and
     // called a machine the user had just named "Unnamed device". Folding the name in
     // costs exactly one re-upload per type per rename, which is what telling the other
     // devices takes. The length prefix keeps two names from ever building the same tag.
@@ -2980,7 +2980,7 @@ export class SyncEngine {
       if (!localE2ee) {
         throw new EncryptionMismatchError(
           "Some of your devices are end-to-end encrypted. Enable E2EE with the same " +
-            "passphrase here (Settings → Advanced) to sync with them."
+            "passphrase here (Settings → Cloud & encryption) to sync with them."
         );
       }
       const pass = this.settings.encryption_passphrase!;
@@ -2989,7 +2989,7 @@ export class SyncEngine {
       if (packet.verifier && !(await verifyPassphrase(pass, packet.verifier))) {
         throw new PassphraseError(
           `Your encryption passphrase doesn't match device ${packet.device_id.slice(0, 8)}. ` +
-            "Use the same passphrase on all your devices (Settings → Advanced)."
+            "Use the same passphrase on all your devices (Settings → Cloud & encryption)."
         );
       }
       try {
@@ -3174,7 +3174,7 @@ export class SyncEngine {
         throw new Error(
           `That device would delete ${blocked.blocked} of your ${blocked.localTotal} bookmarks, ` +
             `which the safety guard blocked (cap ${blocked.cap}, ${blocked.pct}%). Nothing was ` +
-            "deleted and this conflict is still pending. Raise the limit in Settings → Safety, " +
+            "deleted and this conflict is still pending. Raise the limit in Settings → This device → Safety, " +
             "or keep local."
         );
       }

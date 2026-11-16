@@ -108,7 +108,7 @@ further request immediately.
 
 ## Software update
 
-Settings → Advanced → Software update can look for a newer release and install it. Both
+Settings → Tools & diagnostics → Software update can look for a newer release and install it. Both
 steps are things you start; neither happens on its own.
 
 **Checking for updates** sends one request to `api.github.com` (GitHub's public API) and
@@ -176,7 +176,7 @@ against an attacker who already controls your device.
 
 ### Settings backup
 
-Settings → Advanced can export your configuration as a single JSON file, so that
+Settings → Tools & diagnostics can export your configuration as a single JSON file, so that
 another browser can be set up from it without retyping anything. **The default export
 contains no credentials at all**: it carries the storage providers, folders, schedules,
 preferences and device ID, but not the WebDAV password, the GitHub token, the Google

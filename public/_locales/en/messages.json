@@ -103,7 +103,7 @@
     "description": "The popup could not read its own state. The whole banner is a button, hence 'tap to retry'."
   },
   "popup_recovery_notice": {
-    "message": "An unusual deletion ($COUNT$ bookmarks) was blocked and a restore point was saved. Apply it or keep them in Settings → Activity.",
+    "message": "An unusual deletion ($COUNT$ bookmarks) was blocked and a restore point was saved. Apply it or keep them in Settings → Sync history.",
     "description": "The mass-delete guard refused a peer's deletions. Reassuring by design: nothing was lost. Said 'Review in' until there was something to decide there; now the banner leads to a real choice, so it names it. 'Settings → Activity' names a tab, so it must match the tab's own translation.",
     "placeholders": {
       "count": {
@@ -113,7 +113,7 @@
     }
   },
   "popup_guard_notice": {
-    "message": "Publishing is paused: this device's bookmarks keep changing ($COUNT$ entries this cycle). Nothing was lost; a restore point was saved and publishing resumes on its own once the tree settles. See Settings → Activity.",
+    "message": "Publishing is paused: this device's bookmarks keep changing ($COUNT$ entries this cycle). Nothing was lost; a restore point was saved and publishing resumes on its own once the tree settles. See Settings → Sync history.",
     "description": "The local change guard held this device's own bookmark upload because the local tree changed by more than the cap on several consecutive sync cycles. Reassuring by design: nothing was deleted, and no action is needed because it resumes automatically. 'Settings → Activity' names a tab, so it must match the tab's own translation.",
     "placeholders": {
       "count": {
@@ -193,7 +193,7 @@
     }
   },
   "popup_guard_coexist": {
-    "message": "This usually means Kesonode is running alongside your browser's own bookmark sync. Use one sync system for bookmarks, or Exclude bookmarks from sync (Settings → Data types) to keep a folder another tool owns out of Kesonode.",
+    "message": "This usually means Kesonode is running alongside your browser's own bookmark sync. Use one sync system for bookmarks, or Exclude bookmarks from sync (Settings → Synced content) to keep a folder another tool owns out of Kesonode.",
     "description": "First-time tip under the guard banner. Reassuring by design: normally two sync systems touch the same tree. 'Settings → Data types' names a tab, so it must match the tab's own translation."
   },
   "popup_guard_dismiss": {
@@ -346,7 +346,7 @@
     "description": "Footer link to Settings. Keep the arrow."
   },
   "popup_activity_log": {
-    "message": "Activity log →",
+    "message": "Sync history →",
     "description": "Footer link that opens Settings on the Activity tab. Keep the arrow."
   },
   "common_back": {
@@ -1558,7 +1558,7 @@
     }
   },
   "opt_error_check_connection": {
-    "message": "Check the connection in Storage and reopen this tab.",
+    "message": "Check the connection in Cloud & encryption and reopen this tab.",
     "description": "Follows the device-list and restore-point errors when the error itself gives no advice. Left out after the lost-permission message, which already says to open Settings → Storage and press Save. 'Storage' names the tab, so it must match the tab's own translation."
   },
   "opt_devices_loading": {
@@ -2129,7 +2129,7 @@
     "message": "Continue"
   },
   "opt_cfg_import_missing": {
-    "message": "The backup carried no sign-in credentials, so syncing cannot start until you sign in to: $ACCOUNTS$. Open Settings → Storage, enter them and save.",
+    "message": "The backup carried no sign-in credentials, so syncing cannot start until you sign in to: $ACCOUNTS$. Open Settings → Cloud & encryption, enter them and save.",
     "placeholders": {
       "accounts": {
         "content": "$1"
@@ -2189,7 +2189,7 @@
     "message": "Debug mode"
   },
   "opt_debug_desc": {
-    "message": "Verbose logging, to the browser console and to Activity so you can share it. Turn it off when you're done."
+    "message": "Verbose logging, to the browser console and to Sync history so you can share it. Turn it off when you're done."
   },
   "opt_about_section": {
     "message": "About"
@@ -2646,7 +2646,7 @@
     "message": "Restore point before risky merges"
   },
   "opt_auto_snapshot_desc": {
-    "message": "When a merge would remove a large share of this device's bookmarks, a restore point is saved first and offered as Undo on Activity."
+    "message": "When a merge would remove a large share of this device's bookmarks, a restore point is saved first and offered as Undo in Sync history."
   },
   "opt_order_label": {
     "message": "Bookmark order"

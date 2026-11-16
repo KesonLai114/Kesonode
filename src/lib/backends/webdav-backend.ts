@@ -41,7 +41,7 @@ export function isNutstoreHost(host: string): boolean {
 
 export function forbiddenMessage(host: string): string {
   if (isNutstoreHost(host)) {
-    return `Forbidden (403): ${host} refused the request. Nutstore (坚果云) limits WebDAV by frequency — 600 requests per 30 minutes on a free account, 1500 on paid — counted across EVERY app using this account, and it answers with 403 rather than 429. Wait for the window to pass, or raise Sync interval in Settings → Device; another device or app syncing against this same account can use the quota up on its own.`;
+    return `Forbidden (403): ${host} refused the request. Nutstore (坚果云) limits WebDAV by frequency — 600 requests per 30 minutes on a free account, 1500 on paid — counted across EVERY app using this account, and it answers with 403 rather than 429. Wait for the window to pass, or raise Sync interval in Settings → This device; another device or app syncing against this same account can use the quota up on its own.`;
   }
   return `Forbidden (403): ${host} refused the request. The login was accepted, so this is the path or the account's rights: check the URL path and what the account may access.`;
 }
@@ -388,7 +388,7 @@ export class WebDAVBackend implements IBackend {
    * PROPFIND with absolute URLs on another scheme, port or host produced "No other
    * device's bookmarks could be read" on a storage that was perfectly reachable, with the
    * only clue buried in a per-file warning. Saying it once, at the listing, puts it in
-   * Settings → Activity before anyone has to guess.
+   * Settings → Sync history before anyone has to guess.
    *
    * One line per listing: every entry in it has the same cause.
    */

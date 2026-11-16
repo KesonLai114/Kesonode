@@ -208,7 +208,7 @@ named `Kesonode` (no version number in the name), so load that folder in Chromiu
 `manifest.json` in Firefox. If you already have Kesonode installed from an earlier
 package, keep that install — a second install joins the sync group as a new device.
 
-**Upgrading.** Download the new zip, then in Chromium go to Settings → Advanced →
+**Upgrading.** Download the new zip, then in Chromium go to Settings → Tools & diagnostics →
 Software update and press "Upgrade now". The first dialog asks for that zip, and Kesonode
 verifies it. On the first upgrade the same button becomes "Choose folder & finish
 upgrade": one more click picks the folder Kesonode was loaded from (the one that directly
@@ -292,7 +292,7 @@ corrupt deletion log from wiping your tree.
 
 ### Which folder? Three compatibility modes
 
-Settings → Advanced → Compatibility decides where this device publishes. **Every device
+Settings → Cloud & encryption → Compatibility decides where this device publishes. **Every device
 in one sync group must pick the same mode** — the folder is where devices find each other.
 
 | Mode | Folder (WebDAV/GitHub · Google Drive) | Files |
@@ -318,10 +318,10 @@ Three things start a sync, and nothing else does:
 
 - **A bookmark changes on this device.** The upload goes out about a second later, with a
   30-second backstop in case the browser suspends the extension mid-edit. Bookmarks only,
-  and only while **Sync on change** is on (it is by default, under Settings → Device).
+  and only while **Sync on change** is on (it is by default, under Settings → This device).
 - **The scheduled pull**, every 60 seconds by default. This is how a device learns about
   its *peers'* changes, and it covers every data type you have enabled. Adjust it from 30
-  to 600 seconds under **Settings → Device → Sync interval**, or turn it off with **Auto
+  to 600 seconds under **Settings → This device → Sync interval**, or turn it off with **Auto
   sync**.
 - **You press Sync now** in the popup.
 

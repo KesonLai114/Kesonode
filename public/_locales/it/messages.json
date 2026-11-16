@@ -76,7 +76,7 @@
     "message": "Impossibile raggiungere Kesonode. Tocca per riprovare."
   },
   "popup_recovery_notice": {
-    "message": "Un'eliminazione insolita ($COUNT$ segnalibri) è stata bloccata ed è stato salvato un punto di ripristino. Applicala o mantienili in Impostazioni → Attività.",
+    "message": "Un'eliminazione insolita ($COUNT$ segnalibri) è stata bloccata ed è stato salvato un punto di ripristino. Applicala o mantienili in Impostazioni → Cronologia sincronizzazione.",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -85,7 +85,7 @@
     }
   },
   "popup_guard_notice": {
-    "message": "Pubblicazione in pausa: i preferiti di questo dispositivo continuano a cambiare ($COUNT$ voci in questo ciclo). Nulla è stato perso; è stato salvato un punto di ripristino e la pubblicazione riprende da sola quando l'albero si stabilizza. Vedi Impostazioni → Attività.",
+    "message": "Pubblicazione in pausa: i preferiti di questo dispositivo continuano a cambiare ($COUNT$ voci in questo ciclo). Nulla è stato perso; è stato salvato un punto di ripristino e la pubblicazione riprende da sola quando l'albero si stabilizza. Vedi Impostazioni → Cronologia sincronizzazione.",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -235,7 +235,7 @@
     "message": "Configura →"
   },
   "popup_activity_log": {
-    "message": "Registro attività →"
+    "message": "Cronologia sincronizzazione →"
   },
   "common_back": {
     "message": "Indietro"
@@ -1343,7 +1343,7 @@
     }
   },
   "opt_error_check_connection": {
-    "message": "Controlla la connessione in Archiviazione e riapri questa scheda."
+    "message": "Controlla la connessione in Cloud e crittografia e riapri questa scheda."
   },
   "opt_devices_loading": {
     "message": "Lettura della cartella di sincronizzazione…"
@@ -1872,7 +1872,7 @@
     "message": "Continua"
   },
   "opt_cfg_import_missing": {
-    "message": "Il backup non conteneva credenziali, quindi la sincronizzazione non può iniziare finché non accedi a: $ACCOUNTS$. Apri Impostazioni → Archiviazione, inseriscile e salva.",
+    "message": "Il backup non conteneva credenziali, quindi la sincronizzazione non può iniziare finché non accedi a: $ACCOUNTS$. Apri Impostazioni → Cloud e crittografia, inseriscile e salva.",
     "placeholders": {
       "accounts": {
         "content": "$1"
@@ -1913,7 +1913,7 @@
     "message": "Modalità debug"
   },
   "opt_debug_desc": {
-    "message": "Registrazione dettagliata, nella console del browser e in Attività, così puoi condividerla. Disattivala quando hai finito."
+    "message": "Registrazione dettagliata, nella console del browser e in Cronologia sincronizzazione, così puoi condividerla. Disattivala quando hai finito."
   },
   "opt_about_section": {
     "message": "Informazioni"
@@ -1945,7 +1945,7 @@
     }
   },
   "popup_guard_coexist": {
-    "message": "Di solito significa che Kesonode è in esecuzione insieme alla sincronizzazione dei segnalibri del browser. Usa un solo sistema di sincronizzazione per i segnalibri, oppure escludi i segnalibri dalla sincronizzazione (Impostazioni → Tipi di dati) per tenere fuori da Kesonode una cartella di un altro strumento."
+    "message": "Di solito significa che Kesonode è in esecuzione insieme alla sincronizzazione dei segnalibri del browser. Usa un solo sistema di sincronizzazione per i segnalibri, oppure escludi i segnalibri dalla sincronizzazione (Impostazioni → Contenuti sincronizzati) per tenere fuori da Kesonode una cartella di un altro strumento."
   },
   "popup_guard_dismiss": {
     "message": "Non mostrare più"
@@ -2403,7 +2403,7 @@
     "message": "Punto di ripristino prima di unioni rischiose"
   },
   "opt_auto_snapshot_desc": {
-    "message": "Quando un'unione rimuoverebbe gran parte dei segnalibri di questo dispositivo, viene salvato prima un punto di ripristino, offerto come Annulla in Attività."
+    "message": "Quando un'unione rimuoverebbe gran parte dei segnalibri di questo dispositivo, viene salvato prima un punto di ripristino, offerto come Annulla in Cronologia sincronizzazione."
   },
   "opt_order_label": {
     "message": "Ordine dei segnalibri"

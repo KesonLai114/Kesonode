@@ -82,7 +82,7 @@
     "message": "Kesonode war nicht erreichbar. Zum erneuten Versuch klicken."
   },
   "popup_recovery_notice": {
-    "message": "Ein ungewöhnlicher Löschvorgang ($COUNT$ Lesezeichen) wurde verhindert und ein Wiederherstellungspunkt gespeichert. Übernimm ihn oder behalte sie unter Einstellungen → Aktivität.",
+    "message": "Ein ungewöhnlicher Löschvorgang ($COUNT$ Lesezeichen) wurde verhindert und ein Wiederherstellungspunkt gespeichert. Übernimm ihn oder behalte sie unter Einstellungen → Sync-Verlauf.",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -91,7 +91,7 @@
     }
   },
   "popup_guard_notice": {
-    "message": "Veröffentlichung pausiert: Die Lesezeichen dieses Geräts ändern sich fortlaufend ($COUNT$ Einträge in diesem Zyklus). Nichts ging verloren, ein Wiederherstellungspunkt wurde gespeichert; sobald sich der Baum nicht mehr ändert, geht es automatisch weiter. Siehe Einstellungen → Aktivität.",
+    "message": "Veröffentlichung pausiert: Die Lesezeichen dieses Geräts ändern sich fortlaufend ($COUNT$ Einträge in diesem Zyklus). Nichts ging verloren, ein Wiederherstellungspunkt wurde gespeichert; sobald sich der Baum nicht mehr ändert, geht es automatisch weiter. Siehe Einstellungen → Sync-Verlauf.",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -250,7 +250,7 @@
     "message": "Einrichten →"
   },
   "popup_activity_log": {
-    "message": "Aktivitätsprotokoll →"
+    "message": "Sync-Verlauf →"
   },
   "common_back": {
     "message": "Zurück"
@@ -1343,7 +1343,7 @@
     }
   },
   "opt_error_check_connection": {
-    "message": "Prüfe die Verbindung unter Speicher und öffne diesen Tab erneut."
+    "message": "Prüfe die Verbindung unter Cloud & Verschlüsselung und öffne diesen Tab erneut."
   },
   "opt_devices_loading": {
     "message": "Synchronisierungsordner wird gelesen…"
@@ -1872,7 +1872,7 @@
     "message": "Weiter"
   },
   "opt_cfg_import_missing": {
-    "message": "Das Backup enthielt keine Anmeldedaten, daher kann die Synchronisierung erst starten, wenn du dich bei folgenden Diensten anmeldest: $ACCOUNTS$. Öffne Einstellungen → Speicher, trage sie ein und speichere.",
+    "message": "Das Backup enthielt keine Anmeldedaten, daher kann die Synchronisierung erst starten, wenn du dich bei folgenden Diensten anmeldest: $ACCOUNTS$. Öffne Einstellungen → Cloud & Verschlüsselung, trage sie ein und speichere.",
     "placeholders": {
       "accounts": {
         "content": "$1"
@@ -1913,7 +1913,7 @@
     "message": "Debug-Modus"
   },
   "opt_debug_desc": {
-    "message": "Ausführliche Protokollierung in die Browser-Konsole und in Aktivität, damit du sie teilen kannst. Schalte ihn aus, wenn du fertig bist."
+    "message": "Ausführliche Protokollierung in die Browser-Konsole und in Sync-Verlauf, damit du sie teilen kannst. Schalte ihn aus, wenn du fertig bist."
   },
   "opt_about_section": {
     "message": "Über"
@@ -1945,7 +1945,7 @@
     }
   },
   "popup_guard_coexist": {
-    "message": "Das bedeutet meist, dass Kesonode neben dem eigenen Lesezeichen-Sync des Browsers läuft. Nutzen Sie für Lesezeichen nur ein Sync-System, oder schließen Sie Lesezeichen vom Sync aus (Einstellungen → Datentypen), damit ein von einem anderen Werkzeug verwalteter Ordner Kesonode nicht erreicht."
+    "message": "Das bedeutet meist, dass Kesonode neben dem eigenen Lesezeichen-Sync des Browsers läuft. Nutzen Sie für Lesezeichen nur ein Sync-System, oder schließen Sie Lesezeichen vom Sync aus (Einstellungen → Synchronisierte Inhalte), damit ein von einem anderen Werkzeug verwalteter Ordner Kesonode nicht erreicht."
   },
   "popup_guard_dismiss": {
     "message": "Nicht erneut anzeigen"
@@ -2403,7 +2403,7 @@
     "message": "Wiederherstellungspunkt vor riskanten Zusammenführungen"
   },
   "opt_auto_snapshot_desc": {
-    "message": "Wenn eine Zusammenführung einen großen Teil der Lesezeichen dieses Geräts entfernen würde, wird zuerst ein Wiederherstellungspunkt gespeichert und unter Aktivität als Rückgängig angeboten."
+    "message": "Wenn eine Zusammenführung einen großen Teil der Lesezeichen dieses Geräts entfernen würde, wird zuerst ein Wiederherstellungspunkt gespeichert und unter Sync-Verlauf als Rückgängig angeboten."
   },
   "opt_order_label": {
     "message": "Lesezeichen-Reihenfolge"

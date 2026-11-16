@@ -658,7 +658,7 @@ describe("importBookmarks — mass-delete guard (configurable percent)", () => {
     expect(await getBulkDeleteApproval()).toBe(98);
   });
 
-  /** The retained log, which is what Settings → Activity shows. `info` never reaches it. */
+  /** The retained log, which is what Settings → Sync history shows. `info` never reaches it. */
   async function auditText(): Promise<string> {
     await new Promise((r) => setTimeout(r, 0)); // the logger fires appendAudit unawaited
     const r = await chrome.storage.local.get(KEYS.AUDIT_LOG);

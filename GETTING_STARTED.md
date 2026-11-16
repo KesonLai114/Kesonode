@@ -89,7 +89,7 @@ if you enable encryption, the **same passphrase**) to sync together.
    address, or a Nutstore third-party app password (第三方应用密码, in Nutstore's account
    security settings) with your Nutstore email. A free Nutstore account allows 600
    requests every 30 minutes, so with three or more devices raise **Sync interval** to 120
-   seconds under Settings → Device; the card says so too.
+   seconds under Settings → This device; the card says so too.
 4. Plain `http://` is rejected for security (except `http://localhost`). Kesonode creates a
    sync folder for its files: `konode/` by default, `kesonode/` in **Fully separate**
    mode (see [Which folder?](README.md#which-folder-three-compatibility-modes)).
@@ -98,7 +98,7 @@ if you enable encryption, the **same passphrase**) to sync together.
 
 - **Bookmarks**: on by default. Two-way sync with folders preserved; deletions
   propagate (no old bookmarks quietly coming back). **Exclude bookmarks from sync**, under
-  Bookmarks in setup and in Settings → Data Types, lets you tick folders and bookmarks this
+  Bookmarks in setup and in Settings → Synced content, lets you tick folders and bookmarks this
   device keeps to itself. Excluding deletes nothing: copies your other devices already have
   stay there, and so do their files in your storage.
 - **Open tabs / sessions**, **History**, **Installed-extension list**: opt-in. When
@@ -111,7 +111,7 @@ if you enable encryption, the **same passphrase**) to sync together.
 
 Optional, and a conscious choice. It's **off by default**.
 
-- Turn it on in onboarding, or later in **Settings → Storage**, in the **Encryption** card
+- Turn it on in onboarding, or later in **Settings → Cloud & encryption**, in the **Encryption** card
   next to the provider it protects you from. Type a passphrase of at least 12 characters
   (you'll confirm it by re-typing) or **generate a strong key**, which is the safer choice.
 - With encryption on, your data is encrypted on your device (AES-256-GCM) **before**
@@ -133,7 +133,7 @@ Optional, and a conscious choice. It's **off by default**.
 
 - Each device writes one file per data type to your backend. Every sync pulls in each
   other device's file, merges it, and pushes the result back. Both the folder name and
-  the file prefix come from the compatibility mode under Settings → Advanced:
+  the file prefix come from the compatibility mode under Settings → Tools & diagnostics:
   `konode/` + `konode_<type>_<device_id>.json` in **Upstream** (the default, so existing
   data stays compatible), `konode/` + `kesonode_*` in **Own file names**, and
   `kesonode/` + `kesonode_*` in **Fully separate**. Every device in one sync group must
@@ -141,7 +141,7 @@ Optional, and a conscious choice. It's **off by default**.
   see [Which folder?](README.md#which-folder-three-compatibility-modes).
 - **Edit a bookmark and this device uploads in about a second.** Other devices pick it up
   on their next scheduled pull, every 60 seconds by default (adjustable from 30 to 600
-  under Settings → Device; 30s is the browser's minimum for a background check). History,
+  under Settings → This device; 30s is the browser's minimum for a background check). History,
   open tabs and the extension list have no instant path, so they travel on that interval.
 - **There's a pull because there's no push.** Drive, GitHub and WebDAV are ordinary file
   storage with no way to tell your other devices that something changed, so each one goes

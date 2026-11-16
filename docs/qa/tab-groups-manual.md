@@ -35,8 +35,7 @@ own storage. **Case 9 found a bug, and it is fixed** — see it below.
 - **Use your own storage** (WebDAV / Drive / Nutstore), not a local server. The automated
   pass syncs through a throwaway WebDAV server on localhost, so your real backend, your
   real latency and your real folder are untested.
-- Name each device something you will recognise in the popup, and keep **Settings →
-  Activity** open on both. If a case fails, *Copy log* there is the evidence to keep.
+- Name each device something you will recognise in the popup, and keep **Settings → Sync history** open on both. If a case fails, *Copy log* there is the evidence to keep.
 - Make a group the browser's own way: select two tabs → right-click → *Add tabs to new
   group*, then name it and pick a colour.
 
@@ -49,7 +48,7 @@ groups"), never two, and never a second one later. Then do it again and **declin
 setup must still finish and say what is off, and must not bounce you to the extensions page
 in a loop.
 
-**2. The prompt in Settings (Chrome).** Settings → Data Types: Open tabs off, then on.
+**2. The prompt in Settings (Chrome).** Settings → Synced content: Open tabs off, then on.
 → Same single prompt. Then the separate **tab group names** switch: off → publish from here
 and check the peer gets the tabs grouped but **unnamed**; on → the names are back. Opening
 the **popup** must never ask for anything.

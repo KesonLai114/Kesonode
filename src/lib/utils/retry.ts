@@ -27,7 +27,7 @@ export class HttpError extends Error {
  * sync interval. Cure first, status last: the popup shows two lines of this.
  */
 export function rateLimitMessage(where: string): string {
-  return `Too many requests: ${where} is turning Kesonode away for a while. Raise Sync interval in Settings → Device to stay under its limit. (HTTP 429)`;
+  return `Too many requests: ${where} is turning Kesonode away for a while. Raise Sync interval in Settings → This device to stay under its limit. (HTTP 429)`;
 }
 
 /** Retry only transient failures: network errors and HTTP 408/423/429/5xx. */

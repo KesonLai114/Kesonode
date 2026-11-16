@@ -79,7 +79,7 @@
     "message": "No se pudo contactar a Kesonode. Toca para reintentar."
   },
   "popup_recovery_notice": {
-    "message": "Se bloqueó una eliminación inusual ($COUNT$ marcadores) y se guardó un punto de restauración. Aplícala o consérvalos en Configuración → Actividad.",
+    "message": "Se bloqueó una eliminación inusual ($COUNT$ marcadores) y se guardó un punto de restauración. Aplícala o consérvalos en Configuración → Historial de sincronización.",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -88,7 +88,7 @@
     }
   },
   "popup_guard_notice": {
-    "message": "Publicación en pausa: los marcadores de este dispositivo siguen cambiando ($COUNT$ entradas en este ciclo). No se perdió nada; se guardó un punto de restauración y la publicación se reanuda sola cuando el árbol se estabilice. Consulta Configuración → Actividad.",
+    "message": "Publicación en pausa: los marcadores de este dispositivo siguen cambiando ($COUNT$ entradas en este ciclo). No se perdió nada; se guardó un punto de restauración y la publicación se reanuda sola cuando el árbol se estabilice. Consulta Configuración → Historial de sincronización.",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -238,7 +238,7 @@
     "message": "Configurar →"
   },
   "popup_activity_log": {
-    "message": "Registro de actividades →"
+    "message": "Historial de sincronización →"
   },
   "common_back": {
     "message": "Atrás"
@@ -1210,7 +1210,7 @@
     }
   },
   "opt_error_check_connection": {
-    "message": "Revisa la conexión en Almacenamiento y vuelve a abrir esta pestaña."
+    "message": "Revisa la conexión en Nube y cifrado y vuelve a abrir esta pestaña."
   },
   "opt_snap_unknown": {
     "message": "Punto de restauración de marcadores"
@@ -1504,7 +1504,7 @@
     "message": "Continuar"
   },
   "opt_cfg_import_missing": {
-    "message": "La copia no incluía credenciales, así que la sincronización no puede empezar hasta que inicies sesión en: $ACCOUNTS$. Abre Ajustes → Almacenamiento, introdúcelas y guarda.",
+    "message": "La copia no incluía credenciales, así que la sincronización no puede empezar hasta que inicies sesión en: $ACCOUNTS$. Abre Ajustes → Nube y cifrado, introdúcelas y guarda.",
     "placeholders": {
       "accounts": {
         "content": "$1"
@@ -1545,7 +1545,7 @@
     "message": "Modo de depuración"
   },
   "opt_debug_desc": {
-    "message": "Registro detallado, tanto en la consola del navegador como en Actividad, para que puedas compartirlo. Desactívalo cuando hayas terminado."
+    "message": "Registro detallado, tanto en la consola del navegador como en Historial de sincronización, para que puedas compartirlo. Desactívalo cuando hayas terminado."
   },
   "opt_about_section": {
     "message": "Acerca de"
@@ -1945,7 +1945,7 @@
     }
   },
   "popup_guard_coexist": {
-    "message": "Normalmente significa que Kesonode se ejecuta junto con la sincronización de marcadores propia del navegador. Use un único sistema de sincronización para los marcadores, o excluya los marcadores de la sincronización (Ajustes → Tipos de datos) para que una carpeta que pertenece a otra herramienta quede fuera de Kesonode."
+    "message": "Normalmente significa que Kesonode se ejecuta junto con la sincronización de marcadores propia del navegador. Use un único sistema de sincronización para los marcadores, o excluya los marcadores de la sincronización (Ajustes → Contenido sincronizado) para que una carpeta que pertenece a otra herramienta quede fuera de Kesonode."
   },
   "popup_guard_dismiss": {
     "message": "No mostrar de nuevo"
@@ -2403,7 +2403,7 @@
     "message": "Punto de restauración antes de fusiones arriesgadas"
   },
   "opt_auto_snapshot_desc": {
-    "message": "Cuando una fusión eliminaría una gran parte de los marcadores de este dispositivo, se guarda un punto de restauración y se ofrece como Deshacer en Actividad."
+    "message": "Cuando una fusión eliminaría una gran parte de los marcadores de este dispositivo, se guarda un punto de restauración y se ofrece como Deshacer en Historial de sincronización."
   },
   "opt_order_label": {
     "message": "Orden de los marcadores"

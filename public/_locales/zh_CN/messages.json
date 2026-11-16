@@ -79,7 +79,7 @@
     "message": "无法连接 Kesonode。点击重试。"
   },
   "popup_recovery_notice": {
-    "message": "一次异常删除（$COUNT$ 条书签）被阻止，已保存还原点。请在设置 → 活动中应用或保留。",
+    "message": "一次异常删除（$COUNT$ 条书签）被阻止，已保存还原点。请在设置 → 同步记录中应用或保留。",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -88,7 +88,7 @@
     }
   },
   "popup_guard_notice": {
-    "message": "本机书签持续大幅变动（本轮 $COUNT$ 处），已暂停向其它设备发布。未删除任何内容，已保存还原点，书签稳定后会自动恢复。详见 设置 → 活动。",
+    "message": "本机书签持续大幅变动（本轮 $COUNT$ 处），已暂停向其它设备发布。未删除任何内容，已保存还原点，书签稳定后会自动恢复。详见 设置 → 同步记录。",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -238,7 +238,7 @@
     "message": "配置 →"
   },
   "popup_activity_log": {
-    "message": "活动日志 →"
+    "message": "同步记录 →"
   },
   "common_back": {
     "message": "后退"
@@ -1334,7 +1334,7 @@
     }
   },
   "opt_error_check_connection": {
-    "message": "请检查“存储”中的连接，然后重新打开此标签页。"
+    "message": "请检查“云端与加密”中的连接，然后重新打开此标签页。"
   },
   "opt_devices_loading": {
     "message": "正在读取您的同步文件夹…"
@@ -1842,7 +1842,7 @@
     "message": "继续"
   },
   "opt_cfg_import_missing": {
-    "message": "该备份不含登录凭据，因此在你登录以下账户前无法开始同步：$ACCOUNTS$。请打开“设置 → 存储”，填写后保存。",
+    "message": "该备份不含登录凭据，因此在你登录以下账户前无法开始同步：$ACCOUNTS$。请打开“设置 → 云端与加密”，填写后保存。",
     "placeholders": {
       "accounts": {
         "content": "$1"
@@ -1902,7 +1902,7 @@
     "message": "调试模式"
   },
   "opt_debug_desc": {
-    "message": "详细日志记录，输出至浏览器控制台和“活动”以便分享。使用完毕后请将其关闭。"
+    "message": "详细日志记录，输出至浏览器控制台和“同步记录”以便分享。使用完毕后请将其关闭。"
   },
   "opt_about_section": {
     "message": "关于"
@@ -1964,7 +1964,7 @@
     }
   },
   "popup_guard_coexist": {
-    "message": "这通常意味着 Kesonode 正与浏览器自带的同步一起运行。书签请只用一套同步；或在「设置 → 数据类型」里把书签排除出同步，让另一套工具拥有的文件夹不进入 Kesonode。"
+    "message": "这通常意味着 Kesonode 正与浏览器自带的同步一起运行。书签请只用一套同步；或在「设置 → 同步内容」里把书签排除出同步，让另一套工具拥有的文件夹不进入 Kesonode。"
   },
   "popup_guard_dismiss": {
     "message": "不再提示"
@@ -2403,7 +2403,7 @@
     "message": "风险合并前保存还原点"
   },
   "opt_auto_snapshot_desc": {
-    "message": "当一次合并会删除本设备很大一部分书签时，先保存还原点，并在活动页提供撤销。"
+    "message": "当一次合并会删除本设备很大一部分书签时，先保存还原点，并在同步记录页提供撤销。"
   },
   "opt_order_label": {
     "message": "书签顺序"

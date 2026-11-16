@@ -76,7 +76,7 @@ const DRIVE_WINDOW_CLOSED_MSG =
 
 /** The flow failed some other way. The browser's own words go to the log, not the screen. */
 const DRIVE_SIGNIN_FAILED_MSG =
-  "Google sign-in didn't complete. What the browser reported is in Settings → Activity. " +
+  "Google sign-in didn't complete. What the browser reported is in Settings → Sync history. " +
   "Try again, or use GitHub or WebDAV, which need no Google sign-in.";
 
 /** The one case where someone certainly declined: Google says so in the redirect. */
@@ -240,7 +240,7 @@ async function fetchUserInfo(accessToken: string): Promise<{ email: string; disp
  * One Activity line for every way a sign-in ends without a session, saying which way.
  *
  * Only two of the five exits used to log, with the same words, so a user asked to check
- * Settings → Activity could not tell us which one they had hit, and neither could we. The
+ * Settings → Sync history could not tell us which one they had hit, and neither could we. The
  * redirect URI goes in every line: it is the exact string Google's client must have
  * registered, it is invisible anywhere else, and it is what settled #24. The engine's own
  * words stay here and out of the UI.

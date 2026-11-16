@@ -57,7 +57,7 @@
     "message": "同期済み"
   },
   "popup_recovery_notice": {
-    "message": "珍しい削除($COUNT$ ブックマーク)がブロックされ、復元ポイントが保存されました。設定 -> アクティビティから確認してください。。",
+    "message": "珍しい削除($COUNT$ ブックマーク)がブロックされ、復元ポイントが保存されました。設定 -> 同期履歴から確認してください。。",
     "placeholders": {
       "count": {
         "content": "$1",
@@ -138,7 +138,7 @@
     "message": "設定 →"
   },
   "popup_activity_log": {
-    "message": "アクティビティログ →"
+    "message": "同期履歴 →"
   },
   "common_back": {
     "message": "戻る"

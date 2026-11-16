@@ -2,7 +2,7 @@
 
 Common issues and how to fix them. This fork is distributed locally and has no issue
 tracker of its own; when asking for help elsewhere, include your browser, the backend
-you use, the compatibility mode under Settings → Advanced, and what you saw.
+you use, the compatibility mode under Settings → Tools & diagnostics, and what you saw.
 
 ## Loading the extension
 
@@ -40,9 +40,9 @@ inside the extracted `manifest.json` matches the filename.
 
 **Changes take a while to show up on my other device.**
 Edit a bookmark and this device uploads in about a second, as long as **Sync on change** is
-on (it is by default, under Settings → Device). The *receiving* device finds out
+on (it is by default, under Settings → This device). The *receiving* device finds out
 on its next scheduled pull, which is every 60 seconds by default. You can move that to
-anywhere between 30 and 600 seconds under **Settings → Device → Sync interval**; 30s is the
+anywhere between 30 and 600 seconds under **Settings → This device → Sync interval**; 30s is the
 browser's minimum for a background check, so that's the floor, not a bug. History, open
 tabs and the extension list have no instant path at all: they travel on that same interval.
 
@@ -54,17 +54,17 @@ counts as one, so the piece that takes the day's total over the threshold is the
 back, and the card says how many went before it. The device receiving the deletion saves a
 restore point and shows "an unusual deletion was blocked", so nothing is lost either way.
 
-**To let the deletion through**, open **Settings → Activity** on the device showing the
+**To let the deletion through**, open **Settings → Sync history** on the device showing the
 warning and use **Apply the deletion** on the card at the top. It names the device that
 is asking and how many bookmarks are involved, and the restore point is already saved
 before you decide.
 
 **To keep the bookmarks instead**, undo the deletion on the device that made it: open
-**Settings → Activity** there and restore a point from before the cleanup. That puts the
+**Settings → Sync history** there and restore a point from before the cleanup. That puts the
 bookmarks back and clears the deletion record, so it stops being sent to your other
 devices.
 
-Raising **Max bulk delete from a peer** under **Settings → Device → Safety** (50-95%)
+Raising **Max bulk delete from a peer** under **Settings → This device → Safety** (50-95%)
 also lets a large cleanup through, but only up to 95% of your tree, so it cannot help
 when a device asks to clear nearly everything. It is a standing setting rather than a
 one-time approval, so prefer the card above.
@@ -102,7 +102,7 @@ faithful timeline.
 ## Encryption
 
 **"Your passphrase doesn't match your other devices."**
-Every device must use the exact same E2EE passphrase. Open **Settings → Storage** and find
+Every device must use the exact same E2EE passphrase. Open **Settings → Cloud & encryption** and find
 the **Encryption** card, reveal or re-enter the passphrase so it matches your other
 device(s), and sync again. Kesonode fails loudly here on purpose: it won't silently fork your
 data into unreadable files. Note what it does *not* do, though. The sync isn't cancelled.
@@ -214,7 +214,7 @@ is something Kesonode can work around, so it tells you about them instead of fai
 **Bookmarks and History can't be synced there.** Firefox for Android ships no bookmarks
 API and no history API, so an extension has nothing to read or write
 ([bookmarks](https://github.com/mozilla-mobile/fenix/issues/21830)). Kesonode marks both as
-unavailable in Settings → Data Types and skips them, rather than reporting an error every
+unavailable in Settings → Synced content and skips them, rather than reporting an error every
 sync for something you can't fix. Open tabs still sync, and your desktop devices carry on
 syncing everything among themselves. Bookmarks you have on Android are not touched. The
 extension list syncs too.
@@ -250,7 +250,7 @@ with its own file in your storage, as in any browser.
 
 ## Starting over
 
-Google Drive has a **Disconnect** button in **Settings → Storage**. GitHub and WebDAV
+Google Drive has a **Disconnect** button in **Settings → Cloud & encryption**. GitHub and WebDAV
 don't: to leave one of those, either pick a different provider in the same place and enter
 its credentials, or remove and reinstall the extension (which clears all local data and
 credentials). Your synced files on the backend are untouched. Delete those directly through your storage provider if you want
