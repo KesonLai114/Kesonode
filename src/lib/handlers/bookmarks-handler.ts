@@ -13,7 +13,7 @@ import {
   getFolderRenames, updateFolderRenames,
   updateFolderDeletes,
   getAppeared, updateAppeared, getKeptShells, updateKeptShells,
-  getCreated, updateCreated, getPeerRemovals, updatePeerRemovals, getBookmarkExclusions,
+  getCreated, updateCreated, getPeerRemovals, updatePeerRemovals, getBookmarkExclusions, getBookmarkOrderMode,
 } from "@/lib/utils/storage";
 import {
   asRootKind, defaultOtherRootId, findLocalRootByKind, matchLocalRoot, matchLocalRootEx,
@@ -137,6 +137,77 @@ let activeImports = 0;
 // user editing bookmark-manager entries while a merge runs is still recorded — the loss of
 // those records is what made moves and deletions stop travelling (see self-writes.ts).
 let wholesaleImports = 0;
+
+// ── Move-storm diagnostics ──────────────────────────────────────────────────
+// A person drags bookmarks one at a time, seconds apart. A burst of hundreds of
+// onMoved callbacks inside one short window is NOT a person: it is a browser's own
+// sync applying a remote order, another extension rewriting the tree, or this
+// extension's own merge echo arriving after its self-write ledger expired. The API
+// cannot say WHICH, but it can say "this happened, at this time, in this amount" —
+// which is exactly the evidence that was missing when a user asked why their order
+// changed with nobody touching it. One audited line per storm, never per move, so
+// the 200-entry Activity ring is not flooded.
+const MOVE_STORM_WINDOW_MS = 5_000;
+const MOVE_STORM_MIN = 25;
+let moveStormWindowStart = 0;
+let moveStormTotal = 0;
+let moveStormLogged = false;
+
+// The publish-side half of the storm defence. The 25th move is when a burst becomes
+// recognizable, but hundreds more land before the 1s sync debounce fires. So once a
+// window is flagged we extend its [from, to] on EVERY subsequent recorded placement,
+// covering the whole burst — not just the first 25. At publish time, placements whose
+// `at` falls inside a flagged window are withheld from the outgoing packet: a batch no
+// person could have dragged by hand must never be re-sent as this device's own intent.
+// Consecutive windows whose gap is < threshold merge, so a sustained reorder is one span.
+let suppressedFrom = 0;
+let suppressedTo = 0;
+
+/** Whether a record stamped at `at` belongs to a withheld move storm. */
+export function isMoveSuppressed(at: number): boolean {
+  return suppressedFrom !== 0 && at >= suppressedFrom && at <= suppressedTo;
+}
+
+/**
+ * Called once per recorded placement. Emits a single audited event when an unusual
+ * burst accumulates, naming the context so the cause can be narrowed after the fact,
+ * and marks the time span whose placements will be withheld at publish time.
+ */
+export function noteRecordedMove(context: "url" | "folder"): void {
+  const now = Date.now();
+  if (moveStormWindowStart === 0 || now - moveStormWindowStart >= MOVE_STORM_WINDOW_MS) {
+    moveStormWindowStart = now;
+    moveStormTotal = 0;
+    moveStormLogged = false;
+  }
+  moveStormTotal++;
+  if (!moveStormLogged && moveStormTotal >= MOVE_STORM_MIN) {
+    moveStormLogged = true;
+    const during = wholesaleImports > 0 ? "wholesale-import"
+      : activeImports > 0 ? "merge" : "idle";
+    logger.event(
+      "MoveStorm",
+      `Recorded ${MOVE_STORM_MIN}+ ${context} moves within ~${MOVE_STORM_WINDOW_MS / 1000}s (phase: ${during}). ` +
+      `This batch will be withheld from sync; a burst this size is not a manual drag — ` +
+      `check browser-side bookmark sync or another extension.`,
+    );
+  }
+  if (moveStormLogged) {
+    // Extend the flagged span to cover every placement in this storm, including the
+    // ones still arriving after detection. Adjacent storms fold into the same span.
+    suppressedFrom = suppressedFrom === 0 ? moveStormWindowStart : Math.min(suppressedFrom, moveStormWindowStart);
+    suppressedTo = Math.max(suppressedTo, now);
+  }
+}
+
+/** Test seam: clear the in-memory storm window between cases. */
+export function resetMoveStormForTest(): void {
+  moveStormWindowStart = 0;
+  moveStormTotal = 0;
+  moveStormLogged = false;
+  suppressedFrom = 0;
+  suppressedTo = 0;
+}
 
 export function toDeletedMap(list: Tombstone[]): Map<string, number> {
   const m = new Map<string, number>();
@@ -606,6 +677,7 @@ async function recordMove(id: string): Promise<void> {
   if (!urls.length) return;
   const now = Date.now();
   await updateMoves((current) => mergeMoveLists(current, urls.map((url) => ({ url, at: now }))));
+  noteRecordedMove("url");
   logger.info("Moves", `Recorded ${urls.length} move(s)`);
 }
 
@@ -733,6 +805,7 @@ async function recordFolderMove(id: string, moveInfo: chrome.bookmarks.BookmarkM
   await updateFolderMoves((current) =>
     mergeFolderMoveLists(current, [{ path, index: moveInfo.index, at: now, prev, next, ...(holds ? { holds } : {}) }])
   );
+  noteRecordedMove("folder");
   logger.info("Moves", "Recorded a folder reposition");
 }
 
@@ -744,7 +817,7 @@ export async function exportBookmarkPayload(): Promise<BookmarkPayload> {
   // write happened to land last. Nothing here is exempt from the burst just because it
   // runs inside a sync: only a wholesale import suppresses the recorders (a merge names
   // its own writes in the ledger and records everything else, the user's included).
-  const [tree, gced, gcedMoves, gcedFolderMoves, gcedTitles, gcedRenames, gcedFolderDeletes, gcedAppeared, createdRecords] = await Promise.all([
+  const [tree, gced, gcedMoves, gcedFolderMoves, gcedTitles, gcedRenames, gcedFolderDeletes, gcedAppeared, createdRecords, storedOrderMode] = await Promise.all([
     exportBookmarks(),
     updateTombstones(gcTombstones),
     updateMoves(gcMoves),
@@ -754,7 +827,24 @@ export async function exportBookmarkPayload(): Promise<BookmarkPayload> {
     updateFolderDeletes(gcFolderDeletes),
     updateAppeared(gcAppeared),
     getCreated(),
+    getBookmarkOrderMode(),
   ]);
+  // The order publisher decides the fate of placement records on THIS device:
+  //   - "browser": hand order to the browser's own sync — send neither our moves nor a
+  //     local stamp that would later masquerade as the newest intent. Contents still flow.
+  //   - every mode: withhold placements that fell inside a recorded move storm, so a
+  //     programmatic burst (957 moves in 0.5s) cannot propagate as if we dragged them.
+  const publishMoves = storedOrderMode === "browser"
+    ? []
+    : gcedMoves.filter((r) => !isMoveSuppressed(r.at));
+  const publishFolderMoves = storedOrderMode === "browser"
+    ? []
+    : gcedFolderMoves.filter((r) => !isMoveSuppressed(r.at));
+  const withheldMoves = gcedMoves.length - publishMoves.length + (gcedFolderMoves.length - publishFolderMoves.length);
+  if (withheldMoves > 0) {
+    logger.event("MoveWithheld", `Withheld ${withheldMoves} placement record(s) from this sync ` +
+      `(order mode: ${storedOrderMode}) — a move storm or browser-owned ordering.`);
+  }
   // Snapshot the current (full) tree so a later URL edit can find the replaced
   // url by id and tombstone it (see recordUrlChange). This is the state peers hold.
   await setBookmarkCache(tree);
@@ -775,8 +865,8 @@ export async function exportBookmarkPayload(): Promise<BookmarkPayload> {
   // folders in the payload is what made a deleted folder resurrect from a peer.
   return {
     tree: inPeerForm(withAppearance(pruneEmptyFolders(tree), toAppearedMap(gcedAppeared)), forms),
-    tombstones: publishableTombstones(gced, tree, forms), moves: gcedMoves.map(asPeer),
-    folderMoves: gcedFolderMoves.map(asPeerMark), titles: gcedTitles.map(asPeer), folderRenames: gcedRenames.map(asPeerMark),
+    tombstones: publishableTombstones(gced, tree, forms), moves: publishMoves.map(asPeer),
+    folderMoves: publishFolderMoves.map(asPeerMark), titles: gcedTitles.map(asPeer), folderRenames: gcedRenames.map(asPeerMark),
     folderDeletes: publishableFolderDeletes(gcedFolderDeletes, tree),
   };
 }
@@ -1043,7 +1133,8 @@ export async function importBookmarks(
   // Called when the mass-delete guard blocks a peer's deletions (recovery signal).
   onBulkBlocked?: (info: BulkDeleteBlock) => void,
   // Whether a peer's recorded reorder may move a bookmark here. `keep-local` leaves this
-  // device's ordering alone while deletions, adds and renames still converge.
+  // device's ordering alone; `browser` also stops publishing our own placements, handing
+  // order entirely to the browser's built-in sync. Deletions, adds, renames still converge.
   orderMode: BookmarkOrderMode = "lww",
 ): Promise<void> {
   assertDataTypeApi("bookmarks");
@@ -1541,8 +1632,9 @@ async function mergeBookmarks(
 
   const shouldMove = (url: string): boolean => {
     // This device's placement is its own: other signals (deletions, adds, renames) still
-    // merge, but a peer's reorder never reaches this browser.
-    if (orderMode === "keep-local") return false;
+    // merge, but a peer's reorder never reaches this browser. "browser" is the stronger
+    // form: the browser's own sync owns order, so Kesonode stays out of it entirely.
+    if (orderMode === "keep-local" || orderMode === "browser") return false;
     if (strategy === "prefer-local") return false;               // local placement wins
     if (strategy === "prefer-remote") return true;               // peer placement wins
     const key = canonicalUrlKey(url);
@@ -1796,8 +1888,8 @@ async function mergeBookmarks(
   let folderMoved = 0;
   const applyFolderRepositions = async (): Promise<void> => {
     // Same contract as shouldMove: with keep-local this browser's folder order is its own,
-    // so a peer's folder reorder must not reach it either.
-    if (orderMode === "keep-local") return;
+    // so a peer's folder reorder must not reach it either. "browser" keeps out entirely.
+    if (orderMode === "keep-local" || orderMode === "browser") return;
     for (const rec of logs.folderMoves.remote) {
       const winsLWW = strategy === "prefer-local" ? false
         : strategy === "prefer-remote" ? true
@@ -1974,8 +2066,25 @@ async function mergeBookmarks(
   // in the user's Activity log — but only when it changed something. Every idle cycle
   // logging "+0 / -0 / moved 0" is exactly the noise that used to evict the warnings.
   const summary = `Merged +${added} / -${removed} / moved ${moved} / renamed ${renamed}+${renamedFolders} / folders ${folderMoved} / shells ${shells} (folders preserved)`;
-  if (added || removed || moved || renamed || renamedFolders || folderMoved || shells) logger.event("mergeBookmarks", summary);
-  else logger.info("mergeBookmarks", summary);
+  if (added || removed || moved || renamed || renamedFolders || folderMoved || shells) {
+    // When placements were applied, say how OLD the records we honoured were. A move
+    // recorded days ago but only applicable now is the signature of a delayed landing
+    // (an absent folder/root arriving on a later sync); knowing the age separates that
+    // from a peer that just moved something this minute.
+    let ageNote = "";
+    if (moved > 0 || folderMoved > 0) {
+      const times = [
+        ...[...remoteMoveAt.values()],
+        ...logs.folderMoves.remote.map((r) => r.at),
+      ];
+      if (times.length) {
+        const newest = Math.max(...times);
+        const ageMin = Math.max(0, Math.round((Date.now() - newest) / 60_000));
+        ageNote = ` [newest placement record ${ageMin} min old]`;
+      }
+    }
+    logger.event("mergeBookmarks", summary + ageNote);
+  } else logger.info("mergeBookmarks", summary);
   return placed;
 }
 

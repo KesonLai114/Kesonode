@@ -2417,6 +2417,9 @@
   "opt_order_keep_local": {
     "message": "Mantieni l'ordine di questo browser"
   },
+  "opt_order_browser": {
+    "message": "Affida alla sincronizzazione del browser (non sincronizza l ordine)"
+  },
   "opt_autosave_section": {
     "message": "Istantanee della sessione"
   },

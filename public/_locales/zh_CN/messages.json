@@ -2417,6 +2417,9 @@
   "opt_order_keep_local": {
     "message": "保留本浏览器顺序"
   },
+  "opt_order_browser": {
+    "message": "交给浏览器同步（不参与顺序同步）"
+  },
   "opt_autosave_section": {
     "message": "会话快照"
   },

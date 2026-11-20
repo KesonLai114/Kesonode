@@ -3555,9 +3555,10 @@ export default function OptionsApp() {
                   <select className="field-input-inline"
                     aria-label={t("opt_order_label")}
                     value={settings.bookmark_order_mode ?? "lww"}
-                    onChange={(e) => update({ bookmark_order_mode: e.target.value as "lww" | "keep-local" })}>
+                    onChange={(e) => update({ bookmark_order_mode: e.target.value as "lww" | "keep-local" | "browser" })}>
                     <option value="lww">{t("opt_order_lww")}</option>
                     <option value="keep-local">{t("opt_order_keep_local")}</option>
+                    <option value="browser">{t("opt_order_browser")}</option>
                   </select>
                 </div>
               </div>

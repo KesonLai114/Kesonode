@@ -2417,6 +2417,9 @@
   "opt_order_keep_local": {
     "message": "Reihenfolge dieses Browsers behalten"
   },
+  "opt_order_browser": {
+    "message": "An Browser-Sync abgeben (Reihenfolge nicht synchronisieren)"
+  },
   "opt_autosave_section": {
     "message": "Sitzungs-Snapshots"
   },

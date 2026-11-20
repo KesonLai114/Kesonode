@@ -2417,6 +2417,9 @@
   "opt_order_keep_local": {
     "message": "Сохранять порядок этого браузера"
   },
+  "opt_order_browser": {
+    "message": "Передать синхронизации браузера (не синхронизировать порядок)"
+  },
   "opt_autosave_section": {
     "message": "Снимки сеанса"
   },

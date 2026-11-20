@@ -2417,6 +2417,9 @@
   "opt_order_keep_local": {
     "message": "Böngésző sorrendjének megtartása"
   },
+  "opt_order_browser": {
+    "message": "Átadás a böngésző szinkronnak (sorrend nem szinkronizál)"
+  },
   "opt_autosave_section": {
     "message": "Munkamenet-pillanatképek"
   },

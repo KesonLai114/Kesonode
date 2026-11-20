@@ -1,6 +1,7 @@
 import type {
   AppearedRecord,
   BookmarkExclusion,
+  BookmarkOrderMode,
   KeptShellRecord,
   CreatedRecord,
   PeerRemovalRecord,
@@ -489,6 +490,17 @@ export async function getBookmarkExclusions(): Promise<BookmarkExclusion[]> {
   return sanitizeExclusions(stored.excluded_bookmarks);
 }
 
+/**
+ * The order mode, straight from stored settings, for the bookmark publisher. Like the
+ * exclusions reader above this avoids getSettings() (which mints a device id). An absent
+ * or unrecognized value is the historical default, "lww".
+ */
+export async function getBookmarkOrderMode(): Promise<BookmarkOrderMode> {
+  const stored = await get<Partial<SyncSettings>>(KEYS.SETTINGS, {});
+  const mode = stored.bookmark_order_mode;
+  return mode === "keep-local" || mode === "browser" ? mode : "lww";
+}
+
 export async function saveSettings(partial: Partial<SyncSettings>): Promise<SyncSettings> {
   // Read-modify-write of the WHOLE settings object, so two contexts saving at the same
   // moment (options changing the passphrase while the popup disconnects a backend) used
@@ -660,7 +672,7 @@ export const SETTINGS_BACKUP_SCHEMA: Record<keyof SyncSettings, BackupField> = {
         DATA_TYPES.includes(type) && oneOf(CONFLICT_STRATEGIES)(strategy),
       ),
   },
-  bookmark_order_mode: { validate: oneOf(["lww", "keep-local"]) },
+  bookmark_order_mode: { validate: oneOf(["lww", "keep-local", "browser"]) },
   auto_restore_point: { validate: isBoolean },
   session_autosave_enabled: { validate: isBoolean },
   history_days_limit: { validate: isPositiveNumber },

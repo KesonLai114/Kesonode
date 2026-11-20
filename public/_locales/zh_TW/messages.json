@@ -2417,6 +2417,9 @@
   "opt_order_keep_local": {
     "message": "保留本瀏覽器順序"
   },
+  "opt_order_browser": {
+    "message": "交給瀏覽器同步（不參與順序同步）"
+  },
   "opt_autosave_section": {
     "message": "工作階段快照"
   },

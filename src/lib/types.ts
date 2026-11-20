@@ -12,9 +12,12 @@ export type ConflictStrategy = "lww" | "prefer-local" | "prefer-remote" | "manua
  * "lww" is the historical behaviour: the newer recorded move wins, so two devices that
  * reorder the same folder end up on the same order. "keep-local" leaves this device's own
  * arrangement alone — useful when one browser sorts a folder automatically and the user
- * does not want that order pushed everywhere.
+ * does not want that order pushed everywhere, but still publishes this device's own moves.
+ * "browser" goes one step further for coexisting with a browser's built-in bookmark sync:
+ * this device neither applies peers' order nor records/publishes its own, so Kesonode is
+ * completely transparent in the order dimension and the browser owns ordering alone.
  */
-export type BookmarkOrderMode = "lww" | "keep-local";
+export type BookmarkOrderMode = "lww" | "keep-local" | "browser";
 
 /**
  * How a device that ALREADY has bookmarks joins a sync group whose peers also have some.

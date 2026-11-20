@@ -2660,6 +2660,9 @@
   "opt_order_keep_local": {
     "message": "Keep this browser's order"
   },
+  "opt_order_browser": {
+    "message": "Hand off to browser sync (stop syncing order)"
+  },
   "opt_autosave_section": {
     "message": "Session snapshots"
   },
