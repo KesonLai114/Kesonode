@@ -20,6 +20,11 @@ All notable changes to Konode. Format loosely follows
   second) are withheld at publish time so they cannot be mistaken for this device's
   intent; both mechanisms leave MoveStorm / MoveWithheld audit events.
 
+- **An upgrade points at the baseline that needs re-setting.** The shared marker records
+  the extension version that designated it. When a newer build finds a baseline set by an
+  older one, Settings shows a notice and offers a one-click re-set on the baseline browser.
+  Adoption is deliberately one-shot, so upgrading alone never replays the alignment.
+
 ### Changed
 
 - **AI tidy-up plans ask for a second confirmation.** The settings UI shows what the plan
