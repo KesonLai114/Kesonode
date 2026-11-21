@@ -2705,11 +2705,26 @@
   "ai_organize_keep": {
     "message": "保留"
   },
-  "ai_organize_apply": {
-    "message": "套用所選"
-  },
   "ai_organize_applied": {
     "message": "已套用。操作前已建立還原點；這些變動會像一般書籤編輯一樣參與同步。"
+  },
+  "ai_organize_review": {
+    "message": "核對變更"
+  },
+  "ai_organize_folder_rules": {
+    "message": "歸檔目標只能是現有資料夾；同名資料夾以第一個符合者為準，不會新建資料夾。建議最多 20 筆移動、20 組重複，且只針對直接放在根目錄的書籤。"
+  },
+  "ai_organize_confirm_title": {
+    "message": "最終確認：即將執行以下變更"
+  },
+  "ai_organize_confirm_remove": {
+    "message": "刪除"
+  },
+  "ai_organize_confirm_apply": {
+    "message": "確認執行"
+  },
+  "ai_organize_confirm_note": {
+    "message": "執行前會先建立固定還原點；移動僅到現有資料夾，刪除只針對單一書籤。變更會像一般書籤編輯一樣參與同步。"
   },
   "ai_popup_placeholder": {
     "message": "用一句話描述你要找的書籤"

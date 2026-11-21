@@ -93,7 +93,10 @@ provider's policy, not ours.
 
 **What it can change.** Searching and explanations are read-only. The organisation
 suggestions are a *plan*: nothing is written to your bookmarks until you tick individual
-rows and press Apply, and Apply takes a pinned restore point **before** the first edit.
+rows, review a second confirmation that lists every move (source folder → target folder)
+and every duplicate group (which one is kept, which ones are removed), and confirm again.
+Only then is a pinned restore point taken **before** the first edit. Target folders must
+already exist; repeated folder names resolve to the first match, and no folder is created.
 Moves and removals are ordinary bookmark edits, so they travel through the normal sync
 like any edit you make yourself. Model output is treated as untrusted: returned bookmark
 ids are checked against the ids actually sent, and text is rendered as text only.

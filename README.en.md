@@ -146,13 +146,16 @@ you had in mind. Picking one system for bookmarks is the simple answer.
   and model in Settings → AI assistant, you can search bookmarks in natural language,
   get organisation suggestions, and have sync receipts or conflicts explained. A
   question sends only a **reduced bookmark list** — title, hostname and folder path
-  (at most 400 entries). Full URLs, history, tabs, your sync storage and your credentials
-  are never sent; explaining a sync receipt or conflicts sends only counts, data-type names
-  and flags, never titles or URL samples. Requests go only to the address you entered;
-  Kesonode has no server and
+  (at most 120 entries for a question, 400 for organisation suggestions). Full URLs, history,
+  tabs, your sync storage and your credentials are never sent; explaining a sync receipt or
+  conflicts sends only counts, data-type names and flags, never titles or URL samples.
+  Requests go only to the address you entered; Kesonode has no server and
   never sees the key or the answer. The key stays on this device, is not synced, and is
-  **not included in a settings export**. Organisation suggestions are a list only:
-  nothing is written until you tick rows and a pinned restore point has been taken.
+  **not included in a settings export**. Organisation suggestions are a plan only: after
+  ticking rows you get a final confirmation listing every move ("from → to folder") and
+  every duplicate group ("keep / remove"). Only after you confirm again is a pinned restore
+  point taken and the bookmark tree changed. Targets must be existing folders; repeated
+  folder names use the first match, and no folder is ever created.
   See [PRIVACY.md](PRIVACY.md#optional-ai-assistant).
 
 > With the AI assistant off, the "never sent to any third party" promise above has no

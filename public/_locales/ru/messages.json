@@ -2705,11 +2705,26 @@
   "ai_organize_keep": {
     "message": "Оставить"
   },
-  "ai_organize_apply": {
-    "message": "Применить выбранное"
-  },
   "ai_organize_applied": {
     "message": "Применено. Сначала была создана точка восстановления; эти изменения синхронизируются как любая другая правка закладок."
+  },
+  "ai_organize_review": {
+    "message": "Review changes"
+  },
+  "ai_organize_folder_rules": {
+    "message": "Folders can only be chosen from folders that already exist; if names repeat, the first match is used. No folders are created. At most 20 moves and 20 duplicate groups, and only bookmarks directly in a root are considered."
+  },
+  "ai_organize_confirm_title": {
+    "message": "Final check: the following changes will be applied"
+  },
+  "ai_organize_confirm_remove": {
+    "message": "Remove"
+  },
+  "ai_organize_confirm_apply": {
+    "message": "Confirm and apply"
+  },
+  "ai_organize_confirm_note": {
+    "message": "A pinned restore point is taken first. Moves only target existing folders; removals only affect individual bookmarks. The edits sync like any other bookmark change."
   },
   "ai_popup_placeholder": {
     "message": "Опишите закладку, которую ищете"

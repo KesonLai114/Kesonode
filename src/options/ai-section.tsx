@@ -9,12 +9,14 @@
  * MV3 service worker (which the browser may suspend at any moment) is never involved.
  *
  * The organisation plan is a PLAN. Nothing is written to the bookmark tree until the user
- * ticks rows and presses Apply, and Apply takes a pinned restore point first.
+ * ticks rows, reviews a second confirmation listing every move/delete with its target
+ * folder, and confirms. Apply then takes a pinned restore point first.
  */
 
 import { useRef, useState } from "react";
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   Info,
   Loader2,
@@ -66,6 +68,10 @@ function titleById(snapshot: AiBookmarkSnapshot | null, id: string): string {
   return snapshot?.bookmarks.find((b) => b.id === id)?.title ?? id;
 }
 
+function folderById(snapshot: AiBookmarkSnapshot | null, id: string): string {
+  return snapshot?.bookmarks.find((b) => b.id === id)?.folder ?? "";
+}
+
 export function AiSection({ settings, onChange }: AiSectionProps) {
   const [busy, setBusy] = useState<"" | "test" | "plan" | "apply">("");
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -75,6 +81,7 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [keepers, setKeepers] = useState<Map<string, string>>(new Map());
   const [coverage, setCoverage] = useState<{ sent: number; total: number } | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const enabled = settings.ai_enabled === true;
@@ -138,6 +145,7 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
       setCoverage(items.length < loose.length
         ? { sent: items.length, total: loose.length }
         : null);
+      setConfirming(false);
       if (!result.moves.length && !result.duplicates.length) {
         setMessage({ kind: "ok", text: t("ai_organize_empty") });
       }
@@ -170,9 +178,11 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
       setMessage({ kind: "error", text: aiErrorMessage(err) });
     }
     setBusy("");
+    setConfirming(false);
   };
 
   const toggleMove = (id: string) => {
+    setConfirming(false);
     setSelectedMoves((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -181,6 +191,7 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
     });
   };
   const toggleGroup = (key: string) => {
+    setConfirming(false);
     setSelectedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -190,6 +201,9 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
   };
 
   const selectionCount = selectedMoves.size + selectedGroups.size;
+  const chosenMoves = plan?.moves.filter((m) => selectedMoves.has(m.id)) ?? [];
+  const chosenGroups = plan?.duplicates.filter((g) => selectedGroups.has(g.ids.join("|"))) ?? [];
+  const chosenRemoveIds = plan ? planRemovals(plan.duplicates, selectedGroups, keepers) : [];
 
   return (
     <div className="settings-section">
@@ -301,6 +315,10 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
         <Info size={14} />
         <div>{t("ai_organize_desc")}</div>
       </div>
+      <div className="config-hint">
+        <Info size={14} />
+        <div>{t("ai_organize_folder_rules")}</div>
+      </div>
       <div className="settings-row">
         <div className="settings-row-left" />
         <button className="btn-secondary" onClick={onPlan} disabled={busy !== "" || !enabled}>
@@ -336,7 +354,7 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
               <div className="settings-row-left">
                 <div>
                   <div className="row-label">{titleById(snapshot, m.id)}</div>
-                  <div className="row-desc">{m.folder}{m.reason ? ` · ${m.reason}` : ""}</div>
+                  <div className="row-desc">{folderById(snapshot, m.id) || "—"} → {m.folder}{m.reason ? ` · ${m.reason}` : ""}</div>
                 </div>
               </div>
             </label>
@@ -365,7 +383,10 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
                   className="field-input-inline"
                   value={keeper}
                   aria-label={t("ai_organize_keep")}
-                  onChange={(e) => setKeepers((prev) => new Map(prev).set(key, e.target.value))}
+                  onChange={(e) => {
+                    setKeepers((prev) => new Map(prev).set(key, e.target.value));
+                    setConfirming(false);
+                  }}
                 >
                   {g.ids.map((id) => (
                     <option key={id} value={id}>{t("ai_organize_keep")}: {titleById(snapshot, id)}</option>
@@ -380,13 +401,51 @@ export function AiSection({ settings, onChange }: AiSectionProps) {
             </div>
             <button
               className="btn-secondary"
-              onClick={onApply}
+              onClick={() => setConfirming(true)}
               disabled={busy !== "" || selectionCount === 0}
             >
-              {busy === "apply" ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-              {t("ai_organize_apply")}
+              <CheckCircle2 size={12} />
+              {t("ai_organize_review")}
             </button>
           </div>
+
+          {confirming && (
+            <div className="settings-row" style={{ background: "var(--warn-bg)" }}>
+              <div className="settings-row-left">
+                <AlertTriangle size={14} className="row-icon" style={{ color: "var(--warn-border)" }} />
+                <div>
+                  <div className="row-label" style={{ color: "var(--warn-text)" }}>
+                    {t("ai_organize_confirm_title")}
+                  </div>
+                  {chosenMoves.map((m) => (
+                    <div className="row-desc" key={`move-${m.id}`} style={{ color: "var(--warn-text)" }}>
+                      {titleById(snapshot, m.id)}：{folderById(snapshot, m.id) || "—"} → {m.folder}
+                    </div>
+                  ))}
+                  {chosenGroups.map((g) => {
+                    const key = g.ids.join("|");
+                    const keeper = keepers.get(key) ?? g.ids[0];
+                    const removed = g.ids.filter((id) => id !== keeper && chosenRemoveIds.includes(id));
+                    return (
+                      <div className="row-desc" key={`dup-${key}`} style={{ color: "var(--warn-text)" }}>
+                        {t("ai_organize_keep")}：{titleById(snapshot, keeper)} · {t("ai_organize_confirm_remove")}：{removed.map((id) => titleById(snapshot, id)).join("、")}
+                      </div>
+                    );
+                  })}
+                  <div className="row-desc" style={{ color: "var(--warn-text)" }}>
+                    {t("ai_organize_confirm_note")}
+                  </div>
+                </div>
+              </div>
+              <button className="btn-secondary" onClick={() => setConfirming(false)} disabled={busy !== ""}>
+                {t("common_back")}
+              </button>
+              <button className="btn-secondary" onClick={onApply} disabled={busy !== ""}>
+                {busy === "apply" ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                {t("ai_organize_confirm_apply")}
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>

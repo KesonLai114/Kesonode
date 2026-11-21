@@ -2705,11 +2705,26 @@
   "ai_organize_keep": {
     "message": "保留"
   },
-  "ai_organize_apply": {
-    "message": "应用所选"
-  },
   "ai_organize_applied": {
     "message": "已应用。操作前已建立还原点；这些改动会像普通书签编辑一样参与同步。"
+  },
+  "ai_organize_review": {
+    "message": "核对变更"
+  },
+  "ai_organize_folder_rules": {
+    "message": "归档目标只能是现有文件夹；同名文件夹按第一个匹配处理，不会新建文件夹。建议最多 20 条移动、20 组重复，且只针对直接放在根目录的书签。"
+  },
+  "ai_organize_confirm_title": {
+    "message": "最终确认：即将执行以下变更"
+  },
+  "ai_organize_confirm_remove": {
+    "message": "删除"
+  },
+  "ai_organize_confirm_apply": {
+    "message": "确认执行"
+  },
+  "ai_organize_confirm_note": {
+    "message": "执行前会先建立固定还原点；移动仅到已存在文件夹，删除只针对单条书签。改动会像普通书签编辑一样参与同步。"
   },
   "ai_popup_placeholder": {
     "message": "用一句话描述你要找的书签"
