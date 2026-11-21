@@ -1048,6 +1048,12 @@
   "opt_baseline_cleared": {
     "message": "Base rimossa. I segnalibri tornano a unirsi in entrambe le direzioni."
   },
+  "opt_baseline_upgrade_notice": {
+    "message": "L'estensione è stata aggiornata, ma l'attuale base è stata impostata con una versione precedente. Imposta di nuovo la base sul browser che funge da base, così gli altri allineano i preferiti con la logica attuale."
+  },
+  "opt_baseline_reset": {
+    "message": "Imposta di nuovo la base"
+  },
   "bm_exclude_label": {
     "message": "Escludi segnalibri dalla sincronizzazione"
   },

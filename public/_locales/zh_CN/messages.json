@@ -1039,6 +1039,12 @@
   "opt_baseline_cleared": {
     "message": "基准已清除，书签恢复双向合并。"
   },
+  "opt_baseline_upgrade_notice": {
+    "message": "插件已升级，但当前基准是在旧版本上设置的。请到作为基准的浏览器重新设置一次，其他浏览器才会按新版逻辑重新对齐书签顺序。"
+  },
+  "opt_baseline_reset": {
+    "message": "重新设置基准"
+  },
   "bm_exclude_label": {
     "message": "将书签排除在同步之外"
   },

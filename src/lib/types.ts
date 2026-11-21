@@ -1102,6 +1102,9 @@ export interface DeviceInfo {
 export interface BaselineInfo {
   marker: { device_id: string; device_label?: string; at: string } | null;
   adopted_at: string | null;
+  /** Extension version that designated the marker, when the marker records it.
+   *  Missing means it was set by a build old enough not to record one. */
+  set_with_version?: string;
   cached: boolean;
   /** The storage holds no marker, but this device set one and keeps its own record of
    *  it — the marker is gone from the storage, not from this browser's answer. */

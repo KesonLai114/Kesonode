@@ -1048,6 +1048,12 @@
   "opt_baseline_cleared": {
     "message": "基準已清除，書籤恢復雙向合併。"
   },
+  "opt_baseline_upgrade_notice": {
+    "message": "外掛已升級，但目前的基準是在舊版本上設定的。請到作為基準的瀏覽器重新設定一次，其他瀏覽器才會依新版邏輯重新對齊書籤順序。"
+  },
+  "opt_baseline_reset": {
+    "message": "重新設定基準"
+  },
   "bm_exclude_label": {
     "message": "將書籤排除在同步之外"
   },

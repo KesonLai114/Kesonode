@@ -15,6 +15,7 @@ import {
   redactedBackupNeedsPassphrase,
 } from "@/lib/utils/settings-import";
 import { snapshotDisplayName, snapshotIsUnnamed } from "@/lib/sync/snapshots";
+import { baselineNeedsRedesignation } from "@/lib/sync/baseline";
 import { searchAutosaved } from "@/lib/session-autosave";
 import { duplicateRemovalPlan } from "@/lib/cleanup";
 import {
@@ -2120,9 +2121,15 @@ export default function OptionsApp() {
         : baselineMine
           ? t("opt_baseline_mine", baselineTime)
           : t("opt_baseline_other", [isolate(baselineDeviceName), baselineTime]);
+  // Adoption is deliberately one-shot: upgrading the extension never re-applies a
+  // baseline, so a tree aligned by an older build keeps whatever that build did. When
+  // the marker predates the running build, point at the re-designation that refreshes it.
+  const baselineFromOlderBuild = baselineLoad === "ok" && !!baseline?.marker && !baseline.cached
+    && baselineNeedsRedesignation(APP_VERSION, baseline.set_with_version);
   const baselineNote = baselineLoad !== "ok" ? null
     : baseline?.cached ? t("opt_baseline_cached")
     : baseline?.stale ? t("opt_baseline_stale")
+    : baselineFromOlderBuild ? t("opt_baseline_upgrade_notice")
     : baselineAwaiting ? t("opt_baseline_waiting", isolate(baselineDeviceName))
     : null;
 
@@ -3395,10 +3402,10 @@ export default function OptionsApp() {
                       </>
                     ) : (
                       <>
-                        {baselineReady && (!baselineMine || baseline?.stale) && (
+                        {baselineReady && (!baselineMine || baseline?.stale || baselineFromOlderBuild) && (
                           <button className="btn-secondary" disabled={baselineBusy}
                             onClick={() => { setBaselineMsg(null); setBaselineConfirm("set"); }}>
-                            <Star size={12} /> {t("opt_baseline_set")}
+                            <Star size={12} /> {baselineMine && baselineFromOlderBuild ? t("opt_baseline_reset") : t("opt_baseline_set")}
                           </button>
                         )}
                         {baselineReady && baseline?.marker && (

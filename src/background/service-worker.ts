@@ -540,7 +540,7 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
       // Awaited: the pending message response is what keeps the MV3 worker alive through
       // the replace/delete and the sync that publishes the answer.
-      await syncEngine.chooseFirstSync(message.payload.choice);
+      await syncEngine.chooseFirstSync(message.payload.choice, browser.runtime.getManifest().version);
       return { type: "OK" };
     }
 
@@ -551,7 +551,7 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
 
     case "SET_BASELINE": {
       if (!syncEngine) return { type: "ERROR", payload: "Engine not initialized" };
-      const baseline = await syncEngine.setBaseline();
+      const baseline = await syncEngine.setBaseline(browser.runtime.getManifest().version);
       // A marker whose tree is not on the storage yet leaves every other device waiting a
       // whole interval. Publishing is best-effort: the marker is already written, and the
       // next ordinary cycle would upload the tree anyway.
@@ -560,7 +560,10 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       } catch (err) {
         logger.warn("Baseline", `The baseline is set, but publishing this tree failed: ${err instanceof Error ? err.message : err}`);
       }
-      return { type: "BASELINE", payload: { ...baseline, cached: false } };
+      return {
+        type: "BASELINE",
+        payload: { ...baseline, set_with_version: baseline.marker.app_version, cached: false },
+      };
     }
 
     case "CLEAR_BASELINE": {

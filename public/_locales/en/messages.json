@@ -1228,6 +1228,13 @@
   "opt_baseline_cleared": {
     "message": "Baseline cleared. Bookmarks merge both ways again."
   },
+  "opt_baseline_upgrade_notice": {
+    "message": "The extension was upgraded, but the current baseline was set by an older version. Set the baseline again on the browser that is the baseline so the others realign their bookmarks with the current logic.",
+    "description": "Shown on the bookmark baseline card when the running extension is newer than the version that designated the baseline. Adopting a baseline is one-shot, so upgrading alone does not re-align bookmarks."
+  },
+  "opt_baseline_reset": {
+    "message": "Set baseline again"
+  },
   "bm_exclude_label": {
     "message": "Exclude bookmarks from sync",
     "description": "The switch, under Bookmarks in Settings and in the setup wizard, that opens a tree of this browser's bookmarks for picking what stays out of sync."

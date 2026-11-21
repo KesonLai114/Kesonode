@@ -7,6 +7,7 @@ import {
 import { sha256 } from "@/lib/crypto/encryption";
 import {
   BASELINE_FILE, getCachedBaseline, readBaselineMarker, writeBaselineMarker,
+  baselineNeedsRedesignation,
 } from "@/lib/sync/baseline";
 import type { BookmarkPayload, IBackend, SyncBookmark, SyncPacket, SyncSettings } from "@/lib/types";
 
@@ -103,6 +104,7 @@ async function putPeer(deviceId: string, urls: string[], label = "Other browser"
 
 function putMarker(
   deviceId: string, label = "Other browser", at = "2026-11-11T00:00:00.000Z", checksum?: string,
+  appVersion?: string,
 ): void {
   h.blobs.set(BASELINE_FILE, JSON.stringify({
     version: "1.0",
@@ -110,6 +112,7 @@ function putMarker(
     payload: JSON.stringify({
       version: 1, device_id: deviceId, device_label: label, at,
       ...(checksum ? { checksum } : {}),
+      ...(appVersion ? { app_version: appVersion } : {}),
     }),
   }));
 }
@@ -167,9 +170,10 @@ describe("the shared baseline marker", () => {
     } as unknown as IBackend;
     await writeBaselineMarker(backend, settings(), {
       version: 1, device_id: "peer", device_label: "Peer", at: "2026-11-11T00:00:00.000Z",
+      app_version: "1.5.26",
     });
     const read = await readBaselineMarker(backend, settings());
-    expect(read.marker).toMatchObject({ device_id: "peer", device_label: "Peer" });
+    expect(read.marker).toMatchObject({ device_id: "peer", device_label: "Peer", app_version: "1.5.26" });
     expect(read.unreadable).toBe(false);
   });
 
@@ -222,6 +226,29 @@ describe("choosing this browser as the baseline", () => {
     // The tree was published as part of naming it, so the next cycle has nothing to send.
     expect(await getLastUploadChecksum("bookmarks")).not.toBe("old-tag");
     expect(await getLastUploadChecksum("bookmarks")).not.toBeNull();
+  });
+
+  it("records the extension version that designated the baseline", async () => {
+    await seedLocal();
+    const e = engine();
+
+    await e.setBaseline("1.5.26");
+
+    expect(marker()).toMatchObject({ app_version: "1.5.26" });
+    expect((await e.getBaselineInfo()).set_with_version).toBe("1.5.26");
+    expect(baselineNeedsRedesignation("1.5.26", "1.5.26")).toBe(false);
+    expect(baselineNeedsRedesignation("1.5.27", "1.5.26")).toBe(true);
+  });
+
+  it("treats a marker written before the version was recorded as old", async () => {
+    // Every baseline set by a pre-1.5.26 build looks like this: adopting it once was
+    // enough back then, but a newer build needs an explicit re-designation to replay it.
+    putMarker("peer");
+
+    const info = await engine().getBaselineInfo();
+
+    expect(info.set_with_version).toBeUndefined();
+    expect(baselineNeedsRedesignation("1.5.26", info.set_with_version)).toBe(true);
   });
 
   it("writes no marker when a peer file cannot be removed", async () => {

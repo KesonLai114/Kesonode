@@ -1048,6 +1048,12 @@
   "opt_baseline_cleared": {
     "message": "Basis entfernt. Lesezeichen werden wieder in beide Richtungen zusammengeführt."
   },
+  "opt_baseline_upgrade_notice": {
+    "message": "Die Erweiterung wurde aktualisiert, aber die aktuelle Basis wurde mit einer älteren Version festgelegt. Setze die Basis auf dem Browser, der die Basis ist, erneut fest, damit die anderen ihre Lesezeichen nach der aktuellen Logik ausrichten."
+  },
+  "opt_baseline_reset": {
+    "message": "Basis erneut festlegen"
+  },
   "bm_exclude_label": {
     "message": "Lesezeichen von der Synchronisierung ausschließen"
   },

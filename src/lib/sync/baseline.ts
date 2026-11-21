@@ -15,6 +15,7 @@ import { encrypt, decrypt } from "@/lib/crypto/encryption";
 import { browser } from "@/lib/utils/ext";
 import { KEYS } from "@/lib/utils/storage";
 import { logger } from "@/lib/utils/logger";
+import { compareVersions } from "@/lib/utils/upgrade-package";
 import type { IBackend, SyncSettings } from "@/lib/types";
 
 export const BASELINE_FILE = "konode_baseline.json";
@@ -32,6 +33,20 @@ export interface BaselineMarker {
    *  and adopting the stale one would mark the device aligned with the wrong tree.
    *  Optional because a marker written by an earlier build carries no checksum. */
   checksum?: string;
+  /** Extension version that designated this baseline. Lets a device that upgraded since
+   *  then offer to re-designate, so followers re-apply the tree with the current logic.
+   *  Absent on markers written before the field existed: treated as an old build. */
+  app_version?: string;
+}
+
+/**
+ * Whether the running build is newer than the build that designated the baseline.
+ * Markers written before `app_version` existed have no value and are therefore old.
+ */
+export function baselineNeedsRedesignation(
+  currentVersion: string, setWithVersion?: string,
+): boolean {
+  return !setWithVersion || compareVersions(currentVersion, setWithVersion) > 0;
 }
 
 export interface BaselineAdopted {
@@ -99,6 +114,8 @@ export async function readBaselineMarker(
           ? { device_label: value.device_label } : {}),
         ...(typeof value.checksum === "string" && value.checksum.trim()
           ? { checksum: value.checksum } : {}),
+        ...(typeof value.app_version === "string" && value.app_version.trim()
+          ? { app_version: value.app_version } : {}),
         at: value.at,
       },
       unreadable: false,

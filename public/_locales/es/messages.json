@@ -1668,6 +1668,12 @@
   "opt_baseline_cleared": {
     "message": "Base eliminada. Los marcadores vuelven a combinarse en ambos sentidos."
   },
+  "opt_baseline_upgrade_notice": {
+    "message": "La extensión se actualizó, pero la base actual se estableció con una versión anterior. Vuelve a establecer la base en el navegador que es la base para que los demás alineen sus marcadores con la lógica actual."
+  },
+  "opt_baseline_reset": {
+    "message": "Volver a establecer la base"
+  },
   "bm_exclude_label": {
     "message": "Excluir marcadores de la sincronización"
   },

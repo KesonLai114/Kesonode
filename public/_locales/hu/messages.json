@@ -1048,6 +1048,12 @@
   "opt_baseline_cleared": {
     "message": "Az alap törölve. A könyvjelzők ismét kétirányban egyesülnek."
   },
+  "opt_baseline_upgrade_notice": {
+    "message": "A bővítmény frissített, de a jelenlegi alapot egy régebbi verzió állította be. Állítsd be újra az alapot azon a böngészőn, amely az alap, hogy a többiek az új logika szerint igazítsák a könyvjelzőket."
+  },
+  "opt_baseline_reset": {
+    "message": "Alap újra beállítása"
+  },
   "bm_exclude_label": {
     "message": "Könyvjelzők kizárása a szinkronból"
   },

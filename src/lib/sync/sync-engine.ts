@@ -1,5 +1,6 @@
 import type { SyncSettings, SyncState, DataType, SyncPacket, SyncSession, SyncExtension, ConflictItem, BackendConfig,
   DeviceInfo, DeviceBrowser, ConflictDiff, ListedFile, BookmarkPayload, FirstSyncChoice, IBackend, SyncTypeReport,
+  BaselineInfo,
 } from "@/lib/types";
 import { createBackend } from "@/lib/backends/abstract-backend";
 import { normalizeRepoSlug } from "@/lib/backends/github-backend";
@@ -1574,12 +1575,12 @@ export class SyncEngine {
    * bookmarks, "local" only deletes peers' existing bookmark files, and both then publish
    * this device's ordinary v1.0 packet. The frozen wire contract is untouched.
    */
-  async chooseFirstSync(choice: FirstSyncChoice): Promise<void> {
-    await this.withMutationLock(() => this.applyFirstSyncChoice(choice));
+  async chooseFirstSync(choice: FirstSyncChoice, extensionVersion?: string): Promise<void> {
+    await this.withMutationLock(() => this.applyFirstSyncChoice(choice, extensionVersion));
     await this.sync(["bookmarks"], { force: true, mergeBookmarks: choice === "merge" });
   }
 
-  private async applyFirstSyncChoice(choice: FirstSyncChoice): Promise<void> {
+  private async applyFirstSyncChoice(choice: FirstSyncChoice, extensionVersion?: string): Promise<void> {
     // The question is answered once. Two onboarding tabs (or a tab left open while the
     // answer was given in another one) must not run the destructive half twice: "local"
     // would delete files the peers have meanwhile re-uploaded, and "remote" would replace
@@ -1673,7 +1674,7 @@ export class SyncEngine {
         logger.warn("FirstSync", `Couldn't save a restore point before the local choice: ${err instanceof Error ? err.message : err}`);
       }
       const { removed, failed, rateLimited } = await this.withBackend(
-        (b) => this.designateBaselineOn(b),
+        (b) => this.designateBaselineOn(b, extensionVersion),
       );
       // A 503 must not look like a successful "reset". Nothing is marked done yet, so the
       // choice stays available for a retry. Files already removed will come back on their
@@ -1714,14 +1715,12 @@ export class SyncEngine {
    * marker" — not the flat "not set" that made the setting look like it had never
    * been made.
    */
-  async getBaselineInfo(): Promise<{
-    marker: BaselineMarker | null; adopted_at: string | null; cached: boolean; stale?: boolean;
-  }> {
+  async getBaselineInfo(): Promise<BaselineInfo> {
     const cached = await getCachedBaseline();
     const adopted = await getAdoptedBaseline();
     const adoptedAt = adopted?.at ?? null;
     if ((await syncCooldownRemaining()) > 0) {
-      return { marker: cached, adopted_at: adoptedAt, cached: true };
+      return { marker: cached, adopted_at: adoptedAt, set_with_version: cached?.app_version, cached: true };
     }
     try {
       const read = await this.withBackend(async (b) => {
@@ -1730,7 +1729,7 @@ export class SyncEngine {
         return r;
       });
       if (read.unreadable) {
-        return { marker: cached, adopted_at: adoptedAt, cached: true };
+        return { marker: cached, adopted_at: adoptedAt, set_with_version: cached?.app_version, cached: true };
       }
       if (!read.marker) {
         // Somebody else's baseline is gone: drop the local copy of it, or this browser
@@ -1753,13 +1752,18 @@ export class SyncEngine {
         } else {
           await setBaselineStaleNoted(false);
         }
-        return { marker: cached, adopted_at: adoptedAt, cached: false, stale };
+        return { marker: cached, adopted_at: adoptedAt, set_with_version: cached?.app_version, cached: false, stale };
       }
       await setCachedBaseline(read.marker);
       await setBaselineStaleNoted(false);
-      return { marker: read.marker, adopted_at: adoptedAt, cached: false };
+      return {
+        marker: read.marker,
+        adopted_at: adoptedAt,
+        set_with_version: read.marker.app_version,
+        cached: false,
+      };
     } catch {
-      return { marker: cached, adopted_at: adoptedAt, cached: true };
+      return { marker: cached, adopted_at: adoptedAt, set_with_version: cached?.app_version, cached: true };
     }
   }
 
@@ -1771,7 +1775,7 @@ export class SyncEngine {
    * tree. A restore point is a precondition: the operation replaces other devices' trees,
    * and the cost of a failed snapshot is one retry, while the cost of no point is theirs.
    */
-  async setBaseline(): Promise<{ marker: BaselineMarker; adopted_at: string }> {
+  async setBaseline(extensionVersion?: string): Promise<{ marker: BaselineMarker; adopted_at: string }> {
     // A device that does not sync bookmarks is not a candidate: its bookmarks would
     // never keep up with the rest of the group, and every other device would replace
     // its tree with whatever this one happened to be holding.
@@ -1791,7 +1795,7 @@ export class SyncEngine {
           `Couldn't save a restore point before setting the baseline, so nothing was changed. ${err instanceof Error ? err.message : err}`
         );
       }
-      const result = await this.withBackend((b) => this.designateBaselineOn(b));
+      const result = await this.withBackend((b) => this.designateBaselineOn(b, extensionVersion));
       if (result.failed > 0 || !result.marker) {
         if (result.rateLimited) await this.noteRateLimit();
         throw new Error(
@@ -1833,6 +1837,7 @@ export class SyncEngine {
    */
   private async designateBaselineOn(
     backend: ReturnType<typeof createBackend>,
+    extensionVersion?: string,
   ): Promise<{ removed: number; failed: number; rateLimited: boolean; marker: BaselineMarker | null }> {
     // Publish this tree BEFORE naming it, so the marker can carry the checksum of the
     // copy followers are meant to adopt. Uploading afterwards left a window in which a
@@ -1872,6 +1877,7 @@ export class SyncEngine {
       ...(this.settings.device_label?.trim() ? { device_label: this.settings.device_label } : {}),
       at: new Date().toISOString(),
       checksum: packet.checksum,
+      ...(extensionVersion?.trim() ? { app_version: extensionVersion.trim() } : {}),
     };
     await writeBaselineMarker(backend, this.settings, marker);
     // Read it back. The marker file IS the baseline — the other browsers have nothing
