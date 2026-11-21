@@ -2139,16 +2139,23 @@ export async function clearUploadChecksums(): Promise<void> {
  *
  * `importBookmarks(..., "replace")` folds the peer's tombstones/moves/rename logs into
  * this device BEFORE clearing the tree. Leaving those behind would make the very next
- * merge apply the peer's old deletions and moves to the tree we just imported, so
- * "use the remote copy" would quietly not be the remote copy. These keys are all
- * reconstructible working state; the next sync rebuilds what it needs.
+ * merge apply the peer's old deletions to the tree we just imported, so "use the remote
+ * copy" would quietly not be the remote copy. These keys are all reconstructible working
+ * state; the next sync rebuilds what it needs.
+ *
+ * Placement records are the exception. They are LWW markers meaning "this placement is
+ * already done": the merge only applies a peer reorder when its timestamp is NEWER than
+ * the local record. Clearing them after the replace empties that defence, so the very
+ * next cycle replays the imported tree's own stale move/folder-move records against it
+ * and can move folders away from the copy the user designated as the baseline. Callers
+ * that used `getMoves()`/`getFolderMoves()` to fold the designated packet in keep those
+ * two keys with `keepPlacement: true`.
  */
-export async function resetBookmarkMergeState(): Promise<void> {
+export async function resetBookmarkMergeState(options: { keepPlacement?: boolean } = {}): Promise<void> {
   await browser.storage.local.remove([
     KEYS.BOOKMARK_CACHE,
     KEYS.BOOKMARK_TOMBSTONES,
-    KEYS.BOOKMARK_MOVES,
-    KEYS.BOOKMARK_FOLDER_MOVES,
+    ...(options.keepPlacement ? [] : [KEYS.BOOKMARK_MOVES, KEYS.BOOKMARK_FOLDER_MOVES]),
     KEYS.BOOKMARK_TITLES,
     KEYS.BOOKMARK_FOLDER_RENAMES,
     KEYS.BOOKMARK_FOLDER_DELETES,

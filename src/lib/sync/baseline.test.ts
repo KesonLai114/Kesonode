@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   DEFAULT_SETTINGS, getState, getFirstSync, setFirstSync, getLastUploadChecksum,
-  setLastUploadChecksum, clearSyncCooldown, KEYS,
+  setLastUploadChecksum, clearSyncCooldown, getFolderMoves, KEYS,
 } from "@/lib/utils/storage";
 
 import { sha256 } from "@/lib/crypto/encryption";
@@ -374,6 +374,52 @@ describe("another browser's baseline is applied once", () => {
       "https://peer-new.example/",
       "https://peer.example/",
     ]);
+  });
+
+  it("keeps the designated folder order when the next cycle reads the packet's old move log", async () => {
+    await seedLocal();
+    // The designated tree and its move log disagree on purpose: a real baseline device
+    // often carries week-old placement records that no longer describe its current bar.
+    const ordered: SyncBookmark[] = [{
+      id: "0", parentId: null, title: "", dateAdded: 0,
+      children: [{
+        id: "1", parentId: "0", title: "Bookmarks bar", dateAdded: 0,
+        children: [
+          ...["Alpha", "Beta", "Gamma"].map((title, i) => ({
+            id: `f${i}`, parentId: "1", title, dateAdded: i + 1, children: [],
+          })),
+          { id: "f9", parentId: "1", title: "Anchor", url: "https://designated.example/", dateAdded: 9 },
+        ],
+      }],
+    }];
+    const raw = JSON.stringify({
+      tree: ordered,
+      tombstones: [],
+      // Says Alpha sits after Gamma, while the designated tree has it first.
+      folderMoves: [{ path: ["bar", "Alpha"], index: 2, at: Date.now() + 60_000, prev: "f:Gamma" }],
+    } satisfies BookmarkPayload);
+    const designated = await sha256(raw);
+    h.blobs.set("konode_bookmarks_peer.json", JSON.stringify({
+      version: "1.0", device_id: "peer", device_label: "Other browser",
+      timestamp: new Date().toISOString(), data_type: "bookmarks",
+      checksum: designated, encrypted: false, payload: raw,
+    }));
+    putMarker("peer", "Other browser", "2026-11-21T00:00:00.000Z", designated);
+
+    const e = engine();
+    const barOrder = async () => (await chrome.bookmarks.getChildren("1")).map((n) => n.title);
+    await e.sync();
+
+    const designatedOrder = ["Alpha", "Beta", "Gamma", "Anchor"];
+    expect(await barOrder()).toEqual(designatedOrder);
+    // The imported records must stay as "already applied" markers; wiping them here is
+    // what made the next cycle replay them as remote intent.
+    expect(await getFolderMoves()).toEqual([
+      expect.objectContaining({ path: ["bar", "Alpha"], prev: "f:Gamma" }),
+    ]);
+
+    await e.sync();
+    expect(await barOrder()).toEqual(designatedOrder);
   });
 
   it("does not adopt a previous upload when the marker names a newer tree", async () => {

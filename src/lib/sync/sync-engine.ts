@@ -64,6 +64,10 @@ import {
   dropRemoteDevices,
   getFirstSync,
   setFirstSync,
+  getMoves,
+  setMoves,
+  getFolderMoves,
+  setFolderMoves,
   resetBookmarkMergeState,
   cleanDeviceLabel,
   appendSyncReport,
@@ -2018,13 +2022,29 @@ export class SyncEngine {
       logger.warn("Baseline", `Couldn't save a restore point before aligning, so nothing was changed: ${err instanceof Error ? err.message : err}`);
       return;
     }
+    // The baseline tree is the new truth, so forget THIS browser's old placement records
+    // before the replace. importBookmarks() then folds the designated packet's records
+    // into the empty logs: they mean "the imported tree already sits where they say".
+    // Keeping them matters — resetting them afterwards would let the very next merge
+    // replay those (possibly stale) records as remote intents and move the folders we
+    // just put in the baseline's order.
+    const previousMoves = await getMoves();
+    const previousFolderMoves = await getFolderMoves();
+    await setMoves([]);
+    await setFolderMoves([]);
     try {
       await importBookmarks(payload, "replace", strategyFor(this.settings, "bookmarks"), this.settings.bulk_delete_percent, 0);
     } catch (err) {
+      // The tree was left untouched by the failed replace; put its placement history
+      // back too, or the next cycle would replay the peers' records against the OLD tree.
+      await setMoves(previousMoves);
+      await setFolderMoves(previousFolderMoves);
       logger.warn("Baseline", `Couldn't apply the baseline bookmarks: ${err instanceof Error ? err.message : err}`);
       return;
     }
-    await resetBookmarkMergeState();
+    // Tombstones, titles, snapshots of the merge state and checksums are discarded as
+    // before; the placement logs folded in above are the exception (see above).
+    await resetBookmarkMergeState({ keepPlacement: true });
     await setState({ pending_conflicts: [] });
     // The adopted tree is what this device now holds; without a fresh upload its own file
     // would still describe the old one until something else changed.

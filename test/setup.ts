@@ -352,8 +352,11 @@ function makeChrome() {
           for (const [k, v] of Object.entries(obj)) store.set(k, v);
           return Promise.resolve();
         },
-        remove: (key) => {
-          store.delete(key);
+        // The real API takes a string OR an array. Without the array branch a
+        // multi-key remove silently did nothing, which hid bugs in callers such as
+        // resetBookmarkMergeState() (baseline alignment being one of them).
+        remove: (keys) => {
+          for (const k of Array.isArray(keys) ? keys : [keys]) store.delete(k);
           return Promise.resolve();
         },
         // Real chrome.storage.local has this, and a test that plays two devices in turn
