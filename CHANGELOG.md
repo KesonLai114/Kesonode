@@ -8,6 +8,33 @@ All notable changes to Konode. Format loosely follows
 > upstream releases, not to this fork's product name. Kesonode-only changes are recorded
 > in the section immediately below and never change the upstream wire contract.
 
+## [1.5.26] - 2026-11-21
+
+### Added
+
+- **A third bookmark order mode: let the browser decide.** The bookmark order setting gains
+  "browser's own order" next to the existing keep-local and baseline modes. In this mode
+  Kesonode publishes no placement records and applies none, so a browser's native bookmark
+  sync stays in charge of ordering while Kesonode still carries the bookmark contents
+  between devices. Programmatic reorder bursts (hundreds of moves in a fraction of a
+  second) are withheld at publish time so they cannot be mistaken for this device's
+  intent; both mechanisms leave MoveStorm / MoveWithheld audit events.
+
+### Changed
+
+- **AI tidy-up plans ask for a second confirmation.** The settings UI shows what the plan
+  will classify, move and delete and asks you to confirm before applying it, with the
+  folder rules spelled out beside the plan. The README and privacy notes now describe the
+  same scope.
+
+### Fixed
+
+- **Baseline alignment keeps the designated bookmark order.** After a baseline replace, the
+  next merge replayed stale placement records from the imported packet and moved folders
+  back to their old positions. Already-applied placement markers are now preserved across
+  the replace, while this device's own placements are cleared beforehand, so the tree you
+  aligned to stays where it belongs.
+
 ## [1.5.25] - 2026-11-16
 
 ### Changed
