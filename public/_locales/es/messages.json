@@ -2724,7 +2724,7 @@
     "message": "Confirm and apply"
   },
   "ai_organize_confirm_note": {
-    "message": "A pinned restore point is taken first. Moves only target existing folders; removals only affect individual bookmarks. The edits sync like any other bookmark change."
+    "message": "Every move, removal and folder choice proposed by the AI is listed above. Nothing changes until you press Confirm and apply; a pinned restore point is taken first."
   },
   "ai_popup_placeholder": {
     "message": "Describe el marcador que buscas"
