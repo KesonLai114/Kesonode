@@ -105,6 +105,96 @@ describe("folder reposition retry — a failed reposition must not be swallowed"
     expect(logged.some((r) => r.at === at)).toBe(true);
   });
 
+  /**
+   * A peer's records chain: each one anchors to the folder another one moves. The list is
+   * in the order the peer's browser fired the drag events, which is NOT the order the
+   * folders sit in (a multi-select drag reports its items in whatever order it likes). One
+   * sweep then lands only the links whose anchor already sits where it says; the rest act
+   * on a folder that has not moved yet, compute the position it holds right now, and do
+   * nothing. Marking those "placed" froze the peer's reorder half-applied forever.
+   */
+  it("converges when the peer's records anchor to each other in reverse order", async () => {
+    let i = 0;
+    const seed = async (title: string): Promise<void> => {
+      const f = await chrome.bookmarks.create({ parentId: "1", title });
+      await chrome.bookmarks.create({ parentId: f.id, title: `bm${i++}`, url: `https://bm${i}.example/` });
+    };
+    for (const t of ["动漫", "other", "anime", "Real", "PT", "软件"]) await seed(t);
+
+    // Local:   动漫, other, anime, Real, PT, 软件
+    // Peer:    动漫, anime, Real, PT, 软件, other
+    const at = Date.now() + 60_000;
+    const p: BookmarkPayload = {
+      ...payload([]),
+      folderMoves: [
+        { path: ["bar", "软件"], index: 5, at, prev: "f:PT" },
+        { path: ["bar", "PT"], index: 4, at, prev: "f:Real" },
+        { path: ["bar", "Real"], index: 3, at, prev: "f:anime" },
+        { path: ["bar", "anime"], index: 2, at, prev: "f:动漫" },
+      ],
+    };
+
+    await importBookmarks(p, "merge", "lww");
+
+    expect(await folderOrder()).toEqual(["动漫", "anime", "Real", "PT", "软件", "other"]);
+  });
+
+  /**
+   * The log records an INTENT, not a fact. A record folded in earlier (by an older build,
+   * or by a sweep that could not carry it out) must not read as "already done" when the
+   * tree plainly disagrees with it — otherwise the wrong order is permanent.
+   */
+  it("re-applies a record already in the log when the tree does not match it", async () => {
+    let i = 0;
+    const seed = async (title: string): Promise<void> => {
+      const f = await chrome.bookmarks.create({ parentId: "1", title });
+      await chrome.bookmarks.create({ parentId: f.id, title: `bm${i++}`, url: `https://bm${i}.example/` });
+    };
+    for (const t of ["A", "B", "Docs"]) await seed(t); // A, B, Docs
+
+    const at = Date.now() + 60_000;
+    // Already in the local log at the same instant — as a previous, failed sweep left it.
+    await setFolderMoves([{ path: FOLDER_PATH, index: 1, at, prev: "f:A" }]);
+    const p: BookmarkPayload = {
+      ...payload([]),
+      folderMoves: [{ path: FOLDER_PATH, index: 1, at, prev: "f:A" }],
+    };
+
+    await importBookmarks(p, "merge", "lww");
+
+    expect(await folderOrder()).toEqual(["A", "Docs", "B"]);
+  });
+
+  /**
+   * Two devices reordered the same parent in ways that cannot both hold (A after B here,
+   * B after A there). No sweep satisfies both, so the sweeps would move a folder on every
+   * sync forever. It must stop at one arrangement and fold the records, not churn.
+   */
+  it("settles instead of moving folders on every sync when two records contradict", async () => {
+    let i = 0;
+    const seed = async (title: string): Promise<void> => {
+      const f = await chrome.bookmarks.create({ parentId: "1", title });
+      await chrome.bookmarks.create({ parentId: f.id, title: `bm${i++}`, url: `https://bm${i}.example/` });
+    };
+    for (const t of ["A", "B"]) await seed(t);
+
+    const at = Date.now() + 60_000;
+    const p: BookmarkPayload = {
+      ...payload([]),
+      folderMoves: [
+        { path: ["bar", "A"], index: 1, at, prev: "f:B" },
+        { path: ["bar", "B"], index: 1, at, prev: "f:A" },
+      ],
+    };
+
+    await importBookmarks(p, "merge", "lww");
+    const first = await folderOrder();
+    expect(first.sort()).toEqual(["A", "B"]);
+
+    await importBookmarks(p, "merge", "lww");
+    expect(await folderOrder()).toEqual(first);
+  });
+
   it("baseline replace still folds the designated tree's folder moves as done", async () => {
     await seedFolder("A");
     // Baseline alignment imports with strategy "replace" — its records are the truth

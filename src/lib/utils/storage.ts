@@ -249,6 +249,11 @@ export const KEYS = {
   BOOKMARK_TOMBSTONES: "konode_bm_tombstones",
   BOOKMARK_MOVES: "konode_bm_moves",
   BOOKMARK_FOLDER_MOVES: "konode_bm_folder_moves",
+  // folderMoveKey → the `at` this device CONFIRMED the tree matches that record at. The
+  // log alone cannot tell "folded in after the folder landed" from "folded in for a move
+  // that never happened" — the second is what an older build left behind, and without this
+  // marker it stays "already done" (the comparison is strictly newer-than) forever.
+  BOOKMARK_FOLDER_MOVES_VERIFIED: "konode_bm_folder_moves_ok",
   BOOKMARK_TITLES: "konode_bm_titles",
   BOOKMARK_FOLDER_RENAMES: "konode_bm_folder_renames",
   BOOKMARK_FOLDER_DELETES: "konode_bm_folder_deletes",
@@ -1346,6 +1351,26 @@ export function updateFolderMoves(
   mutate: (current: FolderMoveRecord[]) => FolderMoveRecord[]
 ): Promise<FolderMoveRecord[]> {
   return updateKey<FolderMoveRecord[]>(KEYS.BOOKMARK_FOLDER_MOVES, mutate, []);
+}
+
+/**
+ * The folder placements this device has CONFIRMED the tree holds, by folderMoveKey → `at`.
+ *
+ * The folder-move log says an intent was folded in; it cannot say whether the fold came
+ * after the folder actually landed. This map is that second half, and it is what lets the
+ * merge re-check a record the log calls done when the tree plainly disagrees with it — the
+ * state an older build left behind when it marked a move done without carrying it out.
+ * Written only where the merge verified the placement (or where a baseline replace made
+ * the tree itself the truth), so a record kept this way is never replayed.
+ */
+export async function getFolderMovesVerified(): Promise<Record<string, number>> {
+  return get<Record<string, number>>(KEYS.BOOKMARK_FOLDER_MOVES_VERIFIED, {});
+}
+
+export function updateFolderMovesVerified(
+  mutate: (current: Record<string, number>) => Record<string, number>
+): Promise<Record<string, number>> {
+  return updateKey<Record<string, number>>(KEYS.BOOKMARK_FOLDER_MOVES_VERIFIED, mutate, {});
 }
 
 export async function getTitles(): Promise<TitleRecord[]> {

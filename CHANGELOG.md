@@ -8,6 +8,24 @@ All notable changes to Konode. Format loosely follows
 > upstream releases, not to this fork's product name. Kesonode-only changes are recorded
 > in the section immediately below and never change the upstream wire contract.
 
+## [Unreleased]
+
+### Fixed
+
+- **A reordered folder group arrives in full, not half-applied.** A peer's folder
+  repositions chain to one another — each one anchors to a folder another one moves — and
+  they arrive in the order the peer's browser fired its drag events, which a multi-select
+  drag does not have to make the order the folders sit in. One pass then landed only the
+  links whose anchor already sat where it said, and the rest were marked done anyway: the
+  receiver kept a half-reordered bar, forever. The merge now sweeps until a sweep moves
+  nothing, and folds a record in only once the tree actually matches it.
+
+- **A folder move the receiver failed to make is retried.** A record could sit in the
+  placement log without ever having been carried out — a target folder that had not
+  arrived yet, a path that did not resolve — and the log's strictly-newer comparison then
+  read it as done for good. The merge now also checks such a record against the tree, and
+  a move is only counted once the browser reports the folder is actually in place.
+
 ## [1.5.26] - 2026-11-21
 
 ### Added

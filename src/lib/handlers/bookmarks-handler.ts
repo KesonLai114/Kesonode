@@ -8,7 +8,7 @@ import {
   setBookmarkCache, getBookmarkCache,
   getTombstones, setTombstones, updateTombstones,
   getMoves, updateMoves,
-  getFolderMoves, updateFolderMoves,
+  getFolderMoves, updateFolderMoves, getFolderMovesVerified, updateFolderMovesVerified,
   getTitles, updateTitles,
   getFolderRenames, updateFolderRenames,
   updateFolderDeletes,
@@ -126,6 +126,11 @@ function mapNode(node: BookmarkNode, depth: number): SyncBookmark {
 // ─── Tombstones (deletion tracking) ────────────────────────────────────────
 
 const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+
+/** Hard cap on the sweeps that settle a peer's folder repositions (see
+ *  applyFolderRepositions). A chain of N records needs at most N sweeps and the caller
+ *  passes `records + 2`, so this only bites on a log far larger than a person's drag. */
+const MAX_FOLDER_SWEEPS = 40;
 
 // Suppress recording while ANY of our imports/restores is active: one finishing must
 // not expose another's create/remove churn as user edits. This is not an operation lock.
@@ -313,6 +318,28 @@ export function gcFolderMoves(list: FolderMoveRecord[]): FolderMoveRecord[] {
 
 export function mergeFolderMoveLists(a: FolderMoveRecord[], b: FolderMoveRecord[]): FolderMoveRecord[] {
   return gcFolderMoves([...a, ...b]);
+}
+
+/**
+ * Note that this device's tree now HOLDS `records` — see getFolderMovesVerified.
+ *
+ * Folded into the log, a record reads as "already done". This is the other half: it says
+ * the placement was actually carried out, so a later merge may skip the record instead of
+ * re-checking it. Records an older build folded in without applying are absent from here,
+ * which is exactly what makes the next merge re-check them and place the folders.
+ */
+async function confirmFolderMoves(records: FolderMoveRecord[]): Promise<void> {
+  if (!records.length) return;
+  const cutoff = Date.now() - TOMBSTONE_TTL_MS;
+  await updateFolderMovesVerified((current) => {
+    const next: Record<string, number> = {};
+    for (const [k, at] of Object.entries(current)) if (at >= cutoff) next[k] = at;
+    for (const r of records) {
+      const k = folderMoveKey(r);
+      next[k] = Math.max(next[k] ?? 0, r.at);
+    }
+    return next;
+  });
 }
 
 // ─── Titles (rename log — same TTL/dedup shape as the move logs) ────────────
@@ -1203,6 +1230,10 @@ export async function importBookmarks(
       // fold both logs unconditionally (this is the baseline-alignment path).
       await updateMoves((current) => mergeMoveLists(current, logs.moves.remote));
       await updateFolderMoves((current) => mergeFolderMoveLists(current, logs.folderMoves.remote));
+      // The tree IS the truth here, so its records are confirmed by construction. Without
+      // that, the next merge would re-check them against the designated tree, find the
+      // stale ones contradicting it, and move the folders back out of the baseline order.
+      await confirmFolderMoves(logs.folderMoves.remote);
     } else {
       const { placed, placedFolders } = await mergeBookmarks(
         tree, logs, conflictStrategy, deletePercent, approvedFor, onBulkBlocked, local?.part.excludedIds, orderMode,
@@ -1212,9 +1243,9 @@ export async function importBookmarks(
       );
       // Folder counterpart of the URL filter above: only records whose reposition the
       // merge actually established are marked done. Unresolved paths stay retryable.
-      await updateFolderMoves((current) =>
-        mergeFolderMoveLists(current, logs.folderMoves.remote.filter((r) => placedFolders.has(folderMoveKey(r))))
-      );
+      const established = logs.folderMoves.remote.filter((r) => placedFolders.has(folderMoveKey(r)));
+      await updateFolderMoves((current) => mergeFolderMoveLists(current, established));
+      await confirmFolderMoves(established);
     }
   } finally {
     activeImports--;
@@ -1656,8 +1687,6 @@ async function mergeBookmarks(
 
   /** The canonical URLs whose placement this merge settled. See the return type. */
   const placed = new Set<string>();
-  /** folderMoveKey values whose reposition this merge actually established. */
-  const placedFolders = new Set<string>();
 
   let renamedFolders = 0;
 
@@ -1893,16 +1922,30 @@ async function mergeBookmarks(
   //    (QA AX 4, found headless; the same on 1.4.0). A folder already in place is left
   //    alone, so the second pass costs nothing where the first one did the work. ──
   const localFolderMoveAt = toFolderMoveMap(logs.folderMoves.local);
+  // Which placements the tree has been CONFIRMED to hold (see getFolderMovesVerified).
+  // A record whose `at` equals the local one is only skipped when it is in here: an
+  // older build folded records in without ever carrying them out, and those must be
+  // re-checked once (the tree then plainly disagrees) instead of staying "done" forever.
+  const folderMovesVerified = await getFolderMovesVerified();
   let folderMoved = 0;
+  /** The records the LAST call settled (see the fold in importBookmarks). */
+  let settledFolders = new Set<string>();
   const applyFolderRepositions = async (): Promise<void> => {
     // Same contract as shouldMove: with keep-local this browser's folder order is its own,
     // so a peer's folder reorder must not reach it either. "browser" keeps out entirely.
     if (orderMode === "keep-local" || orderMode === "browser") return;
-    for (const rec of logs.folderMoves.remote) {
+
+    /** Apply one record. True when the tree now matches it. */
+    const applyOne = async (rec: FolderMoveRecord): Promise<boolean> => {
+      // The log records an INTENT, not a fact: `at` only decides among competing intents.
+      // Newer wins; equal means "this exact intent is already known", which is done only
+      // where the tree was CONFIRMED to hold it — otherwise it still has to be checked.
+      const key = folderMoveKey(rec);
+      const localAt = localFolderMoveAt.get(key) ?? 0;
       const winsLWW = strategy === "prefer-local" ? false
         : strategy === "prefer-remote" ? true
-        : rec.at > (localFolderMoveAt.get(folderMoveKey(rec)) ?? 0);
-      if (!winsLWW) continue;
+        : rec.at > localAt || (rec.at === localAt && folderMovesVerified[key] !== rec.at);
+      if (!winsLWW) return false;
       let folderId: string | null | undefined;
       if (rec.holds && rec.path.length > 1) {
         // One of several folders of this name (#51): the one holding the bookmark it names.
@@ -1915,10 +1958,10 @@ async function mergeBookmarks(
       } else {
         folderId = await resolveFolderPath(rec.path, localRoots);
       }
-      if (!folderId || excluded.has(folderId)) continue;
+      if (!folderId || excluded.has(folderId)) return false;
       try {
         const [node] = await browser.bookmarks.get(folderId);
-        if (!node || node.parentId == null) continue;
+        if (!node || node.parentId == null) return false;
         const siblings = await browser.bookmarks.getChildren(node.parentId);
         // The order WITHOUT this folder is the frame the anchors are resolved against.
         const rest = siblings.filter((s) => s.id !== folderId);
@@ -1933,18 +1976,68 @@ async function mergeBookmarks(
         }
         if (target === null && rec.prev === undefined) target = 0; // peer had it first
         if (target === null) target = Math.min(rec.index, siblings.length - 1); // fallback
-        if (node.index !== target) {
-          await moveToIndex(folderId, node.parentId, target);
+        // Read the position from the list just fetched rather than `node.index`: a fork
+        // that leaves `index` off a `get()` result made every record look out of place and
+        // re-move it on every cycle, and a stale index is indistinguishable from no move.
+        const at = siblings.findIndex((s) => s.id === folderId);
+        if (at !== target) {
+          // Only a move that actually landed counts. A browser that refuses or clamps it
+          // (the fork kept the order, the parent changed under us) must not be recorded as
+          // having placed the folder — the record stays retryable instead.
+          if (!(await moveToIndex(folderId, node.parentId, target))) {
+            logger.warn("Folder reposition", `${rec.path.join("/")} did not land at ${target}`);
+            return false;
+          }
           folderMoved++;
+          return true;
         }
-        // Reposition established (or already in place): safe to mark done in the LWW
-        // log. A record that could not reach here — unresolved path, excluded folder,
-        // failed move — is deliberately left out so the caller keeps it for retry.
-        placedFolders.add(folderMoveKey(rec));
+        return true; // already where the record says
       } catch (err) {
         logger.error(`Folder reposition: ${rec.path.join("/")}`, err);
+        return false;
       }
+    };
+
+    // A peer's records CHAIN: one anchors to a folder another one moves. They are listed in
+    // the order the peer's browser fired its drag events, which a multi-select drag does not
+    // have to make the order the folders sit in. One sweep then lands only the links whose
+    // anchor already sits where it says — the rest read a folder that has not moved yet,
+    // compute the index it holds right now and do nothing, and marking those "placed" froze
+    // the peer's reorder half-applied for good. So sweep until a sweep moves nothing, and
+    // treat a record as settled only in that last, quiet sweep.
+    let settled = new Set<string>();
+    /** Every key that resolved in ANY sweep: the fallback when the loops fight. */
+    const everResolved = new Set<string>();
+    let converged = false;
+    // Bounded: a sweep carries at least one link of the longest chain, so `records + 2`
+    // covers every order; MAX_FOLDER_SWEEPS is the hard stop for records that contradict
+    // each other. A record already in place moves nothing, so the second sweep settles it.
+    const maxSweeps = Math.min(logs.folderMoves.remote.length + 2, MAX_FOLDER_SWEEPS);
+    for (let sweep = 0; sweep < maxSweeps; sweep++) {
+      let movedThisSweep = 0;
+      settled = new Set<string>();
+      for (const rec of logs.folderMoves.remote) {
+        const before = folderMoved;
+        if (!(await applyOne(rec))) continue;
+        if (folderMoved > before) movedThisSweep++;
+        settled.add(folderMoveKey(rec));
+        everResolved.add(folderMoveKey(rec));
+      }
+      if (movedThisSweep === 0) { converged = true; break; }
     }
+    if (!converged && logs.folderMoves.remote.length) {
+      // Two devices reordered the same parent in ways that contradict each other (A after
+      // B here, B after A there). No sweep can satisfy both, so the loop would move a
+      // folder on every sync forever. Stop it at the state the last sweep left, and fold
+      // what resolved at all: the newer intent still wins whenever anyone drags again.
+      logger.warn(
+        "Folder reposition",
+        `Folder order did not settle after ${maxSweeps} sweeps; keeping the last arrangement`,
+      );
+      settled = everResolved;
+      converged = true;
+    }
+    settledFolders = settled;
   };
   await applyFolderRepositions();
   // The fold reads where each bookmark sits from `placement`, taken before this pass. A folder
@@ -2097,7 +2190,7 @@ async function mergeBookmarks(
     }
     logger.event("mergeBookmarks", summary + ageNote);
   } else logger.info("mergeBookmarks", summary);
-  return { placed, placedFolders };
+  return { placed, placedFolders: settledFolders };
 }
 
 /** Resolve a browser-agnostic folder path (`[rootKind, …titles]`) to a local
@@ -2241,18 +2334,30 @@ function nthIndexOf(keys: string[], key: string, nth: number): number {
   return last;
 }
 
-async function moveToIndex(id: string, parentId: string, finalIndex: number): Promise<void> {
+/**
+ * Move `id` to `finalIndex` within `parentId`, and report whether it is THERE afterwards.
+ *
+ * `parentId` is passed even for a same-parent reorder: some Chromium forks take `index`
+ * only when the destination names the parent, and a move that quietly does nothing looked
+ * exactly like a successful one — the caller counted it, and the peer's reorder never
+ * showed up. The read-back is what turns "we asked" into "it landed".
+ *
+ * The second attempt covers Chromium's pre-removal-array quirk (a downward move lands one
+ * slot short); clamping to `kids.length` (not `length-1`) keeps a move to the LAST slot
+ * from re-requesting the index that already fell short.
+ */
+async function moveToIndex(id: string, parentId: string, finalIndex: number): Promise<boolean> {
   noteSelfMove(id, parentId);
-  await browser.bookmarks.move(id, { index: finalIndex });
-  const kids = await browser.bookmarks.getChildren(parentId);
-  const actual = kids.findIndex((c) => c.id === id);
+  await browser.bookmarks.move(id, { parentId, index: finalIndex });
+  let kids = await browser.bookmarks.getChildren(parentId);
+  let actual = kids.findIndex((c) => c.id === id);
   if (actual !== -1 && actual === finalIndex - 1) {
-    // Clamp to kids.length (not length-1): a same-parent move accepts index = count
-    // ("to the end"), and clamping one lower re-requests the index that already fell
-    // short — a move to the LAST slot would never converge.
     noteSelfMove(id, parentId);
-    await browser.bookmarks.move(id, { index: Math.min(finalIndex + 1, kids.length) });
+    await browser.bookmarks.move(id, { parentId, index: Math.min(finalIndex + 1, kids.length) });
+    kids = await browser.bookmarks.getChildren(parentId);
+    actual = kids.findIndex((c) => c.id === id);
   }
+  return actual === finalIndex;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
