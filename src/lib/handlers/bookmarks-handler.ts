@@ -1183,9 +1183,12 @@ export async function importBookmarks(
     await updateTombstones((current) =>
       mergeTombstoneLists(current, asForeignTombstones(logs.tombstones.remote))
     );
-    // The MOVE log is folded in after the merge, and only for the placements the merge
-    // established — see below.
-    await updateFolderMoves((current) => mergeFolderMoveLists(current, logs.folderMoves.remote));
+    // Both MOVE logs are folded in after the merge, and only for the placements the
+    // merge established — see below. The log is the LWW baseline: a record sitting in it
+    // reads as "this placement is already done" (the comparison is strictly newer-than),
+    // so folding a record in for a placement the merge could NOT make — an unmappable
+    // root, a folder that did not exist yet — loses that move for good. It is retried
+    // every cycle instead, and lands as soon as the merge can make it.
     await updateTitles((current) => mergeTitleLists(current, logs.titles.remote));
     await updateFolderRenames((current) => mergeFolderRenameLists(current, logs.folderRenames.remote));
 
@@ -1196,20 +1199,21 @@ export async function importBookmarks(
       } finally {
         wholesaleImports--;
       }
-      // The whole tree is the peer's now, so every placement it describes is in place.
+      // The whole tree is the peer's now, so every placement it describes is in place —
+      // fold both logs unconditionally (this is the baseline-alignment path).
       await updateMoves((current) => mergeMoveLists(current, logs.moves.remote));
+      await updateFolderMoves((current) => mergeFolderMoveLists(current, logs.folderMoves.remote));
     } else {
-      const placed = await mergeBookmarks(
+      const { placed, placedFolders } = await mergeBookmarks(
         tree, logs, conflictStrategy, deletePercent, approvedFor, onBulkBlocked, local?.part.excludedIds, orderMode,
       );
-      // Fold the peer's move records in AFTER the merge, and only the ones the merge
-      // actually established. The log is the LWW baseline: a record sitting in it reads
-      // as "this placement is already done" (the comparison is strictly newer-than), so
-      // folding a record in for a placement the merge could NOT make — an unmappable
-      // root, a folder that would not create — would lose that move for good. It is
-      // retried every cycle instead, and lands as soon as the merge can make it.
       await updateMoves((current) =>
         mergeMoveLists(current, logs.moves.remote.filter((r) => placed.has(canonicalUrlKey(r.url))))
+      );
+      // Folder counterpart of the URL filter above: only records whose reposition the
+      // merge actually established are marked done. Unresolved paths stay retryable.
+      await updateFolderMoves((current) =>
+        mergeFolderMoveLists(current, logs.folderMoves.remote.filter((r) => placedFolders.has(folderMoveKey(r))))
       );
     }
   } finally {
@@ -1345,12 +1349,14 @@ async function mergeBookmarks(
   excluded: Set<string> = new Set(),
   orderMode: BookmarkOrderMode = "lww",
   /**
-   * The canonical URLs whose placement this merge established — moved here, or already
-   * where the peer says they belong. The caller folds the peer's move records in only
-   * for these: a record for a placement this merge did not make must not sit in the LWW
-   * baseline, or the move reads as done and is never retried.
+   * The placements this merge actually established. The caller folds the peer's move
+   * records in ONLY for these: a record for a placement the merge could not make (an
+   * unmappable root, a folder not present yet) must not sit in the LWW baseline, or it
+   * reads as done and is never retried. `urls` are canonical URLs, `folderMoves` are
+   * folderMoveKey values. Keeping the two symmetrical is what made folder reorderings
+   * silently fail on the receiver while URL moves retried correctly.
    */
-): Promise<Set<string>> {
+): Promise<{ placed: Set<string>; placedFolders: Set<string> }> {
   // All URL identity maps below are keyed by the CANONICAL url (canonicalUrlKey),
   // not the raw string, so a bare-origin bookmark that Chromium/Firefox store with
   // a trailing slash and WebKit (Orion) store without one are treated as the SAME
@@ -1645,11 +1651,13 @@ async function mergeBookmarks(
   const otherId = defaultOtherRootId(localRoots);
   if (!otherId) {
     logger.warn("mergeBookmarks", "No writable root folder found");
-    return new Set<string>();
+    return { placed: new Set<string>(), placedFolders: new Set<string>() };
   }
 
   /** The canonical URLs whose placement this merge settled. See the return type. */
   const placed = new Set<string>();
+  /** folderMoveKey values whose reposition this merge actually established. */
+  const placedFolders = new Set<string>();
 
   let renamedFolders = 0;
 
@@ -1929,6 +1937,10 @@ async function mergeBookmarks(
           await moveToIndex(folderId, node.parentId, target);
           folderMoved++;
         }
+        // Reposition established (or already in place): safe to mark done in the LWW
+        // log. A record that could not reach here — unresolved path, excluded folder,
+        // failed move — is deliberately left out so the caller keeps it for retry.
+        placedFolders.add(folderMoveKey(rec));
       } catch (err) {
         logger.error(`Folder reposition: ${rec.path.join("/")}`, err);
       }
@@ -2085,7 +2097,7 @@ async function mergeBookmarks(
     }
     logger.event("mergeBookmarks", summary + ageNote);
   } else logger.info("mergeBookmarks", summary);
-  return placed;
+  return { placed, placedFolders };
 }
 
 /** Resolve a browser-agnostic folder path (`[rootKind, …titles]`) to a local
