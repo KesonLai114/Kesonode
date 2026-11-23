@@ -10,6 +10,8 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+## [1.5.27] - 2026-11-23
+
 ### Fixed
 
 - **A reordered folder group arrives in full, not half-applied.** A peer's folder
