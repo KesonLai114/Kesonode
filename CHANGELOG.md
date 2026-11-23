@@ -10,6 +10,16 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Folder reordering no longer storms the browser.** The convergence loop added in 1.5.27
+  could run 40 sweeps twice per merge; when two devices left contradictory folder-position
+  records (each folder anchored after the other), no sweep settled it and every folder was
+  re-moved on each pass. One merge issued over 1300 `bookmarks.move` calls and crashed a
+  browser. A chain settles in at most one move per record, so the merge now has a hard move
+  budget (records + 2, capped at 24), and the sweep limit is far lower. Contradictory logs
+  are confirmed after the budget is reached instead of replayed on every sync.
+
 ## [1.5.27] - 2026-11-23
 
 ### Fixed

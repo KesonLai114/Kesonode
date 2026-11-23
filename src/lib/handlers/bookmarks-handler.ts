@@ -128,9 +128,18 @@ function mapNode(node: BookmarkNode, depth: number): SyncBookmark {
 const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 
 /** Hard cap on the sweeps that settle a peer's folder repositions (see
- *  applyFolderRepositions). A chain of N records needs at most N sweeps and the caller
- *  passes `records + 2`, so this only bites on a log far larger than a person's drag. */
-const MAX_FOLDER_SWEEPS = 40;
+ *  applyFolderRepositions). A chain of N records needs at most N sweeps; a person's drag
+ *  is a handful. The old value (40) let contradictory records — A after B, B after A —
+ *  be re-moved on every sweep, and applyFolderRepositions runs twice per merge, so one
+ *  sync could issue 40 × 2 × N moves and crash the browser. */
+const MAX_FOLDER_SWEEPS = 8;
+
+/** Total folder moves allowed in ONE merge (both applyFolderRepositions calls share it).
+ *  A chain settles in one landed move per record, so `records + 2` is ample; the cap is
+ *  what stops a contradictory log from churning the tree for the whole sync. */
+function folderMoveBudget(recordCount: number): number {
+  return Math.min(recordCount + 2, 24);
+}
 
 // Suppress recording while ANY of our imports/restores is active: one finishing must
 // not expose another's create/remove churn as user edits. This is not an operation lock.
@@ -1928,12 +1937,20 @@ async function mergeBookmarks(
   // re-checked once (the tree then plainly disagrees) instead of staying "done" forever.
   const folderMovesVerified = await getFolderMovesVerified();
   let folderMoved = 0;
+  // A chain of N records settles in at most N landed moves. This budget is SHARED by both
+  // applyFolderRepositions calls below (folderMoved lives in the outer scope), so a
+  // contradictory log cannot spend 40 sweeps × 2 calls × N moves in a single sync — the
+  // field report that crashed Quark (1376 moves in one merge).
+  const moveBudget = folderMoveBudget(logs.folderMoves.remote.length);
   /** The records the LAST call settled (see the fold in importBookmarks). */
   let settledFolders = new Set<string>();
   const applyFolderRepositions = async (): Promise<void> => {
     // Same contract as shouldMove: with keep-local this browser's folder order is its own,
     // so a peer's folder reorder must not reach it either. "browser" keeps out entirely.
     if (orderMode === "keep-local" || orderMode === "browser") return;
+    // The first call already spent the budget — a second full pass is what doubled the
+    // storm. Leave whatever it settled intact and stop here.
+    if (folderMoved >= moveBudget) return;
 
     /** Apply one record. True when the tree now matches it. */
     const applyOne = async (rec: FolderMoveRecord): Promise<boolean> => {
@@ -1981,6 +1998,10 @@ async function mergeBookmarks(
         // re-move it on every cycle, and a stale index is indistinguishable from no move.
         const at = siblings.findIndex((s) => s.id === folderId);
         if (at !== target) {
+          // Budget gate: never let one merge churn the tree. A legitimate chain needs at
+          // most one move per record; hitting the cap means the records fight each other,
+          // so stop moving and let the "did not settle" path fold what it can.
+          if (folderMoved >= moveBudget) return false;
           // Only a move that actually landed counts. A browser that refuses or clamps it
           // (the fork kept the order, the parent changed under us) must not be recorded as
           // having placed the folder — the record stays retryable instead.
@@ -2013,6 +2034,7 @@ async function mergeBookmarks(
     // covers every order; MAX_FOLDER_SWEEPS is the hard stop for records that contradict
     // each other. A record already in place moves nothing, so the second sweep settles it.
     const maxSweeps = Math.min(logs.folderMoves.remote.length + 2, MAX_FOLDER_SWEEPS);
+    let exhausted = false;
     for (let sweep = 0; sweep < maxSweeps; sweep++) {
       let movedThisSweep = 0;
       settled = new Set<string>();
@@ -2022,17 +2044,21 @@ async function mergeBookmarks(
         if (folderMoved > before) movedThisSweep++;
         settled.add(folderMoveKey(rec));
         everResolved.add(folderMoveKey(rec));
+        if (folderMoved >= moveBudget) { exhausted = true; break; }
       }
-      if (movedThisSweep === 0) { converged = true; break; }
+      if (exhausted || movedThisSweep === 0) { converged = true; break; }
     }
-    if (!converged && logs.folderMoves.remote.length) {
-      // Two devices reordered the same parent in ways that contradict each other (A after
-      // B here, B after A there). No sweep can satisfy both, so the loop would move a
-      // folder on every sync forever. Stop it at the state the last sweep left, and fold
-      // what resolved at all: the newer intent still wins whenever anyone drags again.
+    if (exhausted || (!converged && logs.folderMoves.remote.length)) {
+      // Either two devices reordered the same parent in ways that contradict each other
+      // (A after B here, B after A there — no arrangement satisfies both), or the move
+      // budget stopped the churn. In both cases stop at the current arrangement and fold
+      // what resolved: the newer intent still wins whenever anyone drags again. Crucially
+      // we do NOT keep rechecking these against the tree every sync — that was the storm.
       logger.warn(
         "Folder reposition",
-        `Folder order did not settle after ${maxSweeps} sweeps; keeping the last arrangement`,
+        exhausted
+          ? `Folder order hit the ${moveBudget}-move budget; keeping the last arrangement`
+          : `Folder order did not settle after ${maxSweeps} sweeps; keeping the last arrangement`,
       );
       settled = everResolved;
       converged = true;

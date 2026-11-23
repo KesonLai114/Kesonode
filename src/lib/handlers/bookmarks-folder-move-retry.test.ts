@@ -195,6 +195,46 @@ describe("folder reposition retry — a failed reposition must not be swallowed"
     expect(await folderOrder()).toEqual(first);
   });
 
+  /**
+   * Field regression (v1.5.27): a log of contradictory folder moves (A after B, B after
+   * A, plus several more) used to churn 1376 `bookmarks.move` calls in ONE merge —
+   * 40 sweeps × 2 applyFolderRepositions calls × ~17 records — which crashed Quark.
+   * A chain settles in at most one landed move per record, so a hard budget must cap
+   * the whole merge no matter how the records fight.
+   */
+  it("never storms the browser: a contradictory log gets a hard move budget", async () => {
+    let i = 0;
+    const seed = async (title: string): Promise<void> => {
+      const f = await chrome.bookmarks.create({ parentId: "1", title });
+      await chrome.bookmarks.create({ parentId: f.id, title: `bm${i++}`, url: `https://bm${i}.example/` });
+    };
+    const titles = ["A", "B", "C", "D", "E", "F", "G", "H"];
+    for (const t of titles) await seed(t);
+
+    const at = Date.now() + 60_000;
+    // Pairs that contradict each other: A after B AND B after A, etc. No arrangement
+    // satisfies all of them, so a naive sweep loop moves folders forever.
+    const folderMoves = titles.flatMap((t, idx) => {
+      const other = titles[(idx + 1) % titles.length];
+      return [{ path: ["bar", t], index: idx, at, prev: `f:${other}` }];
+    });
+    const p: BookmarkPayload = { ...payload([]), folderMoves };
+
+    const moveSpy = vi.spyOn(chrome.bookmarks, "move");
+    await importBookmarks(p, "merge", "lww");
+
+    // Budget is records + 2, capped at 24. A storm would be in the hundreds. Allow
+    // one extra because moveToIndex can issue a second corrective move per landing.
+    const hardCeiling = (folderMoves.length + 2) * 2;
+    expect(moveSpy.mock.calls.length).toBeLessThanOrEqual(hardCeiling);
+
+    // And a subsequent sync with the same log must not storm again — the settled
+    // records are confirmed so the equal-timestamp self-heal stops replaying them.
+    moveSpy.mockClear();
+    await importBookmarks(p, "merge", "lww");
+    expect(moveSpy.mock.calls.length).toBeLessThanOrEqual(hardCeiling);
+  });
+
   it("baseline replace still folds the designated tree's folder moves as done", async () => {
     await seedFolder("A");
     // Baseline alignment imports with strategy "replace" — its records are the truth
