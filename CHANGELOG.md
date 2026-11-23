@@ -10,6 +10,8 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+## [1.5.28] - 2026-11-24
+
 ### Fixed
 
 - **Folder reordering no longer storms the browser.** The convergence loop added in 1.5.27
