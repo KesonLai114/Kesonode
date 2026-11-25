@@ -17,8 +17,25 @@ All notable changes to Konode. Format loosely follows
   back while it was happening, but the records then stayed stamped inside the suppressed
   time span and were withheld on every later sync. The two browsers could therefore keep
   different arrangements indefinitely. Once the tree has been quiet for four seconds, the
-  burst is now re-stamped and published once as this device's settled order. The hot-burst
-  protection and the "browser's own order" mode are unchanged.
+  burst is now published once as this device's settled order. The hot-burst protection and
+  the "browser's own order" mode are unchanged.
+
+- **Order convergence hardened against worker restarts, stale anchors and stale packets.**
+  A strict review found several paths that could still leave Chrome and Quark on different
+  orders. Move-storm windows are now persisted per burst (an MV3 worker restart can no
+  longer leak a hot burst), unrelated storms no longer merge into one growing time span,
+  and the settled release recomputes folder anchors from the FINAL tree instead of replaying
+  intermediate `onMoved` neighbours. Releases are capped at the receiver's move budget and
+  drained over later cycles; the source now confirms its own folder moves. WebDAV bookmark
+  peer files are always fetched, because a pure reorder keeps both file size and a
+  second-resolution modification time and was otherwise served from the stale packet cache.
+  Manual conflict resolution now sees sibling order, first-sync/baseline replacement keeps
+  its placement baseline and verified map, and duplicate peer packets from one device no
+  longer overwrite each other.
+
+- **WebDAV bookmark peers are re-read every cycle.** This costs one extra GET per peer file
+  per cycle, but prevents a same-second, same-length reorder packet from being silently
+  replaced by its cached predecessor.
 
 ## [1.5.28] - 2026-11-24
 

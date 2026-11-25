@@ -62,11 +62,11 @@ describe("bookmarkContent: what two devices share when their bookmarks agree", (
     expect(bookmarkContent(onFirefox)).toBe(bookmarkContent(onChrome));
   });
 
-  it("ignores the order of siblings, which the merge does not converge", () => {
+  it("sees a changed sibling order, so manual conflict resolution can offer a choice", () => {
     const a = chrome([bm("A", "https://a.example/"), bm("B", "https://b.example/")]);
     const b = chrome([bm("B", "https://b.example/"), bm("A", "https://a.example/")]);
 
-    expect(bookmarkContent(b)).toBe(bookmarkContent(a));
+    expect(bookmarkContent(b)).not.toBe(bookmarkContent(a));
   });
 
   it("reads a URL the way the merge matches it, so a bare origin with or without its slash is one", () => {

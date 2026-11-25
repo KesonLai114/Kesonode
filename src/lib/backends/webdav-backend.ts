@@ -504,8 +504,13 @@ export class WebDAVBackend implements IBackend {
         //
         // The listing has to carry a modification time for this to be possible; the
         // GitHub-style listings that carry none simply never hit this path.
-        const version = peerFileVersion(entry.modified, entry.size);
-        const cached = await cachedPeerPacket(entry.name, version, scope);
+        // A pure bookmark reorder changes neither byte length nor (on a server with
+        // second-resolution mtime) the modification time: `m…s…` can be identical
+        // while the file's tree order and placement timestamps are new. Serving the
+        // cached packet then silently drops the reorder forever. Bookmark peer files
+        // therefore always take the round trip; other data types keep the shortcut.
+        const version = data_type === "bookmarks" ? "" : peerFileVersion(entry.modified, entry.size);
+        const cached = version ? await cachedPeerPacket(entry.name, version, scope) : null;
         if (cached) {
           packets.push(cached);
           continue;
@@ -566,7 +571,7 @@ export class WebDAVBackend implements IBackend {
           const packet = JSON.parse(body) as SyncPacket;
           packets.push(packet);
           // Remember it, so the next cycle can merge it without another request.
-          fresh.push({ name: entry.name, version, packet });
+          if (version) fresh.push({ name: entry.name, version, packet });
         } catch {
           // A corrupt/partial file (e.g. trailing junk from a non-truncating write)
           // must not abort the whole sync — skip it; the owner rewrites it next sync.

@@ -69,6 +69,8 @@ import {
   setMoves,
   getFolderMoves,
   setFolderMoves,
+  updateFolderMovesVerified,
+  getFolderMovesVerified,
   resetBookmarkMergeState,
   cleanDeviceLabel,
   appendSyncReport,
@@ -1656,11 +1658,32 @@ export class SyncEngine {
         );
       }
 
-      await importBookmarks(payload, "replace", strategyFor(this.settings, "bookmarks"), this.settings.bulk_delete_percent, 0);
+      // Same contract as baseline adoption below: clear THIS device's placement
+      // history first, let replace fold in the designated packet's records, then
+      // keepPlacement. Dropping the placement logs after the replace emptied the
+      // LWW defence, so the very next cycle replayed the peer's stale reorder.
+      const previousMoves = await getMoves();
+      const previousFolderMoves = await getFolderMoves();
+      const previousVerified = await getFolderMovesVerified();
+      await setMoves([]);
+      await setFolderMoves([]);
+      await updateFolderMovesVerified(() => ({}));
+      try {
+        await importBookmarks(
+          payload, "replace", strategyFor(this.settings, "bookmarks"),
+          this.settings.bulk_delete_percent, 0, undefined,
+          this.settings.bookmark_order_mode ?? "lww",
+        );
+      } catch (err) {
+        await setMoves(previousMoves);
+        await setFolderMoves(previousFolderMoves);
+        await updateFolderMovesVerified(() => previousVerified);
+        throw err;
+      }
       // importBookmarks folds the peer's deletion/move/rename logs in BEFORE replacing
-      // the tree. Dropping them is what makes "use the remote copy" actually stick:
-      // otherwise the very next merge would re-apply that peer's old deletions.
-      await resetBookmarkMergeState();
+      // the tree. Dropping the other working state is what makes "use the remote copy"
+      // stick; the placement logs folded in above are the exception (see storage.ts).
+      await resetBookmarkMergeState({ keepPlacement: true });
       await setState({ pending_conflicts: [] });
       logger.event("FirstSync", "Replaced this device's bookmarks with the newest peer's tree");
     } else if (choice === "local") {
@@ -2036,15 +2059,24 @@ export class SyncEngine {
     // just put in the baseline's order.
     const previousMoves = await getMoves();
     const previousFolderMoves = await getFolderMoves();
+    const previousVerified = await getFolderMovesVerified();
     await setMoves([]);
     await setFolderMoves([]);
+    // "Already confirmed" is only meaningful next to the tree it confirmed. A replace
+    // establishes a new tree and importBookmarks confirms the designated records.
+    await updateFolderMovesVerified(() => ({}));
     try {
-      await importBookmarks(payload, "replace", strategyFor(this.settings, "bookmarks"), this.settings.bulk_delete_percent, 0);
+      await importBookmarks(
+        payload, "replace", strategyFor(this.settings, "bookmarks"),
+        this.settings.bulk_delete_percent, 0, undefined,
+        this.settings.bookmark_order_mode ?? "lww",
+      );
     } catch (err) {
       // The tree was left untouched by the failed replace; put its placement history
       // back too, or the next cycle would replay the peers' records against the OLD tree.
       await setMoves(previousMoves);
       await setFolderMoves(previousFolderMoves);
+      await updateFolderMovesVerified(() => previousVerified);
       logger.warn("Baseline", `Couldn't apply the baseline bookmarks: ${err instanceof Error ? err.message : err}`);
       return;
     }
@@ -2477,11 +2509,16 @@ export class SyncEngine {
         // per cycle is a real cost on the ordinary two-device case. Only bookmarks have
         // a preview; the other types fold as before and pay nothing extra.
         const openedPeers = new Map<string, unknown>();
+        // WebDAV can list two files for one device (isolated + upstream namespace).
+        // Key by packet identity, not device_id, or the newest file's decrypted
+        // payload is overwritten by an older one and both peers merge stale order.
+        const peerKey = (p: typeof peers[number]): string =>
+          `${p.device_id}:${p.timestamp}:${p.checksum}`;
         if (dataType === "bookmarks") {
           for (const peer of peers) {
             if (this.encryptionBarrier(peer) !== null) continue;
             try {
-              openedPeers.set(peer.device_id, await this.openPacket(peer));
+              openedPeers.set(peerKey(peer), await this.openPacket(peer));
             } catch {
               // The fold below reports this peer under the existing rules; a preview
               // that cannot read it simply leaves it out.
@@ -2549,7 +2586,7 @@ export class SyncEngine {
             // The approval belongs to THIS cycle and is handed down explicitly: the field
             // is per-sync state, and a caller outside a cycle (a manual resolution) must
             // never inherit whatever a finished sync left behind.
-            await this.applyRemote(dataType, peer, false, this.bulkApprovedThisSync, openedPeers.get(peer.device_id));
+            await this.applyRemote(dataType, peer, false, this.bulkApprovedThisSync, openedPeers.get(peerKey(peer)));
           } catch (err) {
             // An encryption disagreement (plaintext peer while we encrypt, encrypted
             // peer we can't decrypt, or a wrong passphrase) must NOT be swallowed
@@ -2735,7 +2772,10 @@ export class SyncEngine {
   private async buildPayload(dataType: DataType): Promise<unknown> {
     switch (dataType) {
       case "bookmarks":
-        return exportBookmarkPayload();
+        return exportBookmarkPayload({
+          forSync: true,
+          orderMode: this.settings.bookmark_order_mode ?? "lww",
+        });
       case "sessions": {
         // Make the synced session deterministic: identical open tabs must yield
         // an identical payload (and checksum), otherwise a fresh UUID/timestamp

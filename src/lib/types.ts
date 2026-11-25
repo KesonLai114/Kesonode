@@ -20,6 +20,26 @@ export type ConflictStrategy = "lww" | "prefer-local" | "prefer-remote" | "manua
 export type BookmarkOrderMode = "lww" | "keep-local" | "browser";
 
 /**
+ * One programmatic burst of bookmark `onMoved` events. Local-only working state: it
+ * lives in `storage.local`, never in a sync packet. A span is created at the first
+ * placement after a quiet gap and closed by the release pass, so two unrelated storms
+ * can never merge into one ever-growing time window.
+ */
+export interface MoveStormSpan {
+  from: number;
+  to: number;
+  lastAt: number;
+  count: number;
+  flagged: boolean;
+}
+
+/** Persisted move-storm detection state, so an MV3 worker restart cannot lose it. */
+export interface MoveStormState {
+  spans: MoveStormSpan[];
+  lastRecordedMoveAt: number;
+}
+
+/**
  * How a device that ALREADY has bookmarks joins a sync group whose peers also have some.
  *
  * "merge" is the historical behaviour (non-destructive union). "remote" clears this

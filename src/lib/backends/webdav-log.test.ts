@@ -104,4 +104,38 @@ describe("WebDAV logging keeps the account name out of every sink", () => {
     expect(log).not.toContain(USERNAME);
     expect(log).not.toContain("remote.php");
   });
+
+  it("re-downloads a bookmark peer whose mtime and size did not change", async () => {
+    // A pure reorder keeps byte length and, on a second-resolution server, mtime.
+    // The m…s… cache version would be identical and serve the OLD order forever.
+    const peerFile = "konode_bookmarks_99999999-8888-7777-6666-555555555555.json";
+    const first = { ...packet(), device_id: "99999999-8888-7777-6666-555555555555", checksum: "a".repeat(64) };
+    const second = { ...first, checksum: "b".repeat(64) };
+    let body = JSON.stringify(first);
+    const propfind = `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">
+      <d:response>
+        <d:href>/remote.php/dav/files/${USERNAME}/konode/${peerFile}</d:href>
+        <d:propstat><d:prop>
+          <d:getlastmodified>Tue, 28 Jul 2026 10:00:00 GMT</d:getlastmodified>
+          <d:getcontentlength>${body.length}</d:getcontentlength>
+        </d:prop></d:propstat>
+      </d:response>
+    </d:multistatus>`;
+    let gets = 0;
+    vi.stubGlobal("fetch", (_url: string, init?: { method?: string }) => {
+      if (init?.method === "PROPFIND") {
+        return Promise.resolve({ ok: true, status: 207, text: () => Promise.resolve(propfind) } as Response);
+      }
+      gets++;
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(body) } as Response);
+    });
+
+    const backend = new WebDAVBackend(config());
+    await backend.downloadAll("bookmarks", "me");
+    body = JSON.stringify(second); // same length, different order/checksum
+    const packets = await backend.downloadAll("bookmarks", "me");
+
+    expect(gets).toBe(2);
+    expect(packets[0].checksum).toBe(second.checksum);
+  });
 });

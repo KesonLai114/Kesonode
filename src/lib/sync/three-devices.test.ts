@@ -14,6 +14,7 @@ import {
   setState,
   setBulkDeleteApproval,
   setLastUploadChecksum,
+  setTombstones,
 } from "@/lib/utils/storage";
 import type {
   BookmarkPayload,
@@ -1039,14 +1040,31 @@ describe("AO. Manual asks only when the bookmarks disagree (#34)", () => {
 
   it("keeps an answered question answered while the peer's bookmarks stay the same", async () => {
     // The memo was the peer's checksum, which moves with every date and log entry it
-    // writes: here A only reorders, which Manual cannot act on and the merge does not
-    // converge, and the same card came back.
+    // writes. A log-only change (a tombstone for a URL nobody holds) changes the
+    // packet checksum but NOT the bookmarks the user can see, so no new card is due.
+    // A real reorder now DOES change bookmarkContent and must raise a fresh card.
     const [A, B] = await seedGroup(5);
     await manual(B);
     await at(A, async () => { await add("Only on A", "https://only-on-a.example/"); });
     await cycle(A, B);
     const [card] = await cards(B);
     await at(B, async () => { await B.engine.resolveConflict(card.id, "local"); });
+    expect(await cards(B)).toEqual([]);
+
+    await at(A, async () => {
+      await setTombstones([{ url: "https://never-held.example/", deletedAt: Date.now() }]);
+    });
+    await cycle(A, B);
+
+    expect(await cards(B)).toEqual([]);
+  });
+
+  it("raises a fresh question when the peer's bookmarks only change order", async () => {
+    // Manual used to hash two differently ordered trees as identical, so a pure
+    // reorder produced no card and no way to choose "use remote / keep local".
+    const [A, B] = await seedGroup(5);
+    await manual(B);
+    await cycle(A, B, B);
     expect(await cards(B)).toEqual([]);
 
     await at(A, async () => {
@@ -1058,7 +1076,7 @@ describe("AO. Manual asks only when the bookmarks disagree (#34)", () => {
     });
     await cycle(A, B);
 
-    expect(await cards(B)).toEqual([]);
+    expect((await cards(B)).length).toBe(1);
   });
 
   it("takes down a card raised before the fix once the two devices agree", async () => {

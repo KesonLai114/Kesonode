@@ -12,6 +12,7 @@ import type {
   FolderMoveRecord,
   FolderRenameRecord,
   MoveRecord,
+  MoveStormState,
   TitleRecord,
   RemoteExtensionEntry,
   RemoteSessionEntry,
@@ -254,6 +255,9 @@ export const KEYS = {
   // that never happened" — the second is what an older build left behind, and without this
   // marker it stays "already done" (the comparison is strictly newer-than) forever.
   BOOKMARK_FOLDER_MOVES_VERIFIED: "konode_bm_folder_moves_ok",
+  // Persisted move-storm windows. The placement records they protect live here too;
+  // keeping only an in-memory window let an MV3 worker restart leak a whole burst.
+  BOOKMARK_MOVE_STORM_STATE: "konode_bm_move_storm_state",
   BOOKMARK_TITLES: "konode_bm_titles",
   BOOKMARK_FOLDER_RENAMES: "konode_bm_folder_renames",
   BOOKMARK_FOLDER_DELETES: "konode_bm_folder_deletes",
@@ -1373,6 +1377,26 @@ export function updateFolderMovesVerified(
   return updateKey<Record<string, number>>(KEYS.BOOKMARK_FOLDER_MOVES_VERIFIED, mutate, {});
 }
 
+// The burst windows are written through the same serialized path as the placement
+// logs they protect. A worker restart loses the in-memory cache, never the evidence.
+export function defaultMoveStormState(): MoveStormState {
+  return { spans: [], lastRecordedMoveAt: 0 };
+}
+
+export async function getMoveStormState(): Promise<MoveStormState> {
+  return get<MoveStormState>(KEYS.BOOKMARK_MOVE_STORM_STATE, defaultMoveStormState());
+}
+
+export function updateMoveStormState(
+  mutate: (current: MoveStormState) => MoveStormState
+): Promise<MoveStormState> {
+  return updateKey<MoveStormState>(KEYS.BOOKMARK_MOVE_STORM_STATE, mutate, defaultMoveStormState());
+}
+
+export async function setMoveStormState(state: MoveStormState): Promise<void> {
+  await set(KEYS.BOOKMARK_MOVE_STORM_STATE, state);
+}
+
 export async function getTitles(): Promise<TitleRecord[]> {
   return get<TitleRecord[]>(KEYS.BOOKMARK_TITLES, []);
 }
@@ -2180,7 +2204,16 @@ export async function resetBookmarkMergeState(options: { keepPlacement?: boolean
   await browser.storage.local.remove([
     KEYS.BOOKMARK_CACHE,
     KEYS.BOOKMARK_TOMBSTONES,
-    ...(options.keepPlacement ? [] : [KEYS.BOOKMARK_MOVES, KEYS.BOOKMARK_FOLDER_MOVES]),
+    ...(options.keepPlacement ? [] : [
+      KEYS.BOOKMARK_MOVES,
+      KEYS.BOOKMARK_FOLDER_MOVES,
+      // "Confirmed" is only meaningful next to the log it confirms. Keeping it while
+      // dropping the log makes an equal-timestamp peer record look already applied.
+      KEYS.BOOKMARK_FOLDER_MOVES_VERIFIED,
+    ]),
+    // A replace makes the whole tree the truth: no suppressed pre-replace burst may
+    // be re-stamped and published as this device's later intent.
+    KEYS.BOOKMARK_MOVE_STORM_STATE,
     KEYS.BOOKMARK_TITLES,
     KEYS.BOOKMARK_FOLDER_RENAMES,
     KEYS.BOOKMARK_FOLDER_DELETES,

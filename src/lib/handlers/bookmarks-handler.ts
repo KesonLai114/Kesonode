@@ -1,7 +1,7 @@
 import type {
   SyncBookmark, Tombstone, MoveRecord, FolderMoveRecord, TitleRecord, FolderRenameRecord,
   FolderDeleteRecord, AppearedRecord, KeptShellRecord, CreatedRecord, BookmarkPayload, ConflictStrategy,
-  BookmarkExclusion, BlockedBookmark, BookmarkOrderMode,
+  BookmarkExclusion, BlockedBookmark, BookmarkOrderMode, MoveStormSpan, MoveStormState,
 } from "@/lib/types";
 import { logger } from "@/lib/utils/logger";
 import {
@@ -14,6 +14,7 @@ import {
   updateFolderDeletes,
   getAppeared, updateAppeared, getKeptShells, updateKeptShells,
   getCreated, updateCreated, getPeerRemovals, updatePeerRemovals, getBookmarkExclusions, getBookmarkOrderMode,
+  defaultMoveStormState, updateMoveStormState, setMoveStormState,
 } from "@/lib/utils/storage";
 import {
   asRootKind, defaultOtherRootId, findLocalRootByKind, matchLocalRoot, matchLocalRootEx,
@@ -135,10 +136,13 @@ const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 const MAX_FOLDER_SWEEPS = 8;
 
 /** Total folder moves allowed in ONE merge (both applyFolderRepositions calls share it).
- *  A chain settles in one landed move per record, so `records + 2` is ample; the cap is
- *  what stops a contradictory log from churning the tree for the whole sync. */
+ *  A chain settles in one landed move per record, so `records + 2` is ample; the cap
+ *  matches one settled-release batch and still stops a contradictory log from churning. */
 function folderMoveBudget(recordCount: number): number {
-  return Math.min(recordCount + 2, 24);
+  // Match the publisher's settled-release batch. A coherent snapshot of N folders
+  // needs N landed moves; a lower hard cap truncated the tail of a large reorder,
+  // which then retried from the head on every sync and never reached those folders.
+  return Math.min(recordCount + 2, MAX_SETTLED_FOLDER_RECORDS);
 }
 
 // Suppress recording while ANY of our imports/restores is active: one finishing must
@@ -152,84 +156,99 @@ let activeImports = 0;
 // those records is what made moves and deletions stop travelling (see self-writes.ts).
 let wholesaleImports = 0;
 
-// ── Move-storm diagnostics ──────────────────────────────────────────────────
-// A person drags bookmarks one at a time, seconds apart. A burst of hundreds of
-// onMoved callbacks inside one short window is NOT a person: it is a browser's own
-// sync applying a remote order, another extension rewriting the tree, or this
-// extension's own merge echo arriving after its self-write ledger expired. The API
-// cannot say WHICH, but it can say "this happened, at this time, in this amount" —
-// which is exactly the evidence that was missing when a user asked why their order
-// changed with nobody touching it. One audited line per storm, never per move, so
-// the 200-entry Activity ring is not flooded.
-const MOVE_STORM_WINDOW_MS = 5_000;
+// ── Move-storm detection, suppression and settled release ───────────────────
+// A person drags bookmarks one at a time, seconds apart. A burst of dozens/hundreds
+// of onMoved callbacks inside one quiet-gap-delimited burst is NOT a person: it is a
+// browser's own sync applying a remote order, another extension rewriting the tree,
+// or this extension's own merge echo arriving after its self-write ledger expired.
+// One audited line per storm, never per move, so the 200-entry Activity ring is not
+// flooded.
+//
+// The state is PERSISTED. The placement records it protects live in storage.local;
+// an in-memory window used to vanish when MV3 recycled the worker, after which the
+// whole burst leaked out with its original timestamps and no suppression at all.
 const MOVE_STORM_MIN = 25;
-// A burst is held back while it is still arriving; once the tree has been quiet this
-// long, the burst is treated as this device's SETTLED order and published once. Without
-// this, a browser's own sync re-ordering the bar produced a permanent stand-off: every
-// record stayed stamped inside the suppressed span, so no peer ever learned the final
-// order and the two browsers kept showing different arrangements forever.
+/** A gap this long ends a burst; the next placement starts a NEW span. */
+const MOVE_STORM_JOIN_MS = 5_000;
+/** How quiet the tree must be before a held burst is published as settled order. */
 const MOVE_STORM_SETTLE_MS = 4_000;
-let moveStormWindowStart = 0;
-let moveStormTotal = 0;
-let moveStormLogged = false;
-let lastRecordedMoveAt = 0;
+const MOVE_STORM_STATE_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_MOVE_STORM_SPANS = 8;
+/** One release must fit the receiver's folder-move budget (see folderMoveBudget). */
+export const MAX_SETTLED_FOLDER_RECORDS = 64;
 
-// The publish-side half of the storm defence. The 25th move is when a burst becomes
-// recognizable, but hundreds more land before the 1s sync debounce fires. So once a
-// window is flagged we extend its [from, to] on EVERY subsequent recorded placement,
-// covering the whole burst — not just the first 25. At publish time, placements whose
-// `at` falls inside a flagged window are withheld while the burst is hot; after
-// MOVE_STORM_SETTLE_MS they are re-stamped and sent once as settled intent. Consecutive
-// windows whose gap is < threshold merge, so a sustained reorder is one span.
-let suppressedFrom = 0;
-let suppressedTo = 0;
+let moveStormState: MoveStormState = defaultMoveStormState();
 
-/** Whether a record stamped at `at` belongs to a withheld move storm. */
-export function isMoveSuppressed(at: number): boolean {
-  return suppressedFrom !== 0 && at >= suppressedFrom && at <= suppressedTo;
+function pruneMoveStormSpans(spans: MoveStormSpan[], now: number): MoveStormSpan[] {
+  return spans.filter((s) => now - s.lastAt < MOVE_STORM_STATE_TTL_MS).slice(-MAX_MOVE_STORM_SPANS);
+}
+
+/** Whether a record stamped at `at` belongs to a flagged, still-held burst. */
+export function isMoveSuppressed(at: number, state: MoveStormState = moveStormState): boolean {
+  return state.spans.some((s) => s.flagged && at >= s.from && at <= s.to);
+}
+
+function advanceMoveStormState(
+  state: MoveStormState, now: number,
+): { state: MoveStormState; justFlagged: boolean } {
+  const spans = pruneMoveStormSpans(state.spans, now).map((s) => ({ ...s }));
+  let span = spans[spans.length - 1];
+  if (!span || now - span.lastAt > MOVE_STORM_JOIN_MS) {
+    // Unlike the old fixed 5s window, a quiet gap — not an arbitrary wall-clock
+    // boundary — decides where one burst ends. No unrelated storm can enlarge an
+    // earlier span, and a sustained burst cannot dodge detection by straddling one.
+    span = { from: now, to: now, lastAt: now, count: 1, flagged: false };
+    spans.push(span);
+  } else {
+    span.to = now;
+    span.lastAt = now;
+    span.count++;
+  }
+  let justFlagged = false;
+  if (!span.flagged && span.count >= MOVE_STORM_MIN) {
+    span.flagged = true;
+    justFlagged = true;
+  }
+  return {
+    state: { spans: pruneMoveStormSpans(spans, now), lastRecordedMoveAt: now },
+    justFlagged,
+  };
 }
 
 /**
- * Called once per recorded placement. Emits a single audited event when an unusual
- * burst accumulates, naming the context so the cause can be narrowed after the fact,
- * and marks the time span whose placements will be withheld at publish time.
+ * Called once per recorded placement. Emits ONE audited event when a burst crosses
+ * the threshold, then keeps extending that burst's span until the quiet gap ends it.
  */
-export function noteRecordedMove(context: "url" | "folder"): void {
+export async function noteRecordedMove(context: "url" | "folder"): Promise<void> {
   const now = Date.now();
-  lastRecordedMoveAt = now;
-  if (moveStormWindowStart === 0 || now - moveStormWindowStart >= MOVE_STORM_WINDOW_MS) {
-    moveStormWindowStart = now;
-    moveStormTotal = 0;
-    moveStormLogged = false;
-  }
-  moveStormTotal++;
-  if (!moveStormLogged && moveStormTotal >= MOVE_STORM_MIN) {
-    moveStormLogged = true;
+  let justFlagged = false;
+  const next = await updateMoveStormState((current) => {
+    const advanced = advanceMoveStormState(current, now);
+    justFlagged = advanced.justFlagged;
+    return advanced.state;
+  });
+  moveStormState = next;
+  if (justFlagged) {
     const during = wholesaleImports > 0 ? "wholesale-import"
       : activeImports > 0 ? "merge" : "idle";
     logger.event(
       "MoveStorm",
-      `Recorded ${MOVE_STORM_MIN}+ ${context} moves within ~${MOVE_STORM_WINDOW_MS / 1000}s (phase: ${during}). ` +
-      `This batch will be withheld from sync; a burst this size is not a manual drag — ` +
+      `Recorded ${MOVE_STORM_MIN}+ ${context} moves within one burst (phase: ${during}). ` +
+      `This batch is held until the tree settles; a burst this size is not a manual drag — ` +
       `check browser-side bookmark sync or another extension.`,
     );
   }
-  if (moveStormLogged) {
-    // Extend the flagged span to cover every placement in this storm, including the
-    // ones still arriving after detection. Adjacent storms fold into the same span.
-    suppressedFrom = suppressedFrom === 0 ? moveStormWindowStart : Math.min(suppressedFrom, moveStormWindowStart);
-    suppressedTo = Math.max(suppressedTo, now);
-  }
 }
 
-/** Test seam: clear the in-memory storm window between cases. */
-export function resetMoveStormForTest(): void {
-  moveStormWindowStart = 0;
-  moveStormTotal = 0;
-  moveStormLogged = false;
-  lastRecordedMoveAt = 0;
-  suppressedFrom = 0;
-  suppressedTo = 0;
+/** Test seam: clear BOTH the in-memory cache and the persisted state. */
+export async function resetMoveStormForTest(): Promise<void> {
+  moveStormState = defaultMoveStormState();
+  await setMoveStormState(defaultMoveStormState());
+}
+
+/** Test seam: simulate an MV3 worker restart — memory gone, storage intact. */
+export function forgetMoveStormCacheForTest(): void {
+  moveStormState = defaultMoveStormState();
 }
 
 export function toDeletedMap(list: Tombstone[]): Map<string, number> {
@@ -722,7 +741,7 @@ async function recordMove(id: string): Promise<void> {
   if (!urls.length) return;
   const now = Date.now();
   await updateMoves((current) => mergeMoveLists(current, urls.map((url) => ({ url, at: now }))));
-  noteRecordedMove("url");
+  await noteRecordedMove("url");
   logger.info("Moves", `Recorded ${urls.length} move(s)`);
 }
 
@@ -847,59 +866,160 @@ async function recordFolderMove(id: string, moveInfo: chrome.bookmarks.BookmarkM
   } catch { /* best effort — fall back to index on the receiver */ }
   const holds = await twinMark(id, node.title, moveInfo.parentId);
   const now = Date.now();
-  await updateFolderMoves((current) =>
-    mergeFolderMoveLists(current, [{ path, index: moveInfo.index, at: now, prev, next, ...(holds ? { holds } : {}) }])
-  );
-  noteRecordedMove("folder");
+  const record: FolderMoveRecord = {
+    path, index: moveInfo.index, at: now, prev, next, ...(holds ? { holds } : {}),
+  };
+  await updateFolderMoves((current) => mergeFolderMoveLists(current, [record]));
+  // The tree already holds this placement. The SOURCE must confirm it too: otherwise
+  // the same record coming back from a peer with an equal `at` is re-checked here
+  // (verified is missing), and an unrelated later change can be undone by our own intent.
+  await confirmFolderMoves([record]);
+  await noteRecordedMove("folder");
   logger.info("Moves", "Recorded a folder reposition");
+}
+
+interface LocatedFolder { node: SyncBookmark; siblings: SyncBookmark[] }
+
+/** Find a folder by its browser-agnostic path in the ALREADY EXPORTED (exclusion-free) tree. */
+function locateFolder(tree: SyncBookmark[], path: string[], holds?: string): LocatedFolder | undefined {
+  const [kind, ...titles] = path;
+  const k = asRootKind(kind);
+  if (!k || !titles.length) return undefined;
+  const roots = tree[0]?.children ?? tree;
+  const root = roots.find((r) => r.rootKind === k);
+  if (!root) return undefined;
+  let siblings = root.children ?? [];
+  let node: SyncBookmark | undefined;
+  let finalSiblings = siblings;
+  for (const title of titles) {
+    const candidates = siblings.filter((c) => !c.url && c.title === title);
+    let match = candidates[0];
+    if (holds) {
+      const key = canonicalUrlKey(holds);
+      match = candidates.find((c) => urlKeysIn([c]).has(key)) ?? match;
+    }
+    if (!match) return undefined;
+    node = match;
+    finalSiblings = siblings;
+    siblings = match.children ?? [];
+  }
+  return node ? { node, siblings: finalSiblings } : undefined;
+}
+
+/**
+ * A folder record whose anchors describe the tree AS IT STANDS, not an intermediate
+ * onMoved callback. During a burst, events are delivered with `swallow()` and each
+ * recorder reads live siblings at its own completion time; the last record per path
+ * can therefore name neighbours that a later event has already moved. Replaying those
+ * intermediate anchors made the receiver fight itself. Recompute from the settled tree.
+ */
+function canonicalFolderRecord(
+  tree: SyncBookmark[], rec: FolderMoveRecord, at: number,
+): FolderMoveRecord | null {
+  const located = locateFolder(tree, rec.path, rec.holds);
+  if (!located) return null;
+  const { node, siblings } = located;
+  const index = siblings.findIndex((s) => s.id === node.id);
+  if (index < 0) return null;
+  const prev = index > 0 ? siblingKey(siblings[index - 1]) : undefined;
+  const next = index < siblings.length - 1 ? siblingKey(siblings[index + 1]) : undefined;
+  const twins = siblings.filter((s) => !s.url && s.title === node.title);
+  const holds = twins.length > 1 ? [...urlKeysIn([node])].sort()[0] : undefined;
+  return {
+    path: rec.path,
+    index,
+    at,
+    ...(prev !== undefined ? { prev } : {}),
+    ...(next !== undefined ? { next } : {}),
+    ...(holds ? { holds } : {}),
+  };
 }
 
 /**
  * Publish a suppressed burst once the tree has gone quiet.
  *
  * Holding a burst is right while it is happening: a browser sync or another extension
- * can issue hundreds of onMoved callbacks in one second, and re-sending them all as our
- * own intent is how a reorder churned Quark into a crash. Holding it FOREVER is wrong:
- * the same burst can be the device's actual final order (that is what Chrome's built-in
- * sync was applying here). Its records stay stamped inside the suppressed span, so every
- * later sync withheld them again and the peer never saw the arrangement the user sees.
- *
- * Re-stamping the stored records when the burst settles makes this a one-shot: after the
- * write their `at` is newer than the flagged span, so they travel like any other move
- * and no further "settled" pass is needed. The tree is already quiet, so the last record
- * per key holds the final neighbours — no need to replay every intermediate event.
+ * can issue hundreds of onMoved callbacks in one second. Holding it FOREVER is wrong:
+ * the same burst can be the device's actual final order. The release is a ONE-SHOT —
+ * the stored records are replaced by canonical, freshly stamped ones, so their `at`
+ * leaves every flagged span. A batch larger than the receiver's move budget is drained
+ * over later syncs instead of truncating the tail of a large reorder.
  */
 async function releaseSettledMoveStorm(
-  moves: MoveRecord[], folderMoves: FolderMoveRecord[], orderMode: BookmarkOrderMode,
-): Promise<{ moves: MoveRecord[]; folderMoves: FolderMoveRecord[] }> {
-  if (orderMode === "browser" || suppressedFrom === 0) return { moves, folderMoves };
-  if (lastRecordedMoveAt === 0 || Date.now() - lastRecordedMoveAt < MOVE_STORM_SETTLE_MS) {
-    return { moves, folderMoves };
+  state: MoveStormState,
+  moves: MoveRecord[],
+  folderMoves: FolderMoveRecord[],
+  orderMode: BookmarkOrderMode,
+  tree: SyncBookmark[],
+): Promise<{ moves: MoveRecord[]; folderMoves: FolderMoveRecord[]; state: MoveStormState }> {
+  const flagged = state.spans.some((s) => s.flagged);
+  if (!flagged) return { moves, folderMoves, state };
+  const suppressed = (r: { at: number }): boolean => isMoveSuppressed(r.at, state);
+  if (orderMode === "browser") {
+    // Order belongs to the browser here. Drop the windows so a later switch back to
+    // lww cannot re-stamp a hours-old burst as if it were a fresh user intent.
+    const next = await updateMoveStormState((current) => ({ ...current, spans: [] }));
+    moveStormState = next;
+    return { moves, folderMoves, state: next };
   }
-  const heldMoves = moves.filter((r) => isMoveSuppressed(r.at));
-  const heldFolders = folderMoves.filter((r) => isMoveSuppressed(r.at));
-  if (!heldMoves.length && !heldFolders.length) return { moves, folderMoves };
+  if (state.lastRecordedMoveAt === 0 || Date.now() - state.lastRecordedMoveAt < MOVE_STORM_SETTLE_MS) {
+    return { moves, folderMoves, state };
+  }
+  const heldMoves = moves.filter(suppressed);
+  const heldFolders = folderMoves.filter(suppressed);
+  if (!heldMoves.length && !heldFolders.length) {
+    const next = await updateMoveStormState((current) => ({ ...current, spans: [] }));
+    moveStormState = next;
+    return { moves, folderMoves, state: next };
+  }
 
   const now = Date.now();
   const heldUrls = new Set(heldMoves.map((r) => r.url));
-  const heldKeys = new Set(heldFolders.map(folderMoveKey));
-  // Serialized read-modify-write, the same path the listeners append through: a late
-  // onMoved from the same burst must not be lost between our read and our write.
-  await updateMoves((current) => current.map((r) => heldUrls.has(r.url) ? { ...r, at: now } : r));
-  await updateFolderMoves((current) => current.map((r) => heldKeys.has(folderMoveKey(r)) ? { ...r, at: now } : r));
+  const batch = heldFolders.slice(0, MAX_SETTLED_FOLDER_RECORDS);
+  const releasedFolderKeys = new Set(batch.map(folderMoveKey));
+  const canonicalFolders = batch.map((rec) => canonicalFolderRecord(tree, rec, now) ?? { ...rec, at: now });
+
+  // Serialized read-modify-write. The predicate checks the record's CURRENT `at`, so a
+  // newer placement that landed after our snapshot is never overwritten or re-stamped.
+  const updatedMoves = await updateMoves((current) => gcMoves(current.map((r) =>
+    heldUrls.has(r.url) && suppressed(r) ? { ...r, at: now } : r)));
+  const updatedFolderMoves = await updateFolderMoves((current) => mergeFolderMoveLists(
+    current.filter((r) => !(releasedFolderKeys.has(folderMoveKey(r)) && suppressed(r))),
+    canonicalFolders,
+  ));
+
+  const next = await updateMoveStormState((current) => {
+    const stillHeld = [...updatedMoves, ...updatedFolderMoves].some((r) => isMoveSuppressed(r.at, current));
+    return {
+      spans: stillHeld ? pruneMoveStormSpans(current.spans, now) : [],
+      lastRecordedMoveAt: current.lastRecordedMoveAt,
+    };
+  });
+  moveStormState = next;
   logger.event(
     "MoveStormSettled",
-    `Published ${heldMoves.length + heldFolders.length} placement record(s) after the burst ` +
-    `settled — this is the order this browser now holds.`,
+    `Published ${heldMoves.length + batch.length} placement record(s) after the burst ` +
+    `settled — anchors recomputed from the final tree.`,
   );
-  return {
-    moves: moves.map((r) => heldUrls.has(r.url) ? { ...r, at: now } : r),
-    folderMoves: folderMoves.map((r) => heldKeys.has(folderMoveKey(r)) ? { ...r, at: now } : r),
-  };
+  if (heldFolders.length > batch.length) {
+    logger.warn(
+      "MoveStormSettled",
+      `${heldFolders.length - batch.length} folder record(s) deferred to the next sync ` +
+      `to stay inside the receiver's move budget.`,
+    );
+  }
+  return { moves: updatedMoves, folderMoves: updatedFolderMoves, state: next };
+}
+
+interface ExportBookmarkOptions {
+  /** True only for a payload that will actually be uploaded by a sync cycle. */
+  forSync?: boolean;
+  /** The order mode in force for THIS cycle, so export and import read one source. */
+  orderMode?: BookmarkOrderMode;
 }
 
 /** Bookmark sync payload: live tree + this device's (pruned) deletion log. */
-export async function exportBookmarkPayload(): Promise<BookmarkPayload> {
+export async function exportBookmarkPayload(options: ExportBookmarkOptions = {}): Promise<BookmarkPayload> {
   // GC each log through the SAME serialized path the listeners append on. A bookmark
   // event landing mid-export would otherwise read the pre-GC list and write it back —
   // either undoing the prune or dropping the event's own record, depending on which
@@ -916,24 +1036,33 @@ export async function exportBookmarkPayload(): Promise<BookmarkPayload> {
     updateFolderDeletes(gcFolderDeletes),
     updateAppeared(gcAppeared),
     getCreated(),
-    getBookmarkOrderMode(),
+    options.orderMode ? Promise.resolve(options.orderMode) : getBookmarkOrderMode(),
   ]);
-  // The order publisher decides the fate of placement records on THIS device:
-  //   - "browser": hand order to the browser's own sync — send neither our moves nor a
-  //     local stamp that would later masquerade as the newest intent. Contents still flow.
-  //   - every other mode: withhold placements WHILE a recorded storm is hot, then publish
-  //     them once after it settles so a browser-side reorder can actually reach the peers.
-  const settled = await releaseSettledMoveStorm(gcedMoves, gcedFolderMoves, storedOrderMode);
+  // A snapshot/restore-point export must NOT mutate placement history or fire a
+  // settled-release audit: only a cycle that really uploads may publish order.
+  // Reading the persisted state through the serialized chain also picks up any
+  // recorder update that landed just before this cycle (or before a worker restart).
+  const stormState = options.forSync
+    ? await updateMoveStormState((current) => current)
+    : moveStormState;
+  moveStormState = stormState;
+  const settled = options.forSync
+    ? await releaseSettledMoveStorm(stormState, gcedMoves, gcedFolderMoves, storedOrderMode, tree)
+    : { moves: gcedMoves, folderMoves: gcedFolderMoves, state: stormState };
+  // "browser": hand order to the browser's own sync — send neither our moves nor a
+  // local stamp that would later masquerade as the newest intent. Contents still flow.
   const publishMoves = storedOrderMode === "browser"
     ? []
-    : settled.moves.filter((r) => !isMoveSuppressed(r.at));
+    : settled.moves.filter((r) => !isMoveSuppressed(r.at, settled.state));
   const publishFolderMoves = storedOrderMode === "browser"
     ? []
-    : settled.folderMoves.filter((r) => !isMoveSuppressed(r.at));
-  const withheldMoves = gcedMoves.length - publishMoves.length + (gcedFolderMoves.length - publishFolderMoves.length);
-  if (withheldMoves > 0) {
+    : settled.folderMoves.filter((r) => !isMoveSuppressed(r.at, settled.state));
+  const withheldMoves = settled.moves.length - publishMoves.length +
+    (settled.folderMoves.length - publishFolderMoves.length);
+  const stormActive = settled.state.spans.some((s) => s.flagged);
+  if (withheldMoves > 0 && storedOrderMode !== "browser" && stormActive) {
     logger.event("MoveWithheld", `Withheld ${withheldMoves} placement record(s) from this sync ` +
-      `(order mode: ${storedOrderMode}) — a move storm or browser-owned ordering.`);
+      `(order mode: ${storedOrderMode}) — the move burst has not settled yet.`);
   }
   // Snapshot the current (full) tree so a later URL edit can find the replaced
   // url by id and tombstone it (see recordUrlChange). This is the state peers hold.
@@ -1111,10 +1240,24 @@ export function bookmarkContent(payload: unknown): string {
     const kind = rootKindOf(root);
     const top = kind === "menu" ? "other" : kind ?? `root:${root.title?.trim().toLowerCase() || i}`;
     const walk = (nodes: SyncBookmark[] | undefined, path: string[]): void => {
-      for (const n of nodes ?? []) {
-        if (n.url) lines.add([...path, canonicalUrlKey(n.url), n.title ?? ""].join("\u0000"));
-        else walk(n.children, [...path, n.title ?? ""]);
-      }
+      // Sibling position is part of what the user sees. Manual conflict resolution
+      // used to hash two differently ordered trees as identical, so a pure reorder
+      // produced neither a conflict card nor a "use remote/keep local" choice.
+      // Duplicates of one URL in the same parent still count once (the merge keys
+      // presence by URL), so the first occurrence alone carries the position.
+      const seen = new Set<string>();
+      (nodes ?? []).forEach((n, i) => {
+        if (n.url) {
+          const key = canonicalUrlKey(n.url);
+          const ident = [key, n.title ?? ""].join("\u0000");
+          if (seen.has(ident)) return;
+          seen.add(ident);
+          lines.add([...path, String(i), key, n.title ?? ""].join("\u0000"));
+        } else {
+          lines.add([...path, String(i), "folder", n.title ?? ""].join("\u0000"));
+          walk(n.children, [...path, String(i), n.title ?? ""]);
+        }
+      });
     };
     walk(root.children, [top]);
   });
@@ -1289,14 +1432,17 @@ export async function importBookmarks(
       } finally {
         wholesaleImports--;
       }
-      // The whole tree is the peer's now, so every placement it describes is in place —
-      // fold both logs unconditionally (this is the baseline-alignment path).
+      // The whole tree is the peer's now, so every placement it describes is in place.
+      // Folder logs are operation HISTORY, though: a record can name neighbours the
+      // designated tree no longer has. Fold canonical records recomputed from that
+      // tree (at the same LWW timestamps), not the raw history, or the next merge
+      // would replay a stale anchor and move folders out of the baseline order.
       await updateMoves((current) => mergeMoveLists(current, logs.moves.remote));
-      await updateFolderMoves((current) => mergeFolderMoveLists(current, logs.folderMoves.remote));
-      // The tree IS the truth here, so its records are confirmed by construction. Without
-      // that, the next merge would re-check them against the designated tree, find the
-      // stale ones contradicting it, and move the folders back out of the baseline order.
-      await confirmFolderMoves(logs.folderMoves.remote);
+      const settledFolders = logs.folderMoves.remote.map(
+        (r) => canonicalFolderRecord(tree, r, r.at) ?? r,
+      );
+      await updateFolderMoves((current) => mergeFolderMoveLists(current, settledFolders));
+      await confirmFolderMoves(settledFolders);
     } else {
       const { placed, placedFolders } = await mergeBookmarks(
         tree, logs, conflictStrategy, deletePercent, approvedFor, onBulkBlocked, local?.part.excludedIds, orderMode,
