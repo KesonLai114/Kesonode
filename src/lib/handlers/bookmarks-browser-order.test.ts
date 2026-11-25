@@ -103,7 +103,11 @@ describe("move-storm publish suppression", () => {
     const late = Date.now();
     for (let i = 0; i < 900; i++) await noteRecordedMove("url");
     expect(isMoveSuppressed(late)).toBe(true);
-    expect(isMoveSuppressed(Date.now())).toBe(true);
+    // NOT `isMoveSuppressed(Date.now())`: a span ends at its last placement, so that
+    // assertion flipped whenever the clock ticked one millisecond past the loop.
+    const last = Date.now();
+    await noteRecordedMove("url");
+    expect(isMoveSuppressed(last)).toBe(true);
   });
 
   it("withholds storm-stamped records from the published packet", async () => {

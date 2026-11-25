@@ -174,7 +174,9 @@ const MOVE_STORM_JOIN_MS = 5_000;
 const MOVE_STORM_SETTLE_MS = 4_000;
 const MOVE_STORM_STATE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_MOVE_STORM_SPANS = 8;
-/** One release must fit the receiver's folder-move budget (see folderMoveBudget). */
+/** The most siblings ONE release may publish, folders and bookmarks counted together.
+ *  One batch of that size is well inside the receiver's folder-move budget (see
+ *  folderMoveBudget), so every batch lands whole; a bigger folder drains over later syncs. */
 export const MAX_SETTLED_FOLDER_RECORDS = 64;
 
 let moveStormState: MoveStormState = defaultMoveStormState();
@@ -936,14 +938,54 @@ function canonicalFolderRecord(
 }
 
 /**
+ * The folders a held burst touched, in tree order: each with the path its children are
+ * filed under and those children in the order this device holds them.
+ *
+ * A burst only fires `onMoved` for the items whose index CHANGED, so its records name some
+ * of a folder's siblings and not the others. That is not enough for a receiver to rebuild
+ * the arrangement: a record says "after my neighbour", and where a neighbour that has no
+ * record of its own currently sits on the receiver is anybody's guess. On a receiver that
+ * had already drifted, the batch landed a THIRD arrangement (reproduced: source D,A,B,C;
+ * receiver B,A,C,D; the one record the burst carried, for D, left the receiver at B,D,A,C).
+ * So the whole sibling set of every touched folder travels, and nothing is left to guess.
+ */
+interface ReleaseParent { path: string[]; children: SyncBookmark[] }
+
+function parentsHolding(
+  tree: SyncBookmark[], heldUrls: Set<string>, heldFolderPaths: Set<string>,
+): ReleaseParent[] {
+  const out: ReleaseParent[] = [];
+  // exportBookmarks() hands back the virtual root at [0], its children the real roots.
+  const roots = tree[0]?.children ?? tree;
+  const visit = (node: SyncBookmark, path: string[]): void => {
+    const children = node.children ?? [];
+    if (children.some((c) => c.url
+      ? heldUrls.has(canonicalUrlKey(c.url))
+      : heldFolderPaths.has(folderPathKey([...path, c.title])))) {
+      out.push({ path, children });
+    }
+    for (const c of children) if (!c.url) visit(c, [...path, c.title]);
+  };
+  for (const root of roots) {
+    const kind = asRootKind(root.rootKind);
+    if (kind) visit(root, [kind]);
+  }
+  return out;
+}
+
+/**
  * Publish a suppressed burst once the tree has gone quiet.
  *
  * Holding a burst is right while it is happening: a browser sync or another extension
  * can issue hundreds of onMoved callbacks in one second. Holding it FOREVER is wrong:
- * the same burst can be the device's actual final order. The release is a ONE-SHOT —
- * the stored records are replaced by canonical, freshly stamped ones, so their `at`
- * leaves every flagged span. A batch larger than the receiver's move budget is drained
- * over later syncs instead of truncating the tail of a large reorder.
+ * the same burst can be the device's actual final order.
+ *
+ * What goes out is the WHOLE sibling set of every folder the burst touched, in sibling
+ * order — bookmarks and folders alike, moved or not (see parentsHolding). A receiver can
+ * then rebuild the arrangement whatever it held before: each item lands right behind the
+ * one the source lists before it. A folder larger than one release is drained over later
+ * syncs as a PREFIX of its siblings, so every batch is self-consistent on arrival: no
+ * item is ever sent behind a neighbour that has not been sent yet.
  */
 async function releaseSettledMoveStorm(
   state: MoveStormState,
@@ -974,24 +1016,72 @@ async function releaseSettledMoveStorm(
   }
 
   const now = Date.now();
-  // Cap BOTH placement kinds per release. A burst can sweep hundreds of URLs (moving a
-  // large folder across parents records every URL it contains) or hundreds of folders;
-  // one sync must not dump the whole burst on the peers at once. Folders are also capped
-  // by the receiver's move budget, and the remainder of either kind is drained over later
-  // syncs — `stillHeld` below keeps the span alive until the last record is released.
-  const heldUrls = new Set(heldMoves.slice(0, MAX_SETTLED_FOLDER_RECORDS).map((r) => r.url));
-  const batch = heldFolders.slice(0, MAX_SETTLED_FOLDER_RECORDS);
-  const releasedFolderKeys = new Set(batch.map(folderMoveKey));
-  const canonicalFolders = batch.map((rec) => canonicalFolderRecord(tree, rec, now) ?? { ...rec, at: now });
+  const heldUrls = new Set(heldMoves.map((r) => canonicalUrlKey(r.url)));
+  const heldFolderPaths = new Set(heldFolders.map((r) => folderPathKey(r.path)));
+  // When the earliest flagged span of this episode opened. A record stamped at or after
+  // it and NOT held any more was released by an earlier batch of the same episode (a
+  // folder too large for one release), or is a later drag that already travelled: neither
+  // is released again.
+  const episodeFrom = Math.min(...state.spans.filter((s) => s.flagged).map((s) => s.from));
+  const moveAt = new Map(moves.map((r) => [canonicalUrlKey(r.url), r.at]));
+  const folderAt = new Map<string, number>();
+  for (const r of folderMoves) {
+    const k = folderPathKey(r.path);
+    folderAt.set(k, Math.max(folderAt.get(k) ?? 0, r.at));
+  }
+  const alreadyOut = (at: number | undefined): boolean => at !== undefined && !suppressed({ at }) && at >= episodeFrom;
 
-  // Serialized read-modify-write. The predicate checks the record's CURRENT `at`, so a
-  // newer placement that landed after our snapshot is never overwritten or re-stamped.
-  const updatedMoves = await updateMoves((current) => gcMoves(current.map((r) =>
-    heldUrls.has(r.url) && suppressed(r) ? { ...r, at: now } : r)));
+  const touched = parentsHolding(tree, heldUrls, heldFolderPaths);
+  const urlStamps: MoveRecord[] = [];
+  const folderStamps: FolderMoveRecord[] = [];
+  const releasedFolderPaths = new Set<string>();
+  const locatedUrls = new Set<string>();
+  let room = MAX_SETTLED_FOLDER_RECORDS;
+  let deferred = 0;
+  for (const parent of touched) {
+    for (const c of parent.children) if (c.url) locatedUrls.add(canonicalUrlKey(c.url));
+    for (let i = 0; i < parent.children.length; i++) {
+      const child = parent.children[i];
+      const path = [...parent.path, child.title];
+      const current = child.url ? moveAt.get(canonicalUrlKey(child.url)) : folderAt.get(folderPathKey(path));
+      if (alreadyOut(current)) continue;
+      if (child.url) {
+        if (room > 0) { urlStamps.push({ url: child.url, at: now }); room--; } else deferred++;
+        continue;
+      }
+      const canonical = room > 0 ? canonicalFolderRecord(tree, { path, index: i, at: now }, now) : null;
+      if (canonical) {
+        folderStamps.push(canonical);
+        releasedFolderPaths.add(folderPathKey(path));
+        room--;
+      }
+    }
+  }
+  // A held folder record whose folder is not in the exported tree any more (moved out,
+  // renamed, excluded) cannot be described from the tree. Re-stamp it as it stands: the
+  // receiver fails safe on a path it cannot resolve, and a stale span must not hold it
+  // for good.
+  for (const rec of heldFolders) {
+    if (releasedFolderPaths.has(folderPathKey(rec.path))) continue;
+    if (room > 0) { folderStamps.push({ ...rec, at: now }); room--; } else deferred++;
+  }
+
+  // Serialized read-modify-write. A placement that landed after our snapshot is never
+  // lost: the URL fold keeps the NEWER of the two stamps per url.
+  //
+  // A held bookmark record whose bookmark is in none of the touched folders (deleted, or
+  // taken out of sync, while the burst was running) describes nothing any more. Left in
+  // place it kept its span flagged — and every sync logging "withheld" — for a whole day.
+  const goneUrls = new Set(heldMoves.map((r) => canonicalUrlKey(r.url)).filter((k) => !locatedUrls.has(k)));
+  const updatedMoves = await updateMoves((current) =>
+    mergeMoveLists(current, urlStamps).filter((r) => !goneUrls.has(canonicalUrlKey(r.url))));
   const updatedFolderMoves = await updateFolderMoves((current) => mergeFolderMoveLists(
-    current.filter((r) => !(releasedFolderKeys.has(folderMoveKey(r)) && suppressed(r))),
-    canonicalFolders,
+    // The folder's records go under its path, whichever twin mark they carried.
+    current.filter((r) => !releasedFolderPaths.has(folderPathKey(r.path))),
+    folderStamps,
   ));
+  // The tree already holds every placement just described, so the SOURCE confirms it too.
+  await confirmFolderMoves(folderStamps);
 
   const next = await updateMoveStormState((current) => {
     const stillHeld = [...updatedMoves, ...updatedFolderMoves].some((r) => isMoveSuppressed(r.at, current));
@@ -1003,16 +1093,13 @@ async function releaseSettledMoveStorm(
   moveStormState = next;
   logger.event(
     "MoveStormSettled",
-    `Published ${heldUrls.size + canonicalFolders.length} placement record(s) after the burst ` +
-    `settled — anchors recomputed from the final tree.`,
+    `Published ${urlStamps.length + folderStamps.length} placement record(s) after the burst ` +
+    `settled — the whole sibling set of ${touched.length} folder(s), in order.`,
   );
-  const deferredUrls = heldMoves.length - heldUrls.size;
-  const deferredFolders = heldFolders.length - batch.length;
-  if (deferredUrls + deferredFolders > 0) {
+  if (deferred > 0) {
     logger.warn(
       "MoveStormSettled",
-      `${deferredUrls} URL + ${deferredFolders} folder record(s) deferred to the next sync ` +
-      `to stay inside the per-release budget.`,
+      `${deferred} record(s) deferred to the next sync to stay inside one release's budget.`,
     );
   }
   return { moves: updatedMoves, folderMoves: updatedFolderMoves, state: next };
@@ -2009,8 +2096,20 @@ async function mergeBookmarks(
             // absolute index — an index doesn't translate across devices with different
             // device-local siblings. Fall back to the peer's index when the anchor is
             // absent here. (Mirrors the folder-reposition placement in Step C.)
-            const target = await anchoredIndex(targetId, loc.id, prevKey, index, prevNth());
-            if (loc.parentId !== targetId || loc.index !== target) {
+            //
+            // Where the bookmark sits NOW is read from the same list, not from `placement`:
+            // that map predates the fold, and every move this loop already made shifted the
+            // ones after it. Compared against the stale index, a bookmark that had been
+            // pushed to its target counted as a move it never made ("moved 4" for two), and
+            // one that had been pushed AWAY from a target equal to its old index was skipped
+            // and its record folded in as done — a placement lost for good.
+            const live = await browser.bookmarks.getChildren(targetId);
+            const target = placementIndex(
+              live.filter((c) => c.id !== loc.id), prevKey, index, prevNth(),
+            );
+            const at = live.findIndex((c) => c.id === loc.id);
+            const outOfPlace = loc.parentId !== targetId || at !== target;
+            if (outOfPlace) {
               const from = loc.parentId;
               if (loc.parentId !== targetId) {
                 noteSelfMove(loc.id, targetId);
@@ -2144,6 +2243,8 @@ async function mergeBookmarks(
   // re-checked once (the tree then plainly disagrees) instead of staying "done" forever.
   const folderMovesVerified = await getFolderMovesVerified();
   let folderMoved = 0;
+  /** The folders (by path) whose record this merge honoured — see settleSiblingOrder. */
+  const honouredFolders = new Set<string>();
   // A chain of N records settles in at most N landed moves. This budget is SHARED by both
   // applyFolderRepositions calls below (folderMoved lives in the outer scope), so a
   // contradictory log cannot spend 40 sweeps × 2 calls × N moves in a single sync — the
@@ -2217,8 +2318,10 @@ async function mergeBookmarks(
             return false;
           }
           folderMoved++;
+          honouredFolders.add(folderPathKey(rec.path));
           return true;
         }
+        honouredFolders.add(folderPathKey(rec.path));
         return true; // already where the record says
       } catch (err) {
         logger.error(`Folder reposition: ${rec.path.join("/")}`, err);
@@ -2299,6 +2402,21 @@ async function mergeBookmarks(
 
   // Step C again, now that the fold has made what was missing (see above).
   await applyFolderRepositions();
+
+  // ── Step E: the order both steps describe, in one pass. Honoured items only, so a
+  //    drag the user made here after the peer's record keeps its place (nothing was
+  //    honoured for it), and so does everything under keep-local / browser. ──
+  const settledOrder = orderMode === "keep-local" || orderMode === "browser" || strategy === "prefer-local"
+    ? { bookmarks: 0, folders: 0 }
+    : await settleSiblingOrder(
+      remoteTree, localRoots,
+      (n, path) => n.url
+        ? placed.has(canonicalUrlKey(n.url))
+        : honouredFolders.has(folderPathKey([...path, n.title])),
+      localKeys, excluded,
+    );
+  moved += settledOrder.bookmarks;
+  folderMoved += settledOrder.folders;
 
   // ── Step D: prune the shells this merge left. Two kinds, on different evidence:
   //    - a folder a cross-parent MOVE emptied (see emptiedParents): its bookmarks went
@@ -2426,6 +2544,106 @@ async function mergeBookmarks(
   return { placed, placedFolders: settledFolders };
 }
 
+/**
+ * Put the peer's order of ONE folder in place here, in one pass, for the items whose
+ * records this merge honoured.
+ *
+ * Step B (bookmarks) and Step C (folders) each place an item behind its neighbour as that
+ * neighbour stands at the time. They run in a fixed order — folders, bookmarks, folders —
+ * and a bookmark is only ever anchored behind its neighbour's position as Step B finds it.
+ * In a folder that mixes the two, a bookmark placed behind a folder that Step C then moves
+ * is left behind; the next pass has no bookmark step to correct it. The records all read
+ * "done", so nothing ever revisits them, and the receiver keeps a THIRD arrangement.
+ *
+ * Exhaustively measured with a COMPLETE, correct record set (every sibling recorded, every
+ * anchor right): every arrangement of 4 mixed siblings converged, 60 of 952 five-sibling
+ * pairs did not, and 8,820 of 30,917 six-sibling pairs did not. A real bookmarks bar has
+ * dozens of mixed siblings.
+ *
+ * So once both steps have run, walk the peer's siblings in the peer's order and put each
+ * honoured item immediately behind the one before it. That predecessor is already in place
+ * by induction — honoured items were just put there, and the rest are not this pass's to
+ * move — so each item moves at most once and the folder holds the peer's order when the
+ * pass ends. Where both steps already agreed, it finds everything in place and moves
+ * nothing.
+ */
+async function settleSiblingOrder(
+  remoteTree: SyncBookmark[],
+  localRoots: BookmarkNode[],
+  /** Did this merge honour `node`'s placement record? `path` is its parent's path. */
+  honoured: (node: SyncBookmark, path: string[]) => boolean,
+  /** Every key this device may hold the peer's canonical url under (#41). */
+  urlAliases: (key: string) => string[],
+  excluded: Set<string>,
+): Promise<{ bookmarks: number; folders: number }> {
+  const done = { bookmarks: 0, folders: 0 };
+  // The local tree, read once: parent id → its children as they stand.
+  const childrenOf = new Map<string, BookmarkNode[]>();
+  const index = (n: BookmarkNode): void => {
+    if (!n.children) return;
+    childrenOf.set(n.id, n.children);
+    n.children.forEach(index);
+  };
+  (await browser.bookmarks.getTree()).forEach(index);
+
+  const settle = async (siblings: SyncBookmark[], parentId: string, path: string[]): Promise<void> => {
+    let kids = childrenOf.get(parentId) ?? [];
+    if (!kids.length) return;
+    // Each local child stands for one peer sibling, taken in turn: two folders of one name
+    // are two siblings, and the first unmatched is the one the peer lists first.
+    const taken = new Set<string>();
+    const localIdOf = (n: SyncBookmark): string | undefined => {
+      if (n.url) {
+        const aliases = urlAliases(canonicalUrlKey(n.url));
+        return kids.find((c) => c.url && !taken.has(c.id) && aliases.includes(canonicalUrlKey(c.url)))?.id;
+      }
+      return kids.find((c) => !c.url && !taken.has(c.id) && c.title === n.title && !excluded.has(c.id))?.id;
+    };
+    let prevId: string | undefined;
+    for (const n of siblings) {
+      const id = localIdOf(n);
+      if (!id) continue; // not held here: the next item anchors to the last one that is
+      taken.add(id);
+      if (prevId !== undefined && honoured(n, path)) {
+        const cur = kids.findIndex((c) => c.id === id);
+        const p = kids.findIndex((c) => c.id === prevId);
+        if (p >= 0 && cur >= 0 && cur !== p + 1) {
+          // The FINAL index: behind the predecessor once this item has left its slot, so
+          // one index lower when the item is on its way down (it vacates a slot above).
+          if (!(await moveToIndex(id, parentId, cur < p ? p : p + 1))) continue;
+          if (n.url) done.bookmarks++; else done.folders++;
+          // Read back rather than patch the list: a drag landing mid-merge must not have
+          // the next item placed against an order that is no longer there.
+          kids = (await browser.bookmarks.getChildren(parentId).catch(() => kids));
+        }
+      }
+      prevId = id;
+    }
+  };
+
+  const remoteRoots = remoteTree[0]?.children ?? remoteTree;
+  const walk = async (node: SyncBookmark, localId: string | null, path: string[]): Promise<void> => {
+    if (!localId || excluded.has(localId)) return;
+    const siblings = node.children ?? [];
+    // Most folders hold nothing this merge moved: one predicate per child, no tree reads.
+    if (siblings.some((c) => honoured(c, path))) await settle(siblings, localId, path);
+    for (const c of siblings) {
+      if (c.url || !c.children?.length) continue;
+      const local = (childrenOf.get(localId) ?? []).find((k) => !k.url && k.title === c.title);
+      if (local) await walk(c, local.id, [...path, c.title]);
+    }
+  };
+  for (let r = 0; r < remoteRoots.length; r++) {
+    const root = remoteRoots[r];
+    if (!root) continue;
+    // Unconfident root mapping: the fold would not move into it, and neither does this.
+    const match = matchLocalRootEx(root, localRoots, r);
+    const kind = asRootKind(root.rootKind) ?? rootKindOf(root);
+    if (match.confident && match.id && kind) await walk(root, match.id, [kind]);
+  }
+  return done;
+}
+
 /** Resolve a browser-agnostic folder path (`[rootKind, …titles]`) to a local
  *  folder id, or null if the root kind or any path segment is missing locally. */
 async function resolveFolderPath(path: string[], localRoots: BookmarkNode[]): Promise<string | null> {
@@ -2507,21 +2725,10 @@ async function sameTitleFolder(
  *  short of the requested index (Firefox uses the final-index convention and lands
  *  exactly). Read back and nudge once when it fell short — enough for the ±1 the
  *  convention difference produces, without fighting the browser in a loop. */
-/** Target index for placing `movingId` in `parentId`, anchored to the peer's previous
- *  sibling (`prevKey`, a url/title key shared across devices) rather than an absolute
- *  index that doesn't translate when devices have different device-local siblings.
- *  Frame = the parent's children WITHOUT the moving node (the final-array convention
- *  moveToIndex expects). Falls back to the peer's absolute index if the anchor is
- *  absent locally. */
-async function anchoredIndex(
-  parentId: string, movingId: string, prevKey: string | undefined, fallbackIndex: number, prevNth = 0,
-): Promise<number> {
-  const rest = (await browser.bookmarks.getChildren(parentId)).filter((c) => c.id !== movingId);
-  return placementIndex(rest, prevKey, fallbackIndex, prevNth);
-}
 
-/** Where to place a node among `siblings` — the pure core shared by the move path
- *  (`anchoredIndex`) and the ADD path in the merge.
+/** Where to place a node among `siblings` — the pure core of the merge's move and add
+ *  paths. `siblings` is the parent's children WITHOUT the moving node (the final-array
+ *  convention moveToIndex expects).
  *
  *  Anchored to the peer's previous sibling (`prevKey`) rather than its absolute index,
  *  which doesn't translate when the two devices have different device-local siblings.

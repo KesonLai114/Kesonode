@@ -12,6 +12,22 @@ All notable changes to Konode. Format loosely follows
 
 ### Fixed
 
+- **A reordered folder now lands in the source's order on a browser that had already
+  drifted.** Two faults, both reproduced with failing tests before the fix. (1) A burst only
+  reports the items whose index changed, so the settled release carried records for SOME of a
+  folder's siblings; each says "behind my neighbour", and on a browser where that neighbour
+  sat elsewhere the batch produced a third arrangement (source `D A B C`, receiver `B A C D`,
+  the one record for `D` left the receiver at `B D A C`). The release now publishes the whole
+  sibling set of every folder the burst touched, bookmarks and folders alike, in sibling
+  order. (2) The receiver placed bookmarks and folders in separate passes, and in a folder
+  that mixes the two a bookmark could be left behind a folder the next pass then moved, with
+  every record already marked done. Measured with a complete, correct record set: every
+  arrangement of 4 mixed siblings converged, but 60 of 952 five-sibling pairs and 28% of the
+  six-sibling space did not. A final pass now puts each honoured item directly behind the one
+  the source lists before it. A bookmark whose stale pre-merge index happened to equal its
+  target is no longer skipped, and the Activity line no longer counts bookmarks that were
+  already in place as moved.
+
 - **A settled browser-side reorder now reaches the other browsers.** A burst of 25+ folder
   moves — typically a browser's own bookmark sync applying an order — was correctly held
   back while it was happening, but the records then stayed stamped inside the suppressed
@@ -25,8 +41,9 @@ All notable changes to Konode. Format loosely follows
   orders. Move-storm windows are now persisted per burst (an MV3 worker restart can no
   longer leak a hot burst), unrelated storms no longer merge into one growing time span,
   and the settled release recomputes folder anchors from the FINAL tree instead of replaying
-  intermediate `onMoved` neighbours. Releases are capped for both URL and folder placements
-  and drained over later cycles (folders at the receiver's move budget); the source now
+  intermediate `onMoved` neighbours. One release publishes at most 64 siblings — a PREFIX of
+  each folder, so no item is sent behind a neighbour that has not been sent yet — and drains
+  the rest over later cycles; the source now
   confirms its own folder moves. WebDAV bookmark
   peer files are always fetched, because a pure reorder keeps both file size and a
   second-resolution modification time and was otherwise served from the stale packet cache.
