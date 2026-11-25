@@ -120,4 +120,46 @@ describe("move-storm publish suppression", () => {
     const out = await exportBookmarkPayload();
     expect(out.moves).toEqual([]);
   });
+
+  it("publishes the settled order once after a hot burst goes quiet", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    let now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    await chrome.bookmarks.create({ parentId: "1", title: "X", url: "https://x.com" });
+    await setMoves([{ url: "https://x.com", at: now }]);
+    await setFolderMoves([{ path: ["bookmarks_bar", "Folder"], index: 0, at: now }]);
+
+    for (let i = 0; i < 60; i++) noteRecordedMove("folder");
+    const hot = await exportBookmarkPayload();
+    expect(hot.moves).toEqual([]);
+    expect(hot.folderMoves ?? []).toEqual([]);
+
+    now += 5_000; // no new placement for longer than the settle window
+    const settled = await exportBookmarkPayload();
+    expect(settled.moves?.map((m) => m.url)).toEqual(["https://x.com"]);
+    expect(settled.folderMoves?.map((m) => m.path)).toEqual([["bookmarks_bar", "Folder"]]);
+    expect(settled.moves?.[0].at).toBe(now);
+
+    // The re-stamp is a one-shot: a later sync publishes the settled records as
+    // ordinary LWW moves instead of re-stamping them on every cycle.
+    const later = await exportBookmarkPayload();
+    expect(later.moves?.[0].at).toBe(now);
+    expect(later.folderMoves?.[0].at).toBe(now);
+  });
+
+  it("still publishes no order in browser mode after a storm settles", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    let now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    await chrome.storage.local.set({ [KEYS.SETTINGS]: { bookmark_order_mode: "browser" } });
+    await chrome.bookmarks.create({ parentId: "1", title: "X", url: "https://x.com" });
+    await setMoves([{ url: "https://x.com", at: now }]);
+    await setFolderMoves([{ path: ["bookmarks_bar", "Folder"], index: 0, at: now }]);
+
+    for (let i = 0; i < 60; i++) noteRecordedMove("folder");
+    now += 5_000;
+    const out = await exportBookmarkPayload();
+    expect(out.moves).toEqual([]);
+    expect(out.folderMoves ?? []).toEqual([]);
+  });
 });

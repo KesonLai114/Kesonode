@@ -163,17 +163,24 @@ let wholesaleImports = 0;
 // the 200-entry Activity ring is not flooded.
 const MOVE_STORM_WINDOW_MS = 5_000;
 const MOVE_STORM_MIN = 25;
+// A burst is held back while it is still arriving; once the tree has been quiet this
+// long, the burst is treated as this device's SETTLED order and published once. Without
+// this, a browser's own sync re-ordering the bar produced a permanent stand-off: every
+// record stayed stamped inside the suppressed span, so no peer ever learned the final
+// order and the two browsers kept showing different arrangements forever.
+const MOVE_STORM_SETTLE_MS = 4_000;
 let moveStormWindowStart = 0;
 let moveStormTotal = 0;
 let moveStormLogged = false;
+let lastRecordedMoveAt = 0;
 
 // The publish-side half of the storm defence. The 25th move is when a burst becomes
 // recognizable, but hundreds more land before the 1s sync debounce fires. So once a
 // window is flagged we extend its [from, to] on EVERY subsequent recorded placement,
 // covering the whole burst — not just the first 25. At publish time, placements whose
-// `at` falls inside a flagged window are withheld from the outgoing packet: a batch no
-// person could have dragged by hand must never be re-sent as this device's own intent.
-// Consecutive windows whose gap is < threshold merge, so a sustained reorder is one span.
+// `at` falls inside a flagged window are withheld while the burst is hot; after
+// MOVE_STORM_SETTLE_MS they are re-stamped and sent once as settled intent. Consecutive
+// windows whose gap is < threshold merge, so a sustained reorder is one span.
 let suppressedFrom = 0;
 let suppressedTo = 0;
 
@@ -189,6 +196,7 @@ export function isMoveSuppressed(at: number): boolean {
  */
 export function noteRecordedMove(context: "url" | "folder"): void {
   const now = Date.now();
+  lastRecordedMoveAt = now;
   if (moveStormWindowStart === 0 || now - moveStormWindowStart >= MOVE_STORM_WINDOW_MS) {
     moveStormWindowStart = now;
     moveStormTotal = 0;
@@ -219,6 +227,7 @@ export function resetMoveStormForTest(): void {
   moveStormWindowStart = 0;
   moveStormTotal = 0;
   moveStormLogged = false;
+  lastRecordedMoveAt = 0;
   suppressedFrom = 0;
   suppressedTo = 0;
 }
@@ -845,6 +854,50 @@ async function recordFolderMove(id: string, moveInfo: chrome.bookmarks.BookmarkM
   logger.info("Moves", "Recorded a folder reposition");
 }
 
+/**
+ * Publish a suppressed burst once the tree has gone quiet.
+ *
+ * Holding a burst is right while it is happening: a browser sync or another extension
+ * can issue hundreds of onMoved callbacks in one second, and re-sending them all as our
+ * own intent is how a reorder churned Quark into a crash. Holding it FOREVER is wrong:
+ * the same burst can be the device's actual final order (that is what Chrome's built-in
+ * sync was applying here). Its records stay stamped inside the suppressed span, so every
+ * later sync withheld them again and the peer never saw the arrangement the user sees.
+ *
+ * Re-stamping the stored records when the burst settles makes this a one-shot: after the
+ * write their `at` is newer than the flagged span, so they travel like any other move
+ * and no further "settled" pass is needed. The tree is already quiet, so the last record
+ * per key holds the final neighbours — no need to replay every intermediate event.
+ */
+async function releaseSettledMoveStorm(
+  moves: MoveRecord[], folderMoves: FolderMoveRecord[], orderMode: BookmarkOrderMode,
+): Promise<{ moves: MoveRecord[]; folderMoves: FolderMoveRecord[] }> {
+  if (orderMode === "browser" || suppressedFrom === 0) return { moves, folderMoves };
+  if (lastRecordedMoveAt === 0 || Date.now() - lastRecordedMoveAt < MOVE_STORM_SETTLE_MS) {
+    return { moves, folderMoves };
+  }
+  const heldMoves = moves.filter((r) => isMoveSuppressed(r.at));
+  const heldFolders = folderMoves.filter((r) => isMoveSuppressed(r.at));
+  if (!heldMoves.length && !heldFolders.length) return { moves, folderMoves };
+
+  const now = Date.now();
+  const heldUrls = new Set(heldMoves.map((r) => r.url));
+  const heldKeys = new Set(heldFolders.map(folderMoveKey));
+  // Serialized read-modify-write, the same path the listeners append through: a late
+  // onMoved from the same burst must not be lost between our read and our write.
+  await updateMoves((current) => current.map((r) => heldUrls.has(r.url) ? { ...r, at: now } : r));
+  await updateFolderMoves((current) => current.map((r) => heldKeys.has(folderMoveKey(r)) ? { ...r, at: now } : r));
+  logger.event(
+    "MoveStormSettled",
+    `Published ${heldMoves.length + heldFolders.length} placement record(s) after the burst ` +
+    `settled — this is the order this browser now holds.`,
+  );
+  return {
+    moves: moves.map((r) => heldUrls.has(r.url) ? { ...r, at: now } : r),
+    folderMoves: folderMoves.map((r) => heldKeys.has(folderMoveKey(r)) ? { ...r, at: now } : r),
+  };
+}
+
 /** Bookmark sync payload: live tree + this device's (pruned) deletion log. */
 export async function exportBookmarkPayload(): Promise<BookmarkPayload> {
   // GC each log through the SAME serialized path the listeners append on. A bookmark
@@ -868,14 +921,15 @@ export async function exportBookmarkPayload(): Promise<BookmarkPayload> {
   // The order publisher decides the fate of placement records on THIS device:
   //   - "browser": hand order to the browser's own sync — send neither our moves nor a
   //     local stamp that would later masquerade as the newest intent. Contents still flow.
-  //   - every mode: withhold placements that fell inside a recorded move storm, so a
-  //     programmatic burst (957 moves in 0.5s) cannot propagate as if we dragged them.
+  //   - every other mode: withhold placements WHILE a recorded storm is hot, then publish
+  //     them once after it settles so a browser-side reorder can actually reach the peers.
+  const settled = await releaseSettledMoveStorm(gcedMoves, gcedFolderMoves, storedOrderMode);
   const publishMoves = storedOrderMode === "browser"
     ? []
-    : gcedMoves.filter((r) => !isMoveSuppressed(r.at));
+    : settled.moves.filter((r) => !isMoveSuppressed(r.at));
   const publishFolderMoves = storedOrderMode === "browser"
     ? []
-    : gcedFolderMoves.filter((r) => !isMoveSuppressed(r.at));
+    : settled.folderMoves.filter((r) => !isMoveSuppressed(r.at));
   const withheldMoves = gcedMoves.length - publishMoves.length + (gcedFolderMoves.length - publishFolderMoves.length);
   if (withheldMoves > 0) {
     logger.event("MoveWithheld", `Withheld ${withheldMoves} placement record(s) from this sync ` +

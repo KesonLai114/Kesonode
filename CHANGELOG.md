@@ -10,6 +10,16 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A settled browser-side reorder now reaches the other browsers.** A burst of 25+ folder
+  moves — typically a browser's own bookmark sync applying an order — was correctly held
+  back while it was happening, but the records then stayed stamped inside the suppressed
+  time span and were withheld on every later sync. The two browsers could therefore keep
+  different arrangements indefinitely. Once the tree has been quiet for four seconds, the
+  burst is now re-stamped and published once as this device's settled order. The hot-burst
+  protection and the "browser's own order" mode are unchanged.
+
 ## [1.5.28] - 2026-11-24
 
 ### Fixed
