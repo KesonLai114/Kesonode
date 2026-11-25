@@ -974,7 +974,12 @@ async function releaseSettledMoveStorm(
   }
 
   const now = Date.now();
-  const heldUrls = new Set(heldMoves.map((r) => r.url));
+  // Cap BOTH placement kinds per release. A burst can sweep hundreds of URLs (moving a
+  // large folder across parents records every URL it contains) or hundreds of folders;
+  // one sync must not dump the whole burst on the peers at once. Folders are also capped
+  // by the receiver's move budget, and the remainder of either kind is drained over later
+  // syncs — `stillHeld` below keeps the span alive until the last record is released.
+  const heldUrls = new Set(heldMoves.slice(0, MAX_SETTLED_FOLDER_RECORDS).map((r) => r.url));
   const batch = heldFolders.slice(0, MAX_SETTLED_FOLDER_RECORDS);
   const releasedFolderKeys = new Set(batch.map(folderMoveKey));
   const canonicalFolders = batch.map((rec) => canonicalFolderRecord(tree, rec, now) ?? { ...rec, at: now });
@@ -998,14 +1003,16 @@ async function releaseSettledMoveStorm(
   moveStormState = next;
   logger.event(
     "MoveStormSettled",
-    `Published ${heldMoves.length + batch.length} placement record(s) after the burst ` +
+    `Published ${heldUrls.size + canonicalFolders.length} placement record(s) after the burst ` +
     `settled — anchors recomputed from the final tree.`,
   );
-  if (heldFolders.length > batch.length) {
+  const deferredUrls = heldMoves.length - heldUrls.size;
+  const deferredFolders = heldFolders.length - batch.length;
+  if (deferredUrls + deferredFolders > 0) {
     logger.warn(
       "MoveStormSettled",
-      `${heldFolders.length - batch.length} folder record(s) deferred to the next sync ` +
-      `to stay inside the receiver's move budget.`,
+      `${deferredUrls} URL + ${deferredFolders} folder record(s) deferred to the next sync ` +
+      `to stay inside the per-release budget.`,
     );
   }
   return { moves: updatedMoves, folderMoves: updatedFolderMoves, state: next };

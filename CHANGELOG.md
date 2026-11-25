@@ -25,8 +25,9 @@ All notable changes to Konode. Format loosely follows
   orders. Move-storm windows are now persisted per burst (an MV3 worker restart can no
   longer leak a hot burst), unrelated storms no longer merge into one growing time span,
   and the settled release recomputes folder anchors from the FINAL tree instead of replaying
-  intermediate `onMoved` neighbours. Releases are capped at the receiver's move budget and
-  drained over later cycles; the source now confirms its own folder moves. WebDAV bookmark
+  intermediate `onMoved` neighbours. Releases are capped for both URL and folder placements
+  and drained over later cycles (folders at the receiver's move budget); the source now
+  confirms its own folder moves. WebDAV bookmark
   peer files are always fetched, because a pure reorder keeps both file size and a
   second-resolution modification time and was otherwise served from the stale packet cache.
   Manual conflict resolution now sees sibling order, first-sync/baseline replacement keeps

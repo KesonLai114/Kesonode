@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   importBookmarks, exportBookmarkPayload, resetDeletionLog,
   noteRecordedMove, isMoveSuppressed, resetMoveStormForTest, forgetMoveStormCacheForTest,
+  MAX_SETTLED_FOLDER_RECORDS,
 } from "@/lib/handlers/bookmarks-handler";
 import { KEYS, setMoves, setFolderMoves } from "@/lib/utils/storage";
 import type { BookmarkPayload, SyncBookmark } from "@/lib/types";
@@ -141,6 +142,30 @@ describe("move-storm publish suppression", () => {
     const later = await exportBookmarkPayload(forSync);
     expect(later.moves?.[0].at).toBe(now);
     expect(later.folderMoves?.[0].at).toBe(now);
+  });
+
+  it("drains a large URL burst over multiple syncs instead of dumping it at once", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    let now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    // Moving a big folder across parents records every URL it holds; a burst can sweep
+    // hundreds of URL placements in one go, so the release is capped like the folder one.
+    const urls = Array.from({ length: MAX_SETTLED_FOLDER_RECORDS + 1 }, (_, i) => `https://site${i}.example/`);
+    for (const u of urls) await chrome.bookmarks.create({ parentId: "1", title: u, url: u });
+    await setMoves(urls.map((url) => ({ url, at: now })));
+    for (let i = 0; i < 60; i++) await noteRecordedMove("url");
+
+    now += 5_000;
+    // The first settled release is capped: one URL stays suppressed and withheld.
+    const first = await exportBookmarkPayload(forSync);
+    expect(first.moves).toHaveLength(MAX_SETTLED_FOLDER_RECORDS);
+
+    // The deferred record is released on the next sync. The payload is cumulative — the
+    // 64 already released are re-sent too, but a peer that merged them skips them as
+    // already-verified — so the count is full size again, all freshly stamped.
+    const second = await exportBookmarkPayload(forSync);
+    expect(second.moves).toHaveLength(MAX_SETTLED_FOLDER_RECORDS + 1);
+    expect(second.moves?.every((m) => m.at === now)).toBe(true);
   });
 
   it("recomputes folder anchors from the final tree instead of replaying stale event anchors", async () => {
