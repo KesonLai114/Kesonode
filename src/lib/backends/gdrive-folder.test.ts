@@ -320,6 +320,7 @@ describe("Drive HTTP ETag conditional writes", () => {
           Authorization: "Bearer test-token", "Content-Type": "application/json", "If-Match": etag,
         },
         body: '{"labels":{}}',
+        cache: "no-store",
       },
     ]);
   });

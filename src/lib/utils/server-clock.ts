@@ -141,7 +141,13 @@ interface ServerClockSample { lo: number; hi: number; rtt: number }
  */
 export async function observedFetch(...args: Parameters<typeof fetch>): Promise<Response> {
   const sentAt = Date.now();
-  const res = await fetch(...args);
+  // Every response folded into the range must be made NOW. A response served from the
+  // browser's HTTP cache carries the Date from when it was first made, which is
+  // indistinguishable from a clock being set. Enforce freshness here, at the one place
+  // all backend requests pass through, so a caller cannot reintroduce the bug by
+  // forgetting a per-request flag.
+  const init: RequestInit = { ...(args[1] ?? {}), cache: "no-store" };
+  const res = await fetch(args[0], init);
   try {
     const header = res.headers.get("date");
     if (header) void noteServerDate(header, sentAt, Date.now());

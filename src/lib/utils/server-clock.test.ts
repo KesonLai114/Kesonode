@@ -229,12 +229,28 @@ describe("reading the storage's clock off a response", () => {
     expect(back).toBe(res);
     expect(s.samples).toBe(1);
     expect(s.lo).toBeLessThanOrEqual(90_000);
-    expect(fetch).toHaveBeenCalledWith("https://storage.example/", { method: "GET" });
+    expect(fetch).toHaveBeenCalledWith("https://storage.example/", { method: "GET", cache: "no-store" });
 
     await setServerClockState(defaultServerClockState());
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null)));
     await observedFetch("https://storage.example/");
     expect((await state()).samples).toBe(0);
+  });
+
+  it("never lets a clock-observed request be answered from the HTTP cache", async () => {
+    // This is the invariant behind the clock-change false alarms. Every response folded
+    // into the range must be made NOW: a cached one carries the Date from when it was
+    // first made, minutes ago, which looks exactly like the clock being set. Fixing only
+    // the few pings is not enough — any backend GET can be served from the cache.
+    const calls: RequestInit[] = [];
+    vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return Promise.resolve(new Response(null));
+    });
+    await observedFetch("https://storage.example/");
+    await observedFetch("https://storage.example/", { method: "GET", headers: { "x-test": "1" } });
+    expect(calls[0].cache).toBe("no-store");
+    expect(calls[1]).toMatchObject({ method: "GET", headers: { "x-test": "1" }, cache: "no-store" });
   });
 });
 
