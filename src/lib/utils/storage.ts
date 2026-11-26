@@ -1405,7 +1405,7 @@ export async function setMoveStormState(state: MoveStormState): Promise<void> {
 // every backend response, so it goes through the same serialized path and nothing is lost
 // when two responses land together.
 export function defaultServerClockState(): ServerClockState {
-  return { lo: 0, hi: 0, samples: 0, since: 0, measuredAt: 0, probedAt: 0, rtt: 0, settled: false };
+  return { lo: 0, hi: 0, samples: 0, since: 0, measuredAt: 0, probedAt: 0, rtt: 0, settled: false, conflicts: 0 };
 }
 
 export async function getServerClockState(): Promise<ServerClockState> {

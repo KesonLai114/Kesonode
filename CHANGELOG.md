@@ -78,6 +78,17 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A cached `Date` is no longer reported as a clock change.** The storage clock is read
+  from HTTP `Date` headers on backend responses, and the connection test at the end of a
+  sync is one of those responses. When the browser answered that test from its HTTP cache,
+  the header was minutes old: the measurement was thrown away and Activity logged "The
+  clock changed under Kesonode" even though neither clock had moved. Connection tests now
+  ask for a fresh response, and one outlying `Date` is ignored — only three consecutive
+  disagreements restart the measurement, with a message that also names a stale cache as
+  a possible cause.
+
 ## [1.5.28] - 2026-11-24
 
 ### Fixed

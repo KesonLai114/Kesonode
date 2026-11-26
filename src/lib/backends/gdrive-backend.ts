@@ -534,8 +534,10 @@ export class GDriveBackend implements IBackend {
       // connection test that never touched the connection. getToken() renews via the
       // refresh token first, and throws a clear message if that no longer works.
       const token = await this.getToken(false);
+      // This doubles as the clock measurement's ping; a cached Date would be stale.
       const res = await observedFetch(`${DRIVE_API}/about?fields=user`, {
         headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
       });
       if (res.status === 401 || res.status === 403) {
         return { ok: false, message: "Google rejected the saved access. Sign in again." };

@@ -26,6 +26,7 @@
  * the browser's own `dateAdded` are still on each device's clock.
  */
 import { logger } from "@/lib/utils/logger";
+import type { ServerClockState } from "@/lib/types";
 import { getServerClockState, updateServerClockState } from "@/lib/utils/storage";
 
 const SECOND = 1000;
@@ -47,6 +48,8 @@ const PROBE_SLACK_MS = 300;
 const WINDOW_MAX_AGE_MS = 12 * 60 * 60_000;
 /** A first reading is only a second wide, so only a gap this large is worth telling the user. */
 const NOTEWORTHY_MS = 2000;
+/** A cached response's `Date` is minutes old; one of those is not a clock being set. */
+const CONFLICT_LIMIT = 3;
 
 /** The storage's clock, read from an HTTP `Date` header, in ms since the epoch. */
 export function parseHttpDate(header: string | null | undefined): number | null {
@@ -82,9 +85,9 @@ function describeOffset(offset: number): string {
  * header names. So at the moment it was made, the local clock was somewhere in
  * `[made - receivedAt, made + 1000 - sentAt]` BEHIND the storage's: a second, and the
  * round trip on top. That range is
- * intersected with the one held. An empty intersection means one of the two clocks was
- * SET since (the device's by its owner or by NTP, the storage's by its administrator),
- * and the range starts again from this response.
+ * intersected with the one held. A single empty intersection is far more often a stale
+ * `Date` from a cached response than a clock being set, so it is ignored. Only three
+ * consecutive disagreements restart the range and tell the user.
  */
 export function noteServerDate(
   header: string | null | undefined, sentAt: number, receivedAt: number,
@@ -98,27 +101,33 @@ export function noteServerDate(
   let note: string | null = null;
   const fresh: ServerClockSample = { lo, hi, rtt: receivedAt - sentAt };
   return updateServerClockState((cur) => {
-    const next = {
+    const reset = (): ServerClockState => ({
       ...cur, lo, hi, samples: 1, since: receivedAt, measuredAt: receivedAt,
-      rtt: fresh.rtt, settled: false,
-    };
+      rtt: fresh.rtt, settled: false, conflicts: 0,
+    });
     if (cur.samples === 0) {
       const offset = (lo + hi) / 2;
       if (Math.abs(offset) >= NOTEWORTHY_MS) {
         note = `This device's clock is ${describeOffset(offset)} the storage's. From now on, ` +
           "bookmark order is timed by the storage's clock, so a later drag wins on every device.";
       }
-      return next;
+      return reset();
     }
-    if (receivedAt - cur.since > WINDOW_MAX_AGE_MS) return next;
+    if (receivedAt - cur.since > WINDOW_MAX_AGE_MS) return reset();
     const nlo = Math.max(cur.lo, lo);
     const nhi = Math.min(cur.hi, hi);
     if (nlo > nhi) {
-      note = "The clock changed under Kesonode (this device's was set, or the storage's was). " +
-        "Bookmark order is being timed by the storage's clock again from this measurement on.";
-      return next;
+      const conflicts = (cur.conflicts ?? 0) + 1;
+      if (conflicts < CONFLICT_LIMIT) return { ...cur, conflicts };
+      note = "The clock changed under Kesonode (a device or the storage was set, or a cached " +
+        "Date gave a stale reading). Bookmark order is being timed by the storage's clock " +
+        "again from this measurement on.";
+      return reset();
     }
-    return { ...cur, lo: nlo, hi: nhi, samples: cur.samples + 1, measuredAt: receivedAt, rtt: fresh.rtt };
+    return {
+      ...cur, lo: nlo, hi: nhi, samples: cur.samples + 1,
+      measuredAt: receivedAt, rtt: fresh.rtt, conflicts: 0,
+    };
   }).then(() => { if (note) logger.event("Clock", note); }).catch(() => {
     // The measurement is an improvement, never a requirement.
   });

@@ -189,4 +189,19 @@ describe("WebDAV 401: a refused SCHEME is not a wrong password", () => {
 
     expect(state.calls).toBe(2); // MKCOL, then the PROPFIND that asks whether it exists
   });
+
+  it("does not let the clock's connection test answer from the HTTP cache", async () => {
+    // finishSync() pings this endpoint to read the storage's clock from its Date header.
+    // A cached response brings back the Date from when it was FIRST made, minutes ago.
+    const calls: RequestInit[] = [];
+    vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return Promise.resolve({ ok: true, status: 207, headers: new Headers() } as Response);
+    });
+
+    await new WebDAVBackend(config("ben", "pw")).testConnection();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cache).toBe("no-store");
+  });
 });

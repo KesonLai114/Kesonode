@@ -687,10 +687,12 @@ export class WebDAVBackend implements IBackend {
   async testConnection(): Promise<{ ok: boolean; message: string }> {
     try {
       if (!isSecureBackendUrl(this.w.url)) return { ok: false, message: INSECURE_URL_MSG };
+      // This doubles as the clock measurement's ping; a cached Date would be stale.
       const res = await observedFetch(this.w.url, {
         method: "PROPFIND",
         headers: { ...this.headers(), Depth: "0" },
         body: `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`,
+        cache: "no-store",
       });
       if (res.ok || res.status === 207) {
         return { ok: true, message: `Connected to ${new URL(this.w.url).hostname}` };

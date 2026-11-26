@@ -388,8 +388,9 @@ export class GitHubBackend implements IBackend {
     try {
       if (!this.gh.token) return { ok: false, message: "No token. Paste a Personal Access Token or Fine-grained token" };
 
-      // Verify token works
-      const userRes = await observedFetch(`${GITHUB_API}/user`, { headers: this.headers() });
+      // Verify token works. `no-store` matters beyond the obvious: this response is also
+      // the clock measurement's ping, and a cached Date is minutes old.
+      const userRes = await observedFetch(`${GITHUB_API}/user`, { headers: this.headers(), cache: "no-store" });
       if (userRes.status === 429) return { ok: false, message: rateLimitMessage("GitHub") };
       if (!userRes.ok) {
         return {
@@ -403,8 +404,8 @@ export class GitHubBackend implements IBackend {
 
       if (!this.gh.repo) return { ok: true, message: `Signed in as @${user.login}. Set a repository below` };
 
-      // Check repo access
-      const repoRes = await observedFetch(`${GITHUB_API}/repos/${this.repoSlug}`, { headers: this.headers() });
+      // Check repo access (also a clock measurement: never answer from the HTTP cache)
+      const repoRes = await observedFetch(`${GITHUB_API}/repos/${this.repoSlug}`, { headers: this.headers(), cache: "no-store" });
 
       if (repoRes.status === 404) {
         return {

@@ -60,6 +60,8 @@ export interface ServerClockState {
   rtt: number;
   /** A probe concluded this range is as narrow as the connection allows. */
   settled: boolean;
+  /** Consecutive responses that disagreed with the range. Stale cached Dates look just like a clock change. */
+  conflicts: number;
 }
 
 /**

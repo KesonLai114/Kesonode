@@ -141,6 +141,9 @@ describe("reading the storage's clock off a response", () => {
     // into the future as far as the range held is concerned.
     const made = Math.floor((w.t + 4600) / SECOND) * SECOND;
     await noteServerDate(http(made), w.t, w.t + 40);
+    // One disagreement could be a cached Date; three in a row are a real change.
+    await noteServerDate(http(made), w.t + 80, w.t + 120);
+    await noteServerDate(http(made), w.t + 160, w.t + 200);
     const s = await state();
     expect(s.samples).toBe(1);
     expect(events).toHaveBeenCalledTimes(1);
@@ -148,6 +151,42 @@ describe("reading the storage's clock off a response", () => {
     expect(events.mock.calls[0][1]).toMatch(/clock changed under Kesonode/);
     expect(s.lo).toBeLessThanOrEqual(4600);
     expect(s.hi).toBeGreaterThan(4600);
+  });
+
+  it("does not mistake one cached, stale Date for a clock change", async () => {
+    // A cached response carries the Date it was FIRST made with, which can be a minute
+    // old. Its derived offset is nowhere near the range already built from fresh traffic.
+    // One such response must not throw that range away or tell the user the clock moved.
+    const events = vi.spyOn(logger, "event").mockImplementation(() => {});
+    await setServerClockState({
+      ...defaultServerClockState(), samples: 6, lo: -10, hi: 30,
+      since: w.t, measuredAt: w.t, probedAt: w.t, rtt: 40, settled: true,
+    });
+    const stale = Math.floor((w.t - 60_000) / SECOND) * SECOND;
+    await noteServerDate(http(stale), w.t, w.t + 40);
+    expect(events).not.toHaveBeenCalled();
+    const s = await state();
+    expect(s.samples).toBe(6);
+    expect(s.hi - s.lo).toBeLessThan(100);
+    expect(s.settled).toBe(true);
+  });
+
+  it("starts again after THREE consecutive readings that really disagree", async () => {
+    const events = vi.spyOn(logger, "event").mockImplementation(() => {});
+    await setServerClockState({
+      ...defaultServerClockState(), samples: 6, lo: -10, hi: 30,
+      since: w.t, measuredAt: w.t, probedAt: w.t, rtt: 40, settled: true,
+    });
+    const moved = Math.floor((w.t + 4600) / SECOND) * SECOND;
+    await noteServerDate(http(moved), w.t, w.t + 40);
+    await noteServerDate(http(moved), w.t + 80, w.t + 120);
+    expect(events).not.toHaveBeenCalled();
+    await noteServerDate(http(moved), w.t + 160, w.t + 200);
+    expect(events).toHaveBeenCalledTimes(1);
+    expect(events.mock.calls[0][1]).toMatch(/clock changed under Kesonode/);
+    const s = await state();
+    expect(s.samples).toBe(1);
+    expect(s.settled).toBe(false);
   });
 
   it("starts again without a fuss when half a day has passed since the range was begun", async () => {
