@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { SyncEngine } from "@/lib/sync/sync-engine";
+import { forgetSelfWritesForTest } from "@/lib/utils/self-writes";
 import { createSnapshot } from "@/lib/sync/snapshots";
 import { exportBookmarkPayload, importBookmarks, registerBookmarkListeners } from "@/lib/handlers/bookmarks-handler";
 import { sha256 } from "@/lib/crypto/encryption";
@@ -1424,5 +1425,367 @@ describe("edits made while a peer is being merged", () => {
         "the merge's own move was re-recorded as the user's",
       ).toBe(userAt);
     });
+  });
+});
+
+// ─── Z2. Two sides trading one folder's order back and forth ───────────────
+
+/** One sync on each device in turn, as `cycle` does, and then what a real browser does
+ *  on its own: report every move the merge made, which claims the merge's own entries in
+ *  the self-write ledger. The fake reports nothing, so without this the entries would
+ *  sit for their whole TTL and claim the next drag of the same bookmark as an echo. */
+async function synced(...devices: Device[]): Promise<void> {
+  for (const d of devices) {
+    await syncOnce(d);
+    await at(d, async () => { forgetSelfWritesForTest(); });
+  }
+}
+
+/** Put one folder's bookmarks in `urls` order exactly, the way a browser's own sync
+ *  applies a remote arrangement or a person drags: one `chrome.bookmarks.move` per item,
+ *  each reported. */
+async function arrangeIn(parentId: string, urls: string[]): Promise<void> {
+  for (let i = 0; i < urls.length; i++) {
+    const node = (await chrome.bookmarks.getChildren(parentId)).find((c) => c.url === urls[i]);
+    if (!node || (node.index ?? -1) === i) continue;
+    const oldParentId = node.parentId as string;
+    const oldIndex = node.index ?? 0;
+    const moved = await chrome.bookmarks.move(node.id, { parentId: oldParentId, index: i });
+    fire.moved?.(node.id, { parentId: oldParentId, index: moved.index ?? 0, oldParentId, oldIndex });
+    await settle();
+  }
+}
+const arrange = (urls: string[]): Promise<void> => arrangeIn("1", urls);
+/** The same for a folder's subfolders, by title. */
+async function arrangeFolders(parentId: string, titles: string[]): Promise<void> {
+  for (let i = 0; i < titles.length; i++) {
+    const node = (await chrome.bookmarks.getChildren(parentId)).find((c) => !c.url && c.title === titles[i]);
+    if (!node || (node.index ?? -1) === i) continue;
+    const oldParentId = node.parentId as string;
+    const oldIndex = node.index ?? 0;
+    const moved = await chrome.bookmarks.move(node.id, { parentId: oldParentId, index: i });
+    fire.moved?.(node.id, { parentId: oldParentId, index: moved.index ?? 0, oldParentId, oldIndex });
+    await settle();
+  }
+}
+const barOrder = async (): Promise<string[]> =>
+  (await chrome.bookmarks.getChildren("1")).map((c) => c.url as string);
+/** This browser's Activity log, read on the browser that wrote it. */
+async function auditOn(d: Device): Promise<string> {
+  let text = "";
+  await at(d, async () => {
+    await new Promise((r) => setTimeout(r, 0));
+    text = JSON.stringify((await chrome.storage.local.get(KEYS.AUDIT_LOG))[KEYS.AUDIT_LOG] ?? []);
+  });
+  return text;
+}
+
+describe("Z2. two sides trading one folder's order back and forth", () => {
+  const X = sites(0, 6);
+  /** X with the last two dragged to the front: what the person wants. */
+  const Y = [site(5), site(4), ...sites(0, 4)];
+
+  /** One round of the trade: the person arranges Y on B, and A's own bookmark sync puts the
+   *  bar back the way it was. Both browsers are synced in between, as the alarm would. */
+  async function roundOfTrading(A: Device, B: Device): Promise<void> {
+    await at(B, async () => { await arrange(Y); });
+    await synced(B, A);
+    await at(A, async () => { expect(await barOrder()).toEqual(Y); await arrange(X); });
+    await synced(A, B);
+    await at(B, async () => { expect(await barOrder()).toEqual(X); });
+  }
+
+  it("stops trading after two rounds and leaves the other browser at what the person last arranged", async () => {
+    const [A, B] = await seedGroup(6);
+    await roundOfTrading(A, B);
+    // The person gives it another go, and A's bookmark sync undoes that too.
+    await at(B, async () => { await arrange(Y); });
+    await synced(B, A);
+    await at(A, async () => { expect(await barOrder()).toEqual(Y); await arrange(X); });
+
+    await synced(A, B);
+    // THE check. X has now chased Y twice, each time undoing the person's own drag, which
+    // is a fight nobody is having by hand. A must sit this folder out from here on.
+    await at(B, async () => { expect(await barOrder(), "the browser's own order chased the person's drag a third time").toEqual(Y); });
+    expect(await auditOn(A)).toContain("OrderContest");
+
+    for (let i = 0; i < 4; i++) await synced(A, B);
+    await at(B, async () => { expect(await barOrder()).toEqual(Y); });
+
+    // While A sits the bar out it takes no order for it from B, and sends none of its own.
+    await at(B, async () => { await arrange([...sites(1, 6), site(0)]); });
+    await synced(B, A);
+    await at(A, async () => { expect(await barOrder(), "A took an order for the bar while sitting it out").toEqual(X); });
+    // Two bookmarks moved in one breath, which is the browser's sync and not a drag, ten
+    // minutes on: it must not pass for somebody dragging in the folder. The clock stands
+    // still, so the two land on the SAME millisecond: the most programmatic reorder there
+    // is must not read as a single drag for want of a second, different stamp.
+    const frozen = Date.now() + 10 * 60_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(frozen);
+    try {
+      await at(A, async () => { await arrange([site(3), site(2), ...X.filter((u) => u !== site(3) && u !== site(2))]); });
+      await synced(A, B);
+    } finally {
+      clock.mockRestore();
+    }
+    await at(B, async () => {
+      expect(await barOrder(), "A sent an order for the bar while sitting it out").toEqual([...sites(1, 6), site(0)]);
+    });
+  });
+
+  it("carries this folder's order again once a person drags in it here", async () => {
+    const [A, B] = await seedGroup(6);
+    await roundOfTrading(A, B);
+    await at(B, async () => { await arrange(Y); });
+    await synced(B, A);
+    await at(A, async () => { await arrange(X); });
+    await synced(A, B);
+    await at(B, async () => { expect(await barOrder()).toEqual(Y); });
+
+    // Ten minutes go by, as they would between a browser's sync undoing a drag and the
+    // person noticing. Without that, the drag is two placements after the sync's own in
+    // the same breath, which is exactly what a drag never is.
+    const realNow = Date.now.bind(Date);
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => realNow() + 10 * 60_000);
+    try {
+      // A person drags one bookmark in that folder on A. That is an order somebody wants
+      // carried, so Kesonode takes the folder back up on A.
+      await at(A, async () => { await arrange([site(2), ...X.filter((u) => u !== site(2))]); });
+      await synced(A, B);
+    } finally {
+      clock.mockRestore();
+    }
+    await at(B, async () => { expect((await barOrder())[0]).toBe(site(2)); });
+
+    // And A takes an order from B again, where it had been sitting the folder out.
+    await at(B, async () => {
+      await arrange([site(1), ...Y.filter((u) => u !== site(1))]);
+    });
+    await synced(B, A);
+    await at(A, async () => { expect((await barOrder())[0]).toBe(site(1)); });
+  });
+
+  it("does the same when it is the order of FOLDERS on the bar that is being traded", async () => {
+    const A = newDevice("A", 1000);
+    const B = newDevice("B", 2000);
+    const FX = Array.from({ length: 6 }, (_, i) => `F${i}`);
+    /** FX with the last two dragged to the front. */
+    const FY = ["F5", "F4", ...FX.slice(0, 4)];
+    const folderOrder = async (): Promise<string[]> =>
+      (await chrome.bookmarks.getChildren("1")).filter((c) => !c.url).map((c) => c.title);
+    await at(A, async () => {
+      for (let i = 0; i < 6; i++) await add(`B${i}`, site(i), await addFolder(`F${i}`));
+    });
+    await synced(A, B);
+    await at(B, async () => { expect(await folderOrder()).toEqual(FX); });
+
+    await at(B, async () => { await arrangeFolders("1", FY); });
+    await synced(B, A);
+    await at(A, async () => { expect(await folderOrder()).toEqual(FY); await arrangeFolders("1", FX); });
+    await synced(A, B);
+    await at(B, async () => { expect(await folderOrder()).toEqual(FX); });
+    // Round two.
+    await at(B, async () => { await arrangeFolders("1", FY); });
+    await synced(B, A);
+    await at(A, async () => { expect(await folderOrder()).toEqual(FY); await arrangeFolders("1", FX); });
+
+    await synced(A, B);
+    await at(B, async () => {
+      expect(await folderOrder(), "the browser's own folder order chased the person's drag a third time").toEqual(FY);
+    });
+    expect(await auditOn(A)).toContain("OrderContest");
+
+    // A takes no folder order for the bar from B while it sits it out.
+    const FW = ["F1", ...FX.filter((t) => t !== "F1")];
+    await at(B, async () => { await arrangeFolders("1", FW); });
+    await synced(B, A);
+    await at(A, async () => {
+      expect(await folderOrder(), "A took a folder order for the bar while sitting it out").toEqual(FX);
+    });
+    // And sends none of its own: two folders moved in one breath, on a still clock, ten
+    // minutes on.
+    const frozen = Date.now() + 10 * 60_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(frozen);
+    try {
+      await at(A, async () => { await arrangeFolders("1", ["F3", "F2", ...FX.slice(0, 4).filter((t) => t !== "F3" && t !== "F2")]); });
+      await synced(A, B);
+    } finally {
+      clock.mockRestore();
+    }
+    await at(B, async () => {
+      expect(await folderOrder(), "A sent a folder order for the bar while sitting it out").toEqual(FW);
+    });
+  });
+
+  it("is not called when a second round comes long after the first", async () => {
+    // The same trade as above, but a week lies between the two rounds: whatever the
+    // browser's sync did on Monday is not evidence about what the person did on Tuesday.
+    const [A, B] = await seedGroup(6);
+    await roundOfTrading(A, B);
+    const realNow = Date.now.bind(Date);
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => realNow() + 7 * 24 * 60 * 60_000);
+    try {
+      await at(B, async () => { await arrange(Y); });
+      await synced(B, A);
+      await at(A, async () => { expect(await barOrder()).toEqual(Y); await arrange(X); });
+      await synced(A, B);
+    } finally {
+      clock.mockRestore();
+    }
+    // One round of trading is not a fight either way: the other browser shows what the
+    // browser's sync last put, and nothing has been declared.
+    await at(B, async () => { expect(await barOrder()).toEqual(X); });
+    expect(await auditOn(A)).not.toContain("OrderContest");
+  });
+  it("is not called on two arrangements each made twice, one side and then the other", async () => {
+    // The same two arrangements, each put back once, which IS the fight's shape. But nobody
+    // undid anybody: this browser's person changed the order twice, and the other
+    // browser's person then chose the same two, in the same order. Two people taking turns.
+    const [A, B] = await seedGroup(6);
+    const P = [site(1), ...X.filter((u) => u !== site(1))];
+    const Q = [site(2), site(1), ...X.filter((u) => u !== site(1) && u !== site(2))];
+    await at(A, async () => { await arrange(P); });
+    await synced(A, B);
+    await at(A, async () => { await arrange(Q); });
+    await synced(A, B);
+    await at(B, async () => { expect(await barOrder()).toEqual(Q); await arrange(P); });
+    await synced(B, A);
+    await at(B, async () => { await arrange(Q); });
+    await synced(B, A);
+    await at(A, async () => { expect(await barOrder()).toEqual(Q); });
+    expect(await auditOn(A)).not.toContain("OrderContest");
+  });
+
+  it("is not called on one drag the person makes and nobody undoes", async () => {
+    const [A, B] = await seedGroup(6);
+    await roundOfTrading(A, B);
+    // One undo by A's sync, then quiet: nothing is being traded.
+    for (let i = 0; i < 3; i++) await synced(A, B);
+    expect(await auditOn(A)).not.toContain("OrderContest");
+    // An order from B still lands on A.
+    await at(B, async () => { await arrange([site(3), ...X.filter((u) => u !== site(3))]); });
+    await synced(B, A);
+    await at(A, async () => { expect((await barOrder())[0]).toBe(site(3)); });
+  });
+
+  it("keeps carrying a folder nobody is fighting over, next to one that is", async () => {
+    const [A, B] = await seedGroup(6);
+    await roundOfTrading(A, B);
+    await at(B, async () => { await arrange(Y); });
+    await synced(B, A);
+    await at(A, async () => { await arrange(X); });
+    await synced(A, B); // the bar is now contested on A
+    // A folder below the bar, reordered on B after all that.
+    await at(A, async () => {
+      const id = await addFolder("News");
+      for (let i = 6; i < 9; i++) await add(`N${i}`, site(i), id);
+    });
+    await synced(A, B);
+    await at(B, async () => {
+      const news = (await folderFor("News")).id;
+      await arrangeIn(news, [site(8), site(6), site(7)]);
+    });
+    await synced(B, A);
+    await at(A, async () => {
+      const news = (await folderFor("News")).id;
+      expect((await chrome.bookmarks.getChildren(news)).map((c) => c.url)).toEqual([site(8), site(6), site(7)]);
+    });
+  });
+});
+
+// ─── Z3. Whose drag was later is the storage's question, not the clock's ────
+
+describe("Z3. whose drag was later is the storage's question, not the device clock's", () => {
+  const realNow = Date.now.bind(Date);
+  let skew = 0;
+  /** Run `fn` on `d` while ITS clock runs `clockSkew` off the real one. */
+  async function on<T>(d: Device, clockSkew: number, fn: () => Promise<T>): Promise<T> {
+    skew = clockSkew;
+    try { return await at(d, fn); } finally { skew = 0; }
+  }
+  const barOrder = async (): Promise<string[]> =>
+    (await chrome.bookmarks.getChildren("1")).map((c) => c.url as string);
+  async function drag(url: string, index: number): Promise<void> {
+    const node = await nodeFor(url);
+    const oldParentId = node.parentId as string;
+    const oldIndex = node.index ?? 0;
+    const moved = await chrome.bookmarks.move(node.id, { parentId: oldParentId, index });
+    fire.moved?.(node.id, { parentId: oldParentId, index: moved.index ?? 0, oldParentId, oldIndex });
+    await settle();
+  }
+  /** What the time service would have measured on this browser: its clock is `offset`
+   *  behind the storage's, to within a millisecond. */
+  async function measured(offset: number): Promise<void> {
+    await chrome.storage.local.set({
+      konode_server_clock: {
+        lo: offset, hi: offset, samples: 2, since: 1, measuredAt: 1, probedAt: 0, rtt: 20, settled: true,
+      },
+    });
+  }
+  async function syncClocked(d: Device, clockSkew: number): Promise<void> {
+    await on(d, clockSkew, async () => {
+      const p = priv(d.engine);
+      p.bulkBlockedThisSync = null;
+      p.bulkApprovedThisSync = await getBulkDeleteApproval();
+      if (p.bulkApprovedThisSync > 0) await setBulkDeleteApproval(0);
+      await p.syncType("bookmarks", folder, DEFAULT_STATE);
+      await p.recordBlockedDeletion(p.bulkBlockedThisSync, true);
+      forgetSelfWritesForTest();
+    });
+  }
+
+  it("a browser whose clock runs five minutes fast does not win a drag another browser made after it", async () => {
+    const spy = vi.spyOn(Date, "now").mockImplementation(() => realNow() + skew);
+    try {
+      const [A, B] = await seedGroup(4);
+      const fast = 5 * 60_000;
+      // A drags first, on a clock five minutes fast. B drags the SAME bookmark a moment
+      // later, before either has synced: nobody's record has reached the other, so the
+      // only thing that can say whose drag was later is the time on the two records.
+      await on(A, fast, async () => {
+        await measured(-fast);
+        await drag(site(0), 3);
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      await on(B, 0, async () => {
+        await measured(0);
+        await drag(site(0), 0);
+      });
+
+      await syncClocked(A, fast);
+      await syncClocked(B, 0);
+      await syncClocked(A, fast);
+      const want = [site(0), site(1), site(2), site(3)];
+      await on(B, 0, async () => { expect(await barOrder()).toEqual(want); });
+      await on(A, fast, async () => {
+        expect(await barOrder(), "A's fast clock made its earlier drag read as the later one").toEqual(want);
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a browser with no measurement yet still records a drag that is newer than its own last one", async () => {
+    const spy = vi.spyOn(Date, "now").mockImplementation(() => realNow() + skew);
+    try {
+      const [A, B] = await seedGroup(4);
+      const fast = 5 * 60_000;
+      // A drag recorded while A's clock was believed: stamped five minutes ahead of the truth.
+      await on(A, fast, async () => { await drag(site(0), 3); });
+      await syncClocked(A, fast);
+      await syncClocked(B, 0);
+      // The measurement lands, and A drags the same bookmark again right after.
+      await on(A, fast, async () => {
+        await measured(-fast);
+        await drag(site(0), 0);
+      });
+      await syncClocked(A, fast);
+      await syncClocked(B, 0);
+      await on(B, 0, async () => {
+        expect(await barOrder()).toEqual([site(0), site(1), site(2), site(3)]);
+      });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

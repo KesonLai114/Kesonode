@@ -12,6 +12,27 @@ All notable changes to Konode. Format loosely follows
 
 ### Fixed
 
+- **Two bookmark orders no longer trade a folder back and forth forever.** When the
+  browser's own bookmark sync kept restoring an arrangement that a person had just changed,
+  Kesonode's order records and the browser's order fought over the same folder on every
+  cycle. Each device now fingerprints the arrangement of every folder, watches the last
+  half hour of transitions, and steps out of a folder after two rounds of alternating
+  changes between the same two arrangements. It neither publishes nor applies placement
+  records for that folder (cross-folder moves still work), for 12 hours, doubling on every
+  further fight up to seven days. A genuine manual drag in that folder takes the folder
+  back immediately; a programmatic reorder of two or more items in the same few
+  milliseconds does not. The other browsers keep the order the person last arranged there.
+- **Placement records are now timed by the storage's clock, not by each device's.** Two
+  browsers whose clocks differed by minutes could decide "whose drag was later" wrongly:
+  a fast device won over a later drag made on a slow one. Every backend response is read
+  for its HTTP `Date` header; intersecting those samples brackets the offset between the
+  local and storage clocks. One cheap request per sync tops the measurement up, with one
+  burst of fourteen requests spread over a second when the range is still wide (at most
+  every ten minutes), and a new record is never stamped earlier than this device's previous
+  record for the same item. A storage with no `Date`, a failed request, or a clock that
+  changes is handled without breaking sync. The system clock is never changed, and
+  deletions, renames and `dateAdded` keep their existing device-clock timestamps.
+
 - **A reordered folder now lands in the source's order on a browser that had already
   drifted.** Two faults, both reproduced with failing tests before the fix. (1) A burst only
   reports the items whose index changed, so the settled release carried records for SOME of a

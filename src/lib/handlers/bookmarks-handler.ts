@@ -2,6 +2,7 @@ import type {
   SyncBookmark, Tombstone, MoveRecord, FolderMoveRecord, TitleRecord, FolderRenameRecord,
   FolderDeleteRecord, AppearedRecord, KeptShellRecord, CreatedRecord, BookmarkPayload, ConflictStrategy,
   BookmarkExclusion, BlockedBookmark, BookmarkOrderMode, MoveStormSpan, MoveStormState,
+  OrderContestParent, OrderContestState, OrderTransition,
 } from "@/lib/types";
 import { logger } from "@/lib/utils/logger";
 import {
@@ -15,7 +16,9 @@ import {
   getAppeared, updateAppeared, getKeptShells, updateKeptShells,
   getCreated, updateCreated, getPeerRemovals, updatePeerRemovals, getBookmarkExclusions, getBookmarkOrderMode,
   defaultMoveStormState, updateMoveStormState, setMoveStormState,
+  getOrderContestState, updateOrderContestState,
 } from "@/lib/utils/storage";
+import { serverNow } from "@/lib/utils/server-clock";
 import {
   asRootKind, defaultOtherRootId, findLocalRootByKind, matchLocalRoot, matchLocalRootEx,
   rootKindOf,
@@ -221,8 +224,12 @@ function advanceMoveStormState(
  * Called once per recorded placement. Emits ONE audited event when a burst crosses
  * the threshold, then keeps extending that burst's span until the quiet gap ends it.
  */
-export async function noteRecordedMove(context: "url" | "folder"): Promise<void> {
-  const now = Date.now();
+export async function noteRecordedMove(
+  context: "url" | "folder", at?: number,
+): Promise<void> {
+  // The span is placed exactly where the placement's own stamp is, on the same clock (see
+  // recordMove), so the two can never disagree about what the span covers.
+  const now = at ?? (await serverNow());
   let justFlagged = false;
   const next = await updateMoveStormState((current) => {
     const advanced = advanceMoveStormState(current, now);
@@ -251,6 +258,248 @@ export async function resetMoveStormForTest(): Promise<void> {
 /** Test seam: simulate an MV3 worker restart — memory gone, storage intact. */
 export function forgetMoveStormCacheForTest(): void {
   moveStormState = defaultMoveStormState();
+}
+
+// ── Order contest: two sides undoing each other's order in one folder ──────
+// The placement log answers "whose drag was later", one bookmark at a time. It cannot
+// answer "is anybody dragging at all". A browser's own bookmark sync that puts a folder
+// back the way it was looks, from the log, like a person on this device who prefers the
+// old order; the other device's person arranges it again; and the two trade the folder
+// every sync, each side's records stamped later than the last. Nothing in the merge can
+// tell that loop from two people taking turns, and neither device gives up.
+//
+// So each device watches each folder's ARRANGEMENT: the order of the same set of
+// bookmarks, as one number. A change made here is "local"; one the merge applied from a
+// peer's records is "peer". Four changes in half an hour that alternate — the same two
+// arrangements, each put back by the other side — is not two people. This device then
+// leaves that folder's order alone for a while: it neither sends its own placement
+// records for the folder nor applies a peer's. The trading stops within a cycle, because
+// a side that sends nothing gives the other side nothing to undo.
+//
+// The pause is per folder and per device, and it ends early the moment somebody drags a
+// bookmark in that folder HERE: that is an order somebody wants carried. It doubles each
+// time the fight comes back, so a browser sync that never gives up costs four changes
+// every 12 hours, then every day, then at most every week.
+const ORDER_CONTEST_WINDOW_MS = 30 * 60_000;
+const ORDER_CONTEST_PAUSE_MS = 12 * 60 * 60_000;
+const ORDER_CONTEST_PAUSE_MAX_MS = 7 * 24 * 60 * 60_000;
+/** Longer than this with nothing happening in a folder, and its past fights are forgotten. */
+const ORDER_CONTEST_FORGIVE_MS = 24 * 60 * 60_000;
+const MAX_ORDER_HISTORY = 8;
+/**
+ * Two placements in one folder this close together were not made by hand. A drag, a look
+ * at where it landed, another drag: never under half a second. A browser's own sync
+ * reports a reorder, however small, in one run of back-to-back events. Only the
+ * twenty-fifth move of a burst makes it a move STORM (see MOVE_STORM_MIN); the pace of
+ * the two newest is what lets a folder this device has stepped out of tell a drag from
+ * the browser carrying on.
+ */
+const PERSON_DRAG_GAP_MS = 400;
+
+/** One folder's arrangement: `o` changes with a reorder, `m` only when bookmarks come or go. */
+interface SiblingScan { o: number; m: number }
+
+function hash32(text: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return h >>> 0;
+}
+
+/** A bookmark by its url, a folder by its title. Only ever compared with itself, on this device. */
+function orderItemKey(node: { url?: string; title: string }): string {
+  return node.url ? `u:${canonicalUrlKey(node.url)}` : `f:${node.title}`;
+}
+
+/** Every folder with two or more children, by path key, with the arrangement it holds. */
+function scanSiblingOrder(tree: SyncBookmark[]): Map<string, SiblingScan> {
+  const out = new Map<string, SiblingScan>();
+  const roots = tree[0]?.children ?? tree;
+  const visit = (node: SyncBookmark, path: string[]): void => {
+    const children = node.children ?? [];
+    if (children.length > 1) {
+      // Order: a running hash down the list. Membership: the same hashes added up, which
+      // comes out the same whichever way round they are.
+      let o = 0x811c9dc5;
+      let m = 0;
+      for (const c of children) {
+        const k = hash32(orderItemKey(c));
+        o = Math.imul(o ^ k, 0x01000193) >>> 0;
+        m = (m + k) >>> 0;
+      }
+      out.set(folderPathKey(path), { o, m });
+    }
+    for (const c of children) if (!c.url) visit(c, [...path, c.title]);
+  };
+  for (const root of roots) {
+    const kind = asRootKind(root.rootKind);
+    if (kind) visit(root, [kind]);
+  }
+  return out;
+}
+
+/**
+ * Whether the two newest placements recorded in `parent` arrived closer together than
+ * any two drags: then the latest of them was nobody's drag.
+ */
+function latestPlacementIsBurst(
+  parent: ReleaseParent, moveAt: Map<string, number>, folderAt: Map<string, number>,
+): boolean {
+  const stamps: number[] = [];
+  for (const c of parent.children) {
+    const at = c.url ? moveAt.get(canonicalUrlKey(c.url)) : folderAt.get(folderPathKey([...parent.path, c.title]));
+    if (at !== undefined) stamps.push(at);
+  }
+  // Two DIFFERENT bookmarks, one stamp each (the maps hold each one's newest). The same
+  // millisecond on both is the most programmatic reorder there is, not a lack of evidence:
+  // treating equal stamps as one record read a same-millisecond burst as a drag, and let
+  // the browser's own sync take a paused folder back (seen once in twelve runs).
+  return stamps.length >= 2 && stamps[0] - stamps[1] < PERSON_DRAG_GAP_MS;
+}
+
+/** Every folder that holds something, in tree order. */
+function eachParent(tree: SyncBookmark[]): ReleaseParent[] {
+  const out: ReleaseParent[] = [];
+  const roots = tree[0]?.children ?? tree;
+  const visit = (node: SyncBookmark, path: string[]): void => {
+    const children = node.children ?? [];
+    if (children.length) out.push({ path, children });
+    for (const c of children) if (!c.url) visit(c, [...path, c.title]);
+  };
+  for (const root of roots) {
+    const kind = asRootKind(root.rootKind);
+    if (kind) visit(root, [kind]);
+  }
+  return out;
+}
+
+/** A folder's record, kept while it still says something: a fight in progress, or one
+ *  recent enough that the next should start with a longer pause. */
+function carryFight(
+  fight: OrderContestParent | undefined, now: number,
+): OrderContestParent | undefined {
+  if (!fight) return undefined;
+  if (!fight.history.length) return now - fight.until < ORDER_CONTEST_FORGIVE_MS ? fight : undefined;
+  const history = fight.history.filter((t) => now - t.at <= ORDER_CONTEST_WINDOW_MS);
+  return history.length || now - fight.until < ORDER_CONTEST_FORGIVE_MS ? { ...fight, history } : undefined;
+}
+
+function folderLabel(pathKey: string): string {
+  const parts = pathKey.split("\u0000");
+  const last = parts[parts.length - 1];
+  const roots: Record<string, string> = {
+    bar: "the bookmarks bar", menu: "the bookmarks menu", other: "Other bookmarks",
+    mobile: "Mobile bookmarks", managed: "the managed bookmarks",
+  };
+  return parts.length === 1 ? (roots[last] ?? `“${last}”`) : `“${last}”`;
+}
+
+function describeDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.round(hours / 24)} days`;
+}
+
+/**
+ * Account for every folder's arrangement against the last one this device saw, and
+ * conclude what the changes say. Returns the folders this device is to leave alone.
+ *
+ * On export (`merge` omitted) a reorder is something this device did. After a merge
+ * (`merge` is the scan taken just before it) a reorder the merge itself made is the
+ * peer's, and one that was already there is left for the next export to attribute. After
+ * a replace (`merge` is null) the whole tree is new and nothing is concluded.
+ */
+async function trackOrderTransitions(
+  scan: Map<string, SiblingScan>,
+  opts: { burst?: Set<string>; merge?: Map<string, SiblingScan> | null; now: number },
+): Promise<Set<string>> {
+  const declared: Array<{ key: string; minutes: number; pause: number }> = [];
+  const resumed: string[] = [];
+  await updateOrderContestState((current) => {
+    const known: OrderContestState["known"] = {};
+    const parents: Record<string, OrderContestParent> = {};
+    for (const [key, seen] of scan) {
+      const before = current.known[key];
+      const fight = current.parents[key];
+      if (opts.merge === null || !before || before.o === seen.o || before.m !== seen.m) {
+        // Nothing concluded. What the folder holds now is what this device last saw.
+        known[key] = seen;
+        const kept = carryFight(fight, opts.now);
+        if (kept) parents[key] = kept;
+        continue;
+      }
+      let origin: OrderTransition["origin"];
+      if (opts.merge === undefined) origin = "local";
+      else {
+        const was = opts.merge.get(key);
+        if (!was || was.o === seen.o || was.m !== seen.m) {
+          // The merge left this one as it found it: not its doing.
+          known[key] = before;
+          const kept = carryFight(fight, opts.now);
+          if (kept) parents[key] = kept;
+          continue;
+        }
+        origin = "peer";
+      }
+      if (fight && fight.until > opts.now) {
+        // This device is out of this folder. A burst is the browser carrying on; a drag is
+        // somebody asking for the folder's order to be carried again.
+        if (origin === "local" && !opts.burst?.has(key)) {
+          resumed.push(key);
+        } else {
+          parents[key] = fight;
+        }
+        known[key] = seen;
+        continue;
+      }
+      const history = [
+        ...(carryFight(fight, opts.now)?.history ?? []), { fp: seen.o, origin, at: opts.now },
+      ].slice(-MAX_ORDER_HISTORY);
+      const last = history.slice(-4);
+      const trading = last.length === 4
+        && last[0].fp === last[2].fp && last[1].fp === last[3].fp && last[0].fp !== last[1].fp
+        && last[0].origin !== last[1].origin && last[1].origin !== last[2].origin
+        && last[2].origin !== last[3].origin;
+      const rounds = fight && opts.now - fight.until < ORDER_CONTEST_FORGIVE_MS ? fight.rounds : 0;
+      if (trading) {
+        const pause = Math.min(ORDER_CONTEST_PAUSE_MS * 2 ** (rounds), ORDER_CONTEST_PAUSE_MAX_MS);
+        parents[key] = { history: [], rounds: rounds + 1, until: opts.now + pause };
+        declared.push({ key, minutes: Math.max(1, Math.round((opts.now - last[0].at) / 60_000)), pause });
+      } else if (history.length) {
+        parents[key] = { history, rounds, until: fight?.until ?? 0 };
+      } else if (fight) {
+        parents[key] = fight;
+      }
+      known[key] = seen;
+    }
+    return { known, parents };
+  });
+  for (const { key, minutes, pause } of declared) {
+    logger.warn(
+      "OrderContest",
+      `The order of ${folderLabel(key)} has gone back and forth four times in ${minutes} min: ` +
+      "something here (a drag, or the browser's own bookmark sync) undoes what another device sends, " +
+      "and the other devices undo it back. Kesonode is leaving this folder's order alone on this " +
+      `device for ${describeDuration(pause)}, so the trading stops. The other browsers keep the order ` +
+      "they last showed. To carry this folder's order again sooner, drag one bookmark in it here. " +
+      "To end it for good, turn the browser's own bookmark sync off.",
+    );
+  }
+  for (const key of resumed) {
+    logger.event(
+      "OrderContest",
+      `A bookmark was moved in ${folderLabel(key)} on this device, so Kesonode carries this folder's order again.`,
+    );
+  }
+  const after = await getOrderContestState();
+  return new Set(Object.entries(after.parents).filter(([, p]) => p.until > opts.now).map(([key]) => key));
+}
+
+/** The folders this device is leaving alone right now, by path key. */
+async function pausedOrderParents(now: number): Promise<Set<string>> {
+  const state = await getOrderContestState();
+  return new Set(Object.entries(state.parents).filter(([, p]) => p.until > now).map(([key]) => key));
 }
 
 export function toDeletedMap(list: Tombstone[]): Map<string, number> {
@@ -741,9 +990,18 @@ async function recordMove(id: string): Promise<void> {
     return;
   }
   if (!urls.length) return;
-  const now = Date.now();
-  await updateMoves((current) => mergeMoveLists(current, urls.map((url) => ({ url, at: now }))));
-  await noteRecordedMove("url");
+  // On the STORAGE's clock, the one every device can agree on (see server-clock.ts). And
+  // never earlier than what this device already holds for the same bookmark: the log
+  // keeps the newer of two records, so a stamp that went backwards — right after a first
+  // measurement shows the local clock was minutes off — would drop this move as stale.
+  const now = await serverNow();
+  let at = now;
+  await updateMoves((current) => {
+    const held = new Set(urls);
+    at = Math.max(now, Math.max(0, ...current.filter((r) => held.has(r.url)).map((r) => r.at + 1)));
+    return mergeMoveLists(current, urls.map((url) => ({ url, at })));
+  });
+  await noteRecordedMove("url", at);
   logger.info("Moves", `Recorded ${urls.length} move(s)`);
 }
 
@@ -867,16 +1125,22 @@ async function recordFolderMove(id: string, moveInfo: chrome.bookmarks.BookmarkM
     if (gi >= 0 && gi < siblings.length - 1) next = siblingKey(siblings[gi + 1]);
   } catch { /* best effort — fall back to index on the receiver */ }
   const holds = await twinMark(id, node.title, moveInfo.parentId);
-  const now = Date.now();
-  const record: FolderMoveRecord = {
+  // The storage's clock, and never earlier than this folder's own last record (see recordMove).
+  const now = await serverNow();
+  let record: FolderMoveRecord = {
     path, index: moveInfo.index, at: now, prev, next, ...(holds ? { holds } : {}),
   };
-  await updateFolderMoves((current) => mergeFolderMoveLists(current, [record]));
+  await updateFolderMoves((current) => {
+    const mine = current.filter((r) => folderPathKey(r.path) === folderPathKey(path));
+    const at = Math.max(now, Math.max(0, ...mine.map((r) => r.at + 1)));
+    record = { ...record, at };
+    return mergeFolderMoveLists(current, [record]);
+  });
   // The tree already holds this placement. The SOURCE must confirm it too: otherwise
   // the same record coming back from a peer with an equal `at` is re-checked here
   // (verified is missing), and an unrelated later change can be undone by our own intent.
   await confirmFolderMoves([record]);
-  await noteRecordedMove("folder");
+  await noteRecordedMove("folder", record.at);
   logger.info("Moves", "Recorded a folder reposition");
 }
 
@@ -993,29 +1257,34 @@ async function releaseSettledMoveStorm(
   folderMoves: FolderMoveRecord[],
   orderMode: BookmarkOrderMode,
   tree: SyncBookmark[],
-): Promise<{ moves: MoveRecord[]; folderMoves: FolderMoveRecord[]; state: MoveStormState }> {
+): Promise<{
+  moves: MoveRecord[]; folderMoves: FolderMoveRecord[]; state: MoveStormState;
+  /** The folders (path keys) whose burst this call published. */
+  burstParents: string[];
+}> {
   const flagged = state.spans.some((s) => s.flagged);
-  if (!flagged) return { moves, folderMoves, state };
+  if (!flagged) return { moves, folderMoves, state, burstParents: [] };
   const suppressed = (r: { at: number }): boolean => isMoveSuppressed(r.at, state);
   if (orderMode === "browser") {
     // Order belongs to the browser here. Drop the windows so a later switch back to
     // lww cannot re-stamp a hours-old burst as if it were a fresh user intent.
     const next = await updateMoveStormState((current) => ({ ...current, spans: [] }));
     moveStormState = next;
-    return { moves, folderMoves, state: next };
+    return { moves, folderMoves, state: next, burstParents: [] };
   }
-  if (state.lastRecordedMoveAt === 0 || Date.now() - state.lastRecordedMoveAt < MOVE_STORM_SETTLE_MS) {
-    return { moves, folderMoves, state };
+  // Quiet for long enough, on the storage's clock the burst itself was recorded on.
+  const now = await serverNow();
+  if (state.lastRecordedMoveAt === 0 || now - state.lastRecordedMoveAt < MOVE_STORM_SETTLE_MS) {
+    return { moves, folderMoves, state, burstParents: [] };
   }
   const heldMoves = moves.filter(suppressed);
   const heldFolders = folderMoves.filter(suppressed);
   if (!heldMoves.length && !heldFolders.length) {
     const next = await updateMoveStormState((current) => ({ ...current, spans: [] }));
     moveStormState = next;
-    return { moves, folderMoves, state: next };
+    return { moves, folderMoves, state: next, burstParents: [] };
   }
 
-  const now = Date.now();
   const heldUrls = new Set(heldMoves.map((r) => canonicalUrlKey(r.url)));
   const heldFolderPaths = new Set(heldFolders.map((r) => folderPathKey(r.path)));
   // When the earliest flagged span of this episode opened. A record stamped at or after
@@ -1102,7 +1371,10 @@ async function releaseSettledMoveStorm(
       `${deferred} record(s) deferred to the next sync to stay inside one release's budget.`,
     );
   }
-  return { moves: updatedMoves, folderMoves: updatedFolderMoves, state: next };
+  return {
+    moves: updatedMoves, folderMoves: updatedFolderMoves, state: next,
+    burstParents: touched.map((parent) => folderPathKey(parent.path)),
+  };
 }
 
 interface ExportBookmarkOptions {
@@ -1142,17 +1414,55 @@ export async function exportBookmarkPayload(options: ExportBookmarkOptions = {})
   moveStormState = stormState;
   const settled = options.forSync
     ? await releaseSettledMoveStorm(stormState, gcedMoves, gcedFolderMoves, storedOrderMode, tree)
-    : { moves: gcedMoves, folderMoves: gcedFolderMoves, state: stormState };
+    : { moves: gcedMoves, folderMoves: gcedFolderMoves, state: stormState, burstParents: [] as string[] };
+  // Whether two sides are trading a folder's order, and which folders this device has
+  // stepped out of. Only a cycle that really uploads may conclude anything (see above).
+  const now = await serverNow();
+  const paused = new Set<string>();
+  const parents = eachParent(tree);
+  if (options.forSync && storedOrderMode === "lww") {
+    // Which folders's latest reorder was nobody's drag. A burst this call has just
+    // published; one still held (the folder holds a placement record inside a flagged
+    // span); or, in a folder this device had already stepped out of, any run of placements
+    // too tightly packed to be drags (see PERSON_DRAG_GAP_MS).
+    const moveAt = new Map<string, number>();
+    for (const r of settled.moves) moveAt.set(canonicalUrlKey(r.url), Math.max(moveAt.get(canonicalUrlKey(r.url)) ?? 0, r.at));
+    const folderAt = new Map<string, number>();
+    for (const r of settled.folderMoves) {
+      const k = folderPathKey(r.path);
+      folderAt.set(k, Math.max(folderAt.get(k) ?? 0, r.at));
+    }
+    const heldUrls = new Set(settled.moves.filter((r) => isMoveSuppressed(r.at, settled.state)).map((r) => canonicalUrlKey(r.url)));
+    const heldPaths = new Set(settled.folderMoves.filter((r) => isMoveSuppressed(r.at, settled.state)).map((r) => folderPathKey(r.path)));
+    const held = new Set(parentsHolding(tree, heldUrls, heldPaths).map((parent) => folderPathKey(parent.path)));
+    const wasPaused = await pausedOrderParents(now);
+    const burst = new Set<string>(settled.burstParents);
+    for (const parent of parents) {
+      const key = folderPathKey(parent.path);
+      if (held.has(key) || (wasPaused.has(key) && latestPlacementIsBurst(parent, moveAt, folderAt))) {
+        burst.add(key);
+      }
+    }
+    for (const key of await trackOrderTransitions(scanSiblingOrder(tree), { burst, now })) paused.add(key);
+  }
+  // The bookmarks that sit in a folder this device has stepped out of, straight off the tree.
+  const pausedUrls = new Set<string>();
+  for (const parent of parents) {
+    if (!paused.has(folderPathKey(parent.path))) continue;
+    for (const c of parent.children) if (c.url) pausedUrls.add(canonicalUrlKey(c.url));
+  }
   // "browser": hand order to the browser's own sync — send neither our moves nor a
   // local stamp that would later masquerade as the newest intent. Contents still flow.
   const publishMoves = storedOrderMode === "browser"
     ? []
-    : settled.moves.filter((r) => !isMoveSuppressed(r.at, settled.state));
+    : settled.moves.filter((r) => !isMoveSuppressed(r.at, settled.state) && !pausedUrls.has(canonicalUrlKey(r.url)));
   const publishFolderMoves = storedOrderMode === "browser"
     ? []
-    : settled.folderMoves.filter((r) => !isMoveSuppressed(r.at, settled.state));
-  const withheldMoves = settled.moves.length - publishMoves.length +
-    (settled.folderMoves.length - publishFolderMoves.length);
+    : settled.folderMoves.filter((r) =>
+      !isMoveSuppressed(r.at, settled.state) && !paused.has(folderPathKey(r.path.slice(0, -1))));
+  const withheldMoves = (storedOrderMode === "browser" ? 0
+    : settled.moves.filter((r) => isMoveSuppressed(r.at, settled.state)).length +
+      settled.folderMoves.filter((r) => isMoveSuppressed(r.at, settled.state)).length);
   const stormActive = settled.state.spans.some((s) => s.flagged);
   if (withheldMoves > 0 && storedOrderMode !== "browser" && stormActive) {
     logger.event("MoveWithheld", `Withheld ${withheldMoves} placement record(s) from this sync ` +
@@ -1486,6 +1796,20 @@ export async function importBookmarks(
     remoteFolderRenames = remoteFolderRenames.filter((r) => !out([...r.path, r.from]) && !out([...r.path, r.to]));
     remoteFolderDeletes = remoteFolderDeletes.filter((r) => !out(r.path));
   }
+  // A folder this device has stepped out of, because two sides kept undoing each other's
+  // order there (see "Order contest" above). A peer's reposition of the folders in it is
+  // neither applied nor folded in, so it is still waiting when the pause ends.
+  const watching = strategy === "merge" && orderMode === "lww" && conflictStrategy === "lww";
+  const now = await serverNow();
+  const paused = watching ? await pausedOrderParents(now) : new Set<string>();
+  if (paused.size) {
+    remoteFolderMoves = remoteFolderMoves.filter((r) => !paused.has(folderPathKey(r.path.slice(0, -1))));
+  }
+  // What each folder held before anything moved, so a reorder the merge itself makes can
+  // be told from one that was already there when it started.
+  const before = watching && (remoteMoves.length || remoteFolderMoves.length)
+    ? scanSiblingOrder(await exportBookmarks())
+    : undefined;
   activeImports++;
   try {
     // Capture our own deletions/moves before folding in the peer's, so the merge
@@ -1537,9 +1861,12 @@ export async function importBookmarks(
       );
       await updateFolderMoves((current) => mergeFolderMoveLists(current, settledFolders));
       await confirmFolderMoves(settledFolders);
+      // The whole tree is new: every folder's arrangement is the peer's now, and nothing
+      // that was traded before this is evidence of anything.
+      await trackOrderTransitions(scanSiblingOrder(await exportBookmarks()), { merge: null, now });
     } else {
       const { placed, placedFolders } = await mergeBookmarks(
-        tree, logs, conflictStrategy, deletePercent, approvedFor, onBulkBlocked, local?.part.excludedIds, orderMode,
+        tree, logs, conflictStrategy, deletePercent, approvedFor, onBulkBlocked, local?.part.excludedIds, orderMode, paused,
       );
       await updateMoves((current) =>
         mergeMoveLists(current, logs.moves.remote.filter((r) => placed.has(canonicalUrlKey(r.url))))
@@ -1549,6 +1876,8 @@ export async function importBookmarks(
       const established = logs.folderMoves.remote.filter((r) => placedFolders.has(folderMoveKey(r)));
       await updateFolderMoves((current) => mergeFolderMoveLists(current, established));
       await confirmFolderMoves(established);
+      // A reorder the merge just made is the peer's doing; see "Order contest".
+      if (before) await trackOrderTransitions(scanSiblingOrder(await exportBookmarks()), { merge: before, now });
     }
   } finally {
     activeImports--;
@@ -1682,6 +2011,11 @@ async function mergeBookmarks(
   // never hand back an excluded folder to write into.
   excluded: Set<string> = new Set(),
   orderMode: BookmarkOrderMode = "lww",
+  /**
+   * Folders (path keys) this device has stepped out of: a same-folder reorder in one is
+   * not made here, and its record is not folded in. See "Order contest".
+   */
+  paused: Set<string> = new Set<string>(),
   /**
    * The placements this merge actually established. The caller folds the peer's move
    * records in ONLY for these: a record for a placement the merge could not make (an
@@ -2066,7 +2400,7 @@ async function mergeBookmarks(
   // and moves land at the peer's position instead of always at the end of the folder.
   const mergeNode = async (
     node: SyncBookmark, ensureParent: () => Promise<string>, siblings: SyncBookmark[], index: number,
-    rootConfident: boolean,
+    rootConfident: boolean, parentPath: string[],
   ): Promise<void> => {
     // The peer's previous sibling is the anchor, and so is WHICH of its name it is: a parent
     // can hold several folders of one name (#51). Counted only for an add or a move, which
@@ -2092,43 +2426,47 @@ async function mergeBookmarks(
         if (shouldMove(node.url) && rootConfident) {
           try {
             const targetId = await ensureParent();
-            // Anchor to the peer's previous sibling (shared by url/title) instead of an
-            // absolute index — an index doesn't translate across devices with different
-            // device-local siblings. Fall back to the peer's index when the anchor is
-            // absent here. (Mirrors the folder-reposition placement in Step C.)
-            //
-            // Where the bookmark sits NOW is read from the same list, not from `placement`:
-            // that map predates the fold, and every move this loop already made shifted the
-            // ones after it. Compared against the stale index, a bookmark that had been
-            // pushed to its target counted as a move it never made ("moved 4" for two), and
-            // one that had been pushed AWAY from a target equal to its old index was skipped
-            // and its record folded in as done — a placement lost for good.
-            const live = await browser.bookmarks.getChildren(targetId);
-            const target = placementIndex(
-              live.filter((c) => c.id !== loc.id), prevKey, index, prevNth(),
-            );
-            const at = live.findIndex((c) => c.id === loc.id);
-            const outOfPlace = loc.parentId !== targetId || at !== target;
-            if (outOfPlace) {
-              const from = loc.parentId;
-              if (loc.parentId !== targetId) {
-                noteSelfMove(loc.id, targetId);
-                await browser.bookmarks.move(loc.id, { parentId: targetId, index: target });
+            // A reorder INSIDE a folder this device has stepped out of is left alone (see
+            // "Order contest"). Moving a bookmark into or out of that folder is not order.
+            if (loc.parentId !== targetId || !paused.has(folderPathKey(parentPath))) {
+              // Anchor to the peer's previous sibling (shared by url/title) instead of an
+              // absolute index — an index doesn't translate across devices with different
+              // device-local siblings. Fall back to the peer's index when the anchor is
+              // absent here. (Mirrors the folder-reposition placement in Step C.)
+              //
+              // Where the bookmark sits NOW is read from the same list, not from `placement`:
+              // that map predates the fold, and every move this loop already made shifted the
+              // ones after it. Compared against the stale index, a bookmark that had been
+              // pushed to its target counted as a move it never made ("moved 4" for two), and
+              // one that had been pushed AWAY from a target equal to its old index was skipped
+              // and its record folded in as done — a placement lost for good.
+              const live = await browser.bookmarks.getChildren(targetId);
+              const target = placementIndex(
+                live.filter((c) => c.id !== loc.id), prevKey, index, prevNth(),
+              );
+              const at = live.findIndex((c) => c.id === loc.id);
+              const outOfPlace = loc.parentId !== targetId || at !== target;
+              if (outOfPlace) {
+                const from = loc.parentId;
+                if (loc.parentId !== targetId) {
+                  noteSelfMove(loc.id, targetId);
+                  await browser.bookmarks.move(loc.id, { parentId: targetId, index: target });
+                } else {
+                  // Same-parent reorder: moveToIndex corrects the ±1 move-convention quirk
+                  // (a raw downward move lands one slot short on Chromium).
+                  await moveToIndex(loc.id, targetId, target);
+                }
+                moved++;
+                // The placement is settled here, so the peer's record for it may be folded in.
+                placed.add(urlKey);
+                // Track the folder we moved this bookmark OUT of, so an emptied shell
+                // (left by a cross-parent folder move on the peer) is cleaned up below.
+                if (from && from !== targetId && !localRootIds.has(from)) emptiedParents.add(from);
               } else {
-                // Same-parent reorder: moveToIndex corrects the ±1 move-convention quirk
-                // (a raw downward move lands one slot short on Chromium).
-                await moveToIndex(loc.id, targetId, target);
+                // Already exactly where the peer says it belongs: settled, and the record
+                // may be folded in.
+                placed.add(urlKey);
               }
-              moved++;
-              // The placement is settled here, so the peer's record for it may be folded in.
-              placed.add(urlKey);
-              // Track the folder we moved this bookmark OUT of, so an emptied shell
-              // (left by a cross-parent folder move on the peer) is cleaned up below.
-              if (from && from !== targetId && !localRootIds.has(from)) emptiedParents.add(from);
-            } else {
-              // Already exactly where the peer says it belongs: settled, and the record
-              // may be folded in.
-              placed.add(urlKey);
             }
           } catch (err) {
             logger.error(`Bookmark move: ${node.title}`, err);
@@ -2214,7 +2552,7 @@ async function mergeBookmarks(
       };
       const kids = node.children ?? [];
       for (let i = 0; i < kids.length; i++) {
-        await mergeNode(kids[i], ensureThis, kids, i, rootConfident);
+        await mergeNode(kids[i], ensureThis, kids, i, rootConfident, [...parentPath, node.title]);
       }
     }
   };
@@ -2395,8 +2733,12 @@ async function mergeBookmarks(
     const targetRootId = match.id ?? otherId;
     const rootConfident = match.confident;
     const kids = remoteRoot.children ?? [];
+    const rootPathKind = asRootKind(remoteRoot.rootKind) ?? rootKindOf(remoteRoot);
     for (let i = 0; i < kids.length; i++) {
-      await mergeNode(kids[i], () => Promise.resolve(targetRootId), kids, i, rootConfident);
+      await mergeNode(
+        kids[i], () => Promise.resolve(targetRootId), kids, i, rootConfident,
+        rootPathKind ? [rootPathKind] : [],
+      );
     }
   }
 
@@ -2410,9 +2752,9 @@ async function mergeBookmarks(
     ? { bookmarks: 0, folders: 0 }
     : await settleSiblingOrder(
       remoteTree, localRoots,
-      (n, path) => n.url
+      (n, path) => !paused.has(folderPathKey(path)) && (n.url
         ? placed.has(canonicalUrlKey(n.url))
-        : honouredFolders.has(folderPathKey([...path, n.title])),
+        : honouredFolders.has(folderPathKey([...path, n.title]))),
       localKeys, excluded,
     );
   moved += settledOrder.bookmarks;

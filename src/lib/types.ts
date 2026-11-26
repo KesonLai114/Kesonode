@@ -40,6 +40,64 @@ export interface MoveStormState {
 }
 
 /**
+ * What the storage's clock says against this device's. See server-clock.ts.
+ *
+ * An HTTP `Date` header names the SECOND a response was made in, so one response only
+ * says the local clock is somewhere in `[lo, hi]` ms BEHIND the storage's. Responses made
+ * close together across a second boundary cut that range down.
+ */
+export interface ServerClockState {
+  lo: number;
+  hi: number;
+  /** Responses folded in so far; 0 until the first one, when `lo`/`hi` mean nothing. */
+  samples: number;
+  /** When (local clock) the present range started being built, and was last narrowed. */
+  since: number;
+  measuredAt: number;
+  /** When (local clock) a probe last ran, so probes stay rare. */
+  probedAt: number;
+  /** Round trip of the latest response. */
+  rtt: number;
+  /** A probe concluded this range is as narrow as the connection allows. */
+  settled: boolean;
+}
+
+/**
+ * Two sides undoing each other's order in one folder. See bookmarks-handler.ts.
+ *
+ * The placement log says whose drag was later, one bookmark at a time. It cannot say that
+ * nobody is dragging at all: a browser's own bookmark sync putting a folder back the way
+ * it was, and the other browser's person arranging it again, look like two users taking
+ * turns. Each device keeps the recent arrangement changes it saw in each folder and who
+ * made them, and steps out of a folder whose order keeps going back and forth.
+ */
+/** One change of a folder's arrangement, with the same bookmarks in another order. */
+export interface OrderTransition {
+  /** The arrangement after the change (a hash of the siblings in order). */
+  fp: number;
+  /** "local": made on this device, by a person or by the browser. "peer": applied from a
+   *  peer's placement records. */
+  origin: "local" | "peer";
+  at: number;
+}
+
+export interface OrderContestParent {
+  /** The latest changes, oldest first. Only the last four are ever read. */
+  history: OrderTransition[];
+  /** How many times this device has stepped out of this folder. The pause doubles each time. */
+  rounds: number;
+  /** Until when (the storage's clock) this device leaves this folder's order alone. */
+  until: number;
+}
+
+export interface OrderContestState {
+  /** Per folder (path key): the arrangement this device last accounted for. `o` is the
+   *  order of the siblings, `m` the set of them. A change of `o` alone is a reorder. */
+  known: Record<string, { o: number; m: number }>;
+  parents: Record<string, OrderContestParent>;
+}
+
+/**
  * How a device that ALREADY has bookmarks joins a sync group whose peers also have some.
  *
  * "merge" is the historical behaviour (non-destructive union). "remote" clears this

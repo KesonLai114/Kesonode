@@ -1,6 +1,7 @@
 import type { IBackend, BackendConfig, DataType, SyncPacket } from "@/lib/types";
 import { withRetry, withPeerRetry, HttpError, defaultShouldRetry, rateLimitMessage } from "@/lib/utils/retry";
 import { logger } from "@/lib/utils/logger";
+import { observedFetch } from "@/lib/utils/server-clock";
 import { utf8ToBase64 } from "@/lib/utils/base64";
 import { folderPath, isPeerFileName, packetFileName, peerDeviceIdFromName } from "@/lib/compat/protocol";
 
@@ -136,7 +137,7 @@ export class GitHubBackend implements IBackend {
         };
         if (sha) body.sha = sha;
 
-        const res = await fetch(
+        const res = await observedFetch(
           this.contentsUrl(filename),
           { method: "PUT", headers: this.headers(), body: JSON.stringify(body) }
         );
@@ -162,7 +163,7 @@ export class GitHubBackend implements IBackend {
   private async ensureRepoInitialized(): Promise<void> {
     if (this.repoInitialized) return;
 
-    const repoRes = await fetch(
+    const repoRes = await observedFetch(
       `${GITHUB_API}/repos/${this.repoSlug}`,
       { headers: this.headers() }
     );
@@ -187,7 +188,7 @@ export class GitHubBackend implements IBackend {
 
     // If repo is empty (no commits), initialize it
     if (!repoData.default_branch) {
-      const initRes = await fetch(`${GITHUB_API}/repos/${this.repoSlug}/contents/README.md`, {
+      const initRes = await observedFetch(`${GITHUB_API}/repos/${this.repoSlug}/contents/README.md`, {
         method: "PUT",
         headers: this.headers(),
         body: JSON.stringify({
@@ -217,7 +218,7 @@ export class GitHubBackend implements IBackend {
   }
 
   private async getFileSHA(path: string, branch: string): Promise<string | null> {
-    const res = await fetch(
+    const res = await observedFetch(
       this.contentsUrl(path, branch),
       // GitHub sends `Cache-Control: max-age=60` on contents reads, so the browser
       // HTTP cache can hand back a stale SHA right after a write — which then makes
@@ -249,7 +250,7 @@ export class GitHubBackend implements IBackend {
       message: `snapshot: ${name}`, content: utf8ToBase64(content), branch: this.branch,
     };
     if (version) body.sha = version;
-    const res = await fetch(this.contentsUrl(filename), {
+    const res = await observedFetch(this.contentsUrl(filename), {
       method: "PUT", headers: this.headers(), body: JSON.stringify(body),
     });
     // 409: the sha we named is no longer the current one. 422 with NO sha is the same
@@ -267,7 +268,7 @@ export class GitHubBackend implements IBackend {
 
   async downloadAll(data_type: DataType, excludeDeviceId?: string): Promise<SyncPacket[]> {
     return withRetry(async () => {
-      const res = await fetch(
+      const res = await observedFetch(
         this.contentsUrl(this.path, this.branch),
         { headers: this.headers(), cache: "no-store" }
       );
@@ -289,7 +290,7 @@ export class GitHubBackend implements IBackend {
         let r: Response;
         try {
           r = await withPeerRetry(async () => {
-            const res = await fetch(
+            const res = await observedFetch(
               this.contentsUrl(`${this.path}/${m.name}`, this.branch),
               { headers: { ...this.headers(), Accept: "application/vnd.github.raw+json" }, cache: "no-store" }
             );
@@ -332,7 +333,7 @@ export class GitHubBackend implements IBackend {
         const sha = await this.getFileSHA(filename, this.branch);
         const body: Record<string, unknown> = { message: `snapshot: ${name}`, content: encoded, branch: this.branch };
         if (sha) body.sha = sha;
-        const res = await fetch(this.contentsUrl(filename), {
+        const res = await observedFetch(this.contentsUrl(filename), {
           method: "PUT", headers: this.headers(), body: JSON.stringify(body),
         });
         if (!res.ok) {
@@ -346,7 +347,7 @@ export class GitHubBackend implements IBackend {
 
   async getFile(name: string): Promise<string | null> {
     return withRetry(async () => {
-      const res = await fetch(
+      const res = await observedFetch(
         this.contentsUrl(`${this.path}/${name}`, this.branch),
         { headers: { ...this.headers(), Accept: "application/vnd.github.raw+json" }, cache: "no-store" }
       );
@@ -358,7 +359,7 @@ export class GitHubBackend implements IBackend {
 
   async listFiles(prefix: string): Promise<string[]> {
     return withRetry(async () => {
-      const res = await fetch(
+      const res = await observedFetch(
         this.contentsUrl(this.path, this.branch),
         { headers: this.headers(), cache: "no-store" }
       );
@@ -374,7 +375,7 @@ export class GitHubBackend implements IBackend {
     await withRetry(async () => {
       const sha = await this.getFileSHA(filename, this.branch);
       if (!sha) return; // already gone
-      const res = await fetch(this.contentsUrl(filename), {
+      const res = await observedFetch(this.contentsUrl(filename), {
         method: "DELETE", headers: this.headers(),
         body: JSON.stringify({ message: `snapshot: delete ${name}`, sha, branch: this.branch }),
       });
@@ -388,7 +389,7 @@ export class GitHubBackend implements IBackend {
       if (!this.gh.token) return { ok: false, message: "No token. Paste a Personal Access Token or Fine-grained token" };
 
       // Verify token works
-      const userRes = await fetch(`${GITHUB_API}/user`, { headers: this.headers() });
+      const userRes = await observedFetch(`${GITHUB_API}/user`, { headers: this.headers() });
       if (userRes.status === 429) return { ok: false, message: rateLimitMessage("GitHub") };
       if (!userRes.ok) {
         return {
@@ -403,7 +404,7 @@ export class GitHubBackend implements IBackend {
       if (!this.gh.repo) return { ok: true, message: `Signed in as @${user.login}. Set a repository below` };
 
       // Check repo access
-      const repoRes = await fetch(`${GITHUB_API}/repos/${this.repoSlug}`, { headers: this.headers() });
+      const repoRes = await observedFetch(`${GITHUB_API}/repos/${this.repoSlug}`, { headers: this.headers() });
 
       if (repoRes.status === 404) {
         return {
@@ -436,7 +437,7 @@ export class GitHubBackend implements IBackend {
       // yet, the first upload creates one.
       if (!isEmpty) {
         const branch = this.branch;
-        const brRes = await fetch(
+        const brRes = await observedFetch(
           `${GITHUB_API}/repos/${this.repoSlug}/branches/${encodeURIComponent(branch)}`,
           { headers: this.headers() }
         );

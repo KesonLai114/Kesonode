@@ -78,6 +78,7 @@ import {
   setAutosavedSessions,
 } from "@/lib/utils/storage";
 import { logger } from "@/lib/utils/logger";
+import { ensureServerClock } from "@/lib/utils/server-clock";
 import { isSafeContentUrl } from "@/lib/utils/url";
 import { noteCleanSync } from "@/lib/rate-prompt";
 import { PERMISSION_LOST_PREFIX } from "@/lib/constants";
@@ -902,6 +903,15 @@ export class SyncEngine {
   }
 
   private async finishSync(backend: ReturnType<typeof createBackend>): Promise<void> {
+    // Last, before the connection goes: if the storage's clock is still only known to the
+    // second, ask for a few responses around a second boundary (see server-clock.ts). The
+    // ordinary traffic of the cycle has already refreshed the measurement for free; this
+    // only tops it up, at most every ten minutes, with the cycle's own connection.
+    try {
+      await ensureServerClock(() => backend.testConnection());
+    } catch (e) {
+      logger.info("SyncEngine", `Reading the storage's clock was skipped: ${e instanceof Error ? e.message : e}`);
+    }
     try {
       await releaseSyncLock();
     } catch (e) {

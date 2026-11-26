@@ -77,6 +77,19 @@ function prune(now: number): void {
 }
 
 /**
+ * Test seam: the browser has delivered every echo of the merge's writes.
+ *
+ * A real browser reports each move, rename and removal the merge made, and each report
+ * claims its entry. A fake one does not, so in a test the entries would sit here for the
+ * whole TTL and claim the next drag of the same bookmark as the merge's own echo.
+ */
+export function forgetSelfWritesForTest(): void {
+  pending.clear();
+  pendingMoves.clear();
+  pendingRemovals.clear();
+}
+
+/**
  * The merge is about to write `title` to `id`.
  *
  * Called BEFORE the write, not after: nothing promises that the write resolves before its

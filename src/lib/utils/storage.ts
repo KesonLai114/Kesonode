@@ -13,6 +13,8 @@ import type {
   FolderRenameRecord,
   MoveRecord,
   MoveStormState,
+  OrderContestState,
+  ServerClockState,
   TitleRecord,
   RemoteExtensionEntry,
   RemoteSessionEntry,
@@ -258,6 +260,8 @@ export const KEYS = {
   // Persisted move-storm windows. The placement records they protect live here too;
   // keeping only an in-memory window let an MV3 worker restart leak a whole burst.
   BOOKMARK_MOVE_STORM_STATE: "konode_bm_move_storm_state",
+  BOOKMARK_ORDER_CONTEST: "konode_bm_order_contest",
+  SERVER_CLOCK: "konode_server_clock",
   BOOKMARK_TITLES: "konode_bm_titles",
   BOOKMARK_FOLDER_RENAMES: "konode_bm_folder_renames",
   BOOKMARK_FOLDER_DELETES: "konode_bm_folder_deletes",
@@ -1397,6 +1401,43 @@ export async function setMoveStormState(state: MoveStormState): Promise<void> {
   await set(KEYS.BOOKMARK_MOVE_STORM_STATE, state);
 }
 
+// The time service's measurement. Unlike the logs around it, this one is written from
+// every backend response, so it goes through the same serialized path and nothing is lost
+// when two responses land together.
+export function defaultServerClockState(): ServerClockState {
+  return { lo: 0, hi: 0, samples: 0, since: 0, measuredAt: 0, probedAt: 0, rtt: 0, settled: false };
+}
+
+export async function getServerClockState(): Promise<ServerClockState> {
+  return get<ServerClockState>(KEYS.SERVER_CLOCK, defaultServerClockState());
+}
+
+export function updateServerClockState(
+  mutate: (current: ServerClockState) => ServerClockState
+): Promise<ServerClockState> {
+  return updateKey<ServerClockState>(KEYS.SERVER_CLOCK, mutate, defaultServerClockState());
+}
+
+export async function setServerClockState(state: ServerClockState): Promise<void> {
+  await set(KEYS.SERVER_CLOCK, state);
+}
+
+// Whether this device has stepped out of a folder's order because two sides kept undoing
+// each other (see bookmarks-handler.ts). Persisted: the pause outlasts a worker restart.
+export function defaultOrderContestState(): OrderContestState {
+  return { known: {}, parents: {} };
+}
+
+export function updateOrderContestState(
+  mutate: (current: OrderContestState) => OrderContestState
+): Promise<OrderContestState> {
+  return updateKey<OrderContestState>(KEYS.BOOKMARK_ORDER_CONTEST, mutate, defaultOrderContestState());
+}
+
+export async function getOrderContestState(): Promise<OrderContestState> {
+  return get<OrderContestState>(KEYS.BOOKMARK_ORDER_CONTEST, defaultOrderContestState());
+}
+
 export async function getTitles(): Promise<TitleRecord[]> {
   return get<TitleRecord[]>(KEYS.BOOKMARK_TITLES, []);
 }
@@ -2214,6 +2255,9 @@ export async function resetBookmarkMergeState(options: { keepPlacement?: boolean
     // A replace makes the whole tree the truth: no suppressed pre-replace burst may
     // be re-stamped and published as this device's later intent.
     KEYS.BOOKMARK_MOVE_STORM_STATE,
+    // The tree is being replaced wholesale: every folder's arrangement is about to be
+    // somebody else's, so nothing that was traded before is evidence any more.
+    KEYS.BOOKMARK_ORDER_CONTEST,
     KEYS.BOOKMARK_TITLES,
     KEYS.BOOKMARK_FOLDER_RENAMES,
     KEYS.BOOKMARK_FOLDER_DELETES,

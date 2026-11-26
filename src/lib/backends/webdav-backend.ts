@@ -1,6 +1,7 @@
 import type { IBackend, BackendConfig, DataType, ListedFile, SyncPacket } from "@/lib/types";
 import { withRetry, withPeerRetry, HttpError, rateLimitMessage } from "@/lib/utils/retry";
 import { logger } from "@/lib/utils/logger";
+import { observedFetch } from "@/lib/utils/server-clock";
 import { isSecureBackendUrl } from "@/lib/utils/url";
 import { utf8ToBase64 } from "@/lib/utils/base64";
 import { folderPath, isPeerFileName, packetFileName, peerDeviceIdFromName } from "@/lib/compat/protocol";
@@ -272,7 +273,7 @@ export class WebDAVBackend implements IBackend {
   private async ensureFolder(): Promise<void> {
     // MKCOL creates the folder if it doesn't exist
     // 405 = already exists, which is fine
-    const res = await fetch(this.baseUrl, {
+    const res = await observedFetch(this.baseUrl, {
       method: "MKCOL",
       headers: this.headers(),
     });
@@ -309,7 +310,7 @@ export class WebDAVBackend implements IBackend {
     // Don't guess from the status code, though: WebDAV servers answer MKCOL with a wide
     // spread of codes, and a 403 can mean "you may not create it" on a collection that
     // already exists. Ask.
-    const check = await fetch(this.baseUrl + "/", {
+    const check = await observedFetch(this.baseUrl + "/", {
       method: "PROPFIND",
       headers: { ...this.headers(), Depth: "0" },
       cache: "no-store",
@@ -365,7 +366,7 @@ export class WebDAVBackend implements IBackend {
 
   private async fetchListing(): Promise<DavEntry[]> {
     this.guardRateLimit();
-    const res = await fetch(this.baseUrl + "/", {
+    const res = await observedFetch(this.baseUrl + "/", {
       method: "PROPFIND",
       headers: { ...this.headers(), Depth: "1" },
       body: `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/><d:getlastmodified/><d:getcontentlength/></d:prop></d:propfind>`,
@@ -418,7 +419,7 @@ export class WebDAVBackend implements IBackend {
     await withRetry(async () => {
       this.guardRateLimit();
       const name = packetFileName(packet.data_type, packet.device_id);
-      const res = await fetch(`${this.baseUrl}/${name}`, {
+      const res = await observedFetch(`${this.baseUrl}/${name}`, {
         method: "PUT",
         headers: this.headers(),
         body: JSON.stringify(packet, null, 2),
@@ -522,7 +523,7 @@ export class WebDAVBackend implements IBackend {
           // without re-running the whole listing.
           r = await withPeerRetry(async () => {
             this.guardRateLimit();
-            const res = await fetch(fullUrl, {
+            const res = await observedFetch(fullUrl, {
               headers: { Authorization: this.authHeader() },
               cache: "no-store", // avoid a stale peer file from the browser HTTP cache
             });
@@ -596,7 +597,7 @@ export class WebDAVBackend implements IBackend {
   async putFile(name: string, content: string): Promise<void> {
     await withRetry(async () => {
       this.guardRateLimit();
-      const res = await fetch(`${this.baseUrl}/${name}`, { method: "PUT", headers: this.headers(), body: content });
+      const res = await observedFetch(`${this.baseUrl}/${name}`, { method: "PUT", headers: this.headers(), body: content });
       if (!res.ok) this.fail(res, "PUT");
       this.invalidateListing();
     });
@@ -605,7 +606,7 @@ export class WebDAVBackend implements IBackend {
   async getFile(name: string): Promise<string | null> {
     return withRetry(async () => {
       this.guardRateLimit();
-      const res = await fetch(`${this.baseUrl}/${name}`, { headers: this.headers(), cache: "no-store" });
+      const res = await observedFetch(`${this.baseUrl}/${name}`, { headers: this.headers(), cache: "no-store" });
       if (res.status === 404) return null;
       if (!res.ok) this.fail(res, "GET");
       return res.text();
@@ -620,7 +621,7 @@ export class WebDAVBackend implements IBackend {
   async getFileVersion(name: string): Promise<string | null> {
     return withRetry(async () => {
       this.guardRateLimit();
-      const res = await fetch(`${this.baseUrl}/${name}`, {
+      const res = await observedFetch(`${this.baseUrl}/${name}`, {
         method: "HEAD", headers: this.headers(), cache: "no-store",
       });
       if (res.status === 404) return null;
@@ -644,7 +645,7 @@ export class WebDAVBackend implements IBackend {
         // `If-None-Match: *` for a file that must not exist yet; `If-Match` otherwise.
         [version === null ? "If-None-Match" : "If-Match"]: version === null ? "*" : version,
       };
-      const res = await fetch(`${this.baseUrl}/${name}`, {
+      const res = await observedFetch(`${this.baseUrl}/${name}`, {
         method: "PUT", headers, body: content,
       });
       if (res.status === 412) return false;
@@ -675,7 +676,7 @@ export class WebDAVBackend implements IBackend {
   async deleteFile(name: string): Promise<void> {
     await withRetry(async () => {
       this.guardRateLimit();
-      const res = await fetch(`${this.baseUrl}/${name}`, { method: "DELETE", headers: this.headers() });
+      const res = await observedFetch(`${this.baseUrl}/${name}`, { method: "DELETE", headers: this.headers() });
       if (!res.ok && res.status !== 404) this.fail(res, "DELETE");
       // The folder no longer holds what the cached listing says it holds.
       this.invalidateListing();
@@ -686,7 +687,7 @@ export class WebDAVBackend implements IBackend {
   async testConnection(): Promise<{ ok: boolean; message: string }> {
     try {
       if (!isSecureBackendUrl(this.w.url)) return { ok: false, message: INSECURE_URL_MSG };
-      const res = await fetch(this.w.url, {
+      const res = await observedFetch(this.w.url, {
         method: "PROPFIND",
         headers: { ...this.headers(), Depth: "0" },
         body: `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`,
