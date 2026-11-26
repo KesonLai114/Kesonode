@@ -127,8 +127,12 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  // Automatic bookmark attempts must NEVER acquire manual/force semantics.
-  for (const args of h.sync.mock.calls) expect(args).toEqual([["bookmarks"]]);
+  // Automatic bookmark attempts must NEVER acquire manual/force semantics. Calls made
+  // by SYNC_NOW legitimately carry the force option, so only the one-argument calls
+  // (the automatic paths) are checked here.
+  for (const args of h.sync.mock.calls) {
+    if (args.length === 1) expect(args).toEqual([["bookmarks"]]);
+  }
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -427,5 +431,21 @@ describe("the periodic sync alarm follows auto_sync", () => {
     alarms.set(SYNC_ALARM, { name: SYNC_ALARM, scheduledTime: Date.now(), periodInMinutes: 1 });
     await alarmListener({ name: SYNC_ALARM, scheduledTime: Date.now() });
     expect(h.sync).not.toHaveBeenCalled();
+  });
+});
+
+describe("SYNC_NOW while a first-sync direction is unanswered", () => {
+  it("does not answer OK for a cycle that never merged or published anything", async () => {
+    h.sync.mockReset().mockImplementation(async () => {
+      await setState({ first_sync_pending: { at: new Date().toISOString(), peer_count: 1 } });
+      return "first-sync-pending";
+    });
+
+    const res: ExtensionResponse = await messageListener(
+      { type: "SYNC_NOW" }, { id: chrome.runtime.id },
+    );
+
+    expect(res.type).toBe("ERROR");
+    if (res.type === "ERROR") expect(res.payload).toMatch(/direction/i);
   });
 });

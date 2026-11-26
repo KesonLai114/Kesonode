@@ -389,9 +389,18 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       if (outcome === "nothing-enabled") {
         return { type: "ERROR", payload: "No data types are turned on, so there is nothing to sync. Turn one on in Data Types." };
       }
-      // "first-sync-pending" is deliberately not an error: nothing was meant to move
-      // this cycle, and the question reaches the popup (which links to the onboarding
-      // direction step) via STATE_UPDATE.
+      // A pending direction is not an engine failure, but it is not a completed sync
+      // either: runSync() returns before syncAllTypes(), so NOTHING was merged or
+      // published. Answering OK here made "Sync now" look successful while the
+      // bookmarks stayed exactly as they were — the report that led to this fix.
+      // The state banner still carries the onboarding link; this response only stops
+      // the button from claiming a sync that never ran.
+      if (outcome === "first-sync-pending") {
+        return {
+          type: "ERROR",
+          payload: "Waiting for you to choose a sync direction. No bookmarks were changed; open the Kesonode popup and choose how to merge them.",
+        };
+      }
       return { type: "OK" };
     }
 

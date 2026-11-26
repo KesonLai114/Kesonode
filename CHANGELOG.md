@@ -80,6 +80,16 @@ All notable changes to Konode. Format loosely follows
 
 ### Fixed
 
+- **"Sync now" no longer reports success while a first-sync direction is unanswered.**
+  On a browser that has local bookmarks and finds another device's bookmarks before it has
+  ever published its own, `sync()` deliberately stops before merging and asks which side
+  wins. The manual button still answered `OK`, and Settings → Sync history showed only
+  counters and an unrelated restore point, so a browser that had been closed for a long
+  time looked synced while none of the newer bookmarks had arrived. The button now returns
+  an explicit "waiting for a sync direction" error, and the Activity page shows the same
+  question and a button that opens the direction card. A failing test reproduced the false
+  `OK` before the fix.
+
 - **A cached `Date` is no longer reported as a clock change.** The storage clock is read
   from HTTP `Date` headers on backend responses, and the connection test at the end of a
   sync is one of those responses. When the browser answered that test from its HTTP cache,

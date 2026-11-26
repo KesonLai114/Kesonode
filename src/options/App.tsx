@@ -3685,6 +3685,32 @@ export default function OptionsApp() {
                     </div>
                   </div>
 
+                  {/* The direction card lives in the popup/onboarding. A person who lands
+                      straight here (as in the "sync ran but nothing changed" report) saw
+                      only counters and a restore point, with no hint that sync() returned
+                      BEFORE the merge. Put the same unanswered question next to the
+                      counters, with the one action that resolves it. */}
+                  {syncState?.first_sync_pending && (
+                    <div className="settings-row" role="status">
+                      <div className="settings-row-left">
+                        <div>
+                          <div className="row-label" style={{ color: "var(--warn-text)" }}>
+                            {t("popup_first_sync_notice")}
+                          </div>
+                          <div className="row-desc">{t("onb_direction_subtitle")}</div>
+                          <div className="row-desc">{t("onb_direction_hint")}</div>
+                        </div>
+                      </div>
+                      <button
+                        className="btn-secondary"
+                        style={{ color: "var(--warn-text)", borderColor: "var(--warn-text)", flexShrink: 0 }}
+                        onClick={() => void browser.tabs.create({ url: browser.runtime.getURL("onboarding.html") })}
+                      >
+                        {t("popup_first_sync_cta")}
+                      </button>
+                    </div>
+                  )}
+
                   {/* What has actually gone across, per type — ITEMS, not completed syncs
                       (this printed "extensions 682" for a browser with a few dozen). The
                       type switches are on another tab, so "why is history always 0" needed
