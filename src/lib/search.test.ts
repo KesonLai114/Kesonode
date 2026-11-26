@@ -52,6 +52,19 @@ describe("searchDocs", () => {
     ]);
   });
 
+  it("keeps the best-scoring duplicate, not merely the first one seen", () => {
+    // Same source + same canonical URL: the shorter, prefix-matching title is the better
+    // result. First-seen-wins used to surface the worse representative and hide the best.
+    const docs = [
+      doc({ title: "The GitHub guide", url: "https://a.example/" }),
+      doc({ title: "GitHub", url: "https://a.example/" }),
+    ];
+
+    const hits = searchDocs(docs, "github");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].title).toBe("GitHub");
+  });
+
   it("falls back to the URL as the title, and skips rows with no URL", () => {
     const hits = searchDocs(
       [doc({ title: "", url: "https://untitled.example/" }), doc({ title: "No URL", url: "" })],

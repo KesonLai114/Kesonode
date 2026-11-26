@@ -93,6 +93,35 @@ function isMissing(error: unknown): boolean {
   return error instanceof DOMException && error.name === "NotFoundError";
 }
 
+/**
+ * Undo a rename backup after a failed write: move every backed-up top-level entry back
+ * into the install root.
+ *
+ * `makeBackupByMove` moves the old code OUT of the root before the new files are written,
+ * leaving only the old manifest behind. If a write then fails, that manifest points at
+ * chunks that are no longer in the root, so the browser cannot load the extension after a
+ * restart. Restoring the moved entries makes the old manifest loadable again.
+ *
+ * A new file of the same name may already have been written before the failure; clear it
+ * first so the old (loadable) file reclaims its name. Failure here is best-effort — it must
+ * never mask the original write error that triggered the rollback.
+ */
+async function restoreMovedBackup(
+  dir: DirectoryHandleLike,
+  backupTarget: DirectoryHandleLike,
+): Promise<void> {
+  const mover = backupTarget as MovableDir;
+  if (typeof mover.moveEntry !== "function") return;
+  for await (const [name] of backupTarget.entries()) {
+    try {
+      await dir.removeEntry(name);
+    } catch {
+      // Nothing under that name in the root — the old entry can move straight back.
+    }
+    await mover.moveEntry(name, dir, { name });
+  }
+}
+
 /** A directory handle that may support moving a child entry (Chrome 113+). */
 type MovableDir = DirectoryHandleLike & {
   moveEntry?: (
@@ -157,13 +186,27 @@ async function mapWithConcurrency<T>(
   worker: (item: T) => Promise<void>
 ): Promise<void> {
   let index = 0;
+  let firstError: unknown;
+  let failed = false;
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (index < items.length) {
+      if (failed) break; // stop claiming new work once one item has failed
       const i = index++;
-      await worker(items[i]);
+      try {
+        await worker(items[i]);
+      } catch (err) {
+        if (!failed) { failed = true; firstError = err; }
+        break;
+      }
     }
   });
+  // Let every already-in-flight write settle before surfacing the error. A bare
+  // Promise.all rejects on the first failure while sibling writes keep running in the
+  // background; a rollback that starts here would race those late writes and could be
+  // overwritten by them (the failed-upgrade restore would restore old code, then a late
+  // write would replace it with new). Waiting makes the folder state stable on failure.
   await Promise.all(runners);
+  if (failed) throw firstError;
 }
 
 /** Write one file, creating the folders above it via the shared cache. */
@@ -351,6 +394,11 @@ export async function applyPackageToFolder(
       onProgress?.({ phase: "write", done: written, total });
     });
   } catch (error) {
+    // Rename backup pulled the old code out of the root before this write failed. Put it
+    // back so the old manifest (still in the root) remains loadable on the next restart.
+    if (backupByMove && backupTarget) {
+      try { await restoreMovedBackup(dir, backupTarget); } catch { /* keep original error */ }
+    }
     return {
       ok: false,
       failure: "write",
@@ -372,6 +420,8 @@ export async function applyPackageToFolder(
         await movable.moveEntry("manifest.json", backupTarget, { name: "manifest.json" });
       }
     } catch (error) {
+      // Same loadability guarantee: the old code is still in the backup, so put it back.
+      try { await restoreMovedBackup(dir, backupTarget); } catch { /* keep original error */ }
       return {
         ok: false,
         failure: "write",

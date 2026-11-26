@@ -90,6 +90,25 @@ All notable changes to Konode. Format loosely follows
   `Date` is also ignored, and only three consecutive disagreements restart the
   measurement, with a message that also names a stale cache as a possible cause.
 
+- **A malformed entry in a remote packet no longer drops the rest of the batch.** A null
+  element in a peer's history or session array was dereferenced and threw, aborting the
+  whole import; a peer file with a non-string `device_id` threw while ordering peers,
+  aborting that type's sync before any healthy peer could merge. All three are now skipped
+  or coerced safely, so one bad packet costs only its own entry.
+
+- **Search and failed upgrades now keep the best / last loadable copy.** Search results
+  de-duplicated by URL kept the first match rather than the highest-scoring one, so a
+  worse-titled duplicate could hide the best answer. And when an upgrade backed up the old
+  extension by renaming its code away and a later file write failed, the old manifest was
+  left in place pointing at code that was no longer there — the browser could not load the
+  extension after a restart. A failed upgrade now restores the old code, and waits for all
+  in-flight writes to settle before rolling back so a late write cannot overwrite it.
+
+- **The periodic sync no longer flickers the popup while the first-sync card waits.** While
+  a device asked which side wins a first sync, each scheduled tick still ran a cycle that
+  briefly broadcast "syncing" and then "idle". The periodic alarm now skips the engine while
+  that question is unanswered, matching the behaviour of the bookmark-change path.
+
 ## [1.5.28] - 2026-11-24
 
 ### Fixed

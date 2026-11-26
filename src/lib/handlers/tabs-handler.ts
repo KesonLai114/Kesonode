@@ -128,8 +128,12 @@ export async function importSession(session: SyncSession): Promise<number> {
   // Never open a non-web URL from a remote packet (javascript:/data:/file: are
   // an injection/exfiltration vector); only http(s) tabs are restored.
   const safe = session.tabs.filter((t) => {
-    if (isSafeContentUrl(t.url)) return true;
-    logger.warn("importSession", "Skipping an unsafe tab URL");
+    // A remote session payload is only top-level-array checked before we get here. A null
+    // element must be skipped, not dereferenced — one malformed tab used to throw and abort
+    // the whole restore. All downstream indices are against this filtered array, so
+    // dropping it cannot shift group/restore bookkeeping out of alignment.
+    if (t && typeof t === "object" && isSafeContentUrl(t.url)) return true;
+    logger.warn("importSession", "Skipping an unsafe or malformed tab");
     return false;
   });
   // Only what is not open here yet, so a second restore of a session that has grown opens

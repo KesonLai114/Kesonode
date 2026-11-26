@@ -119,6 +119,17 @@ class MoveDir extends MemDir {
     this.children.delete(name);
     destination.children.set(options?.name ?? name, child);
   }
+  // On Chrome 113+ EVERY directory handle supports moveEntry, including ones obtained
+  // through getDirectoryHandle — not just the root. Model that so nested handles (the
+  // backup target) can be moved back on rollback, exactly as the real API allows.
+  async getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<DirectoryHandleLike> {
+    const found = this.children.get(name);
+    if (found instanceof MemDir) return found;
+    if (!options?.create) throw new DOMException("no such folder", "NotFoundError");
+    const dir = new MoveDir(name);
+    this.children.set(name, dir);
+    return dir;
+  }
 }
 
 const enc = new TextEncoder();
@@ -302,5 +313,31 @@ describe("applyPackageToFolder backup strategy", () => {
     // The rename moved the old chunks/popup away first, but the manifest is moved LAST,
     // so it is still the old one after a failed write.
     expect(textOf(dir, "manifest.json")).toContain('"1.5.18"');
+  });
+
+  it("restores the old code after a failed rename-path write, so a reload can still load", async () => {
+    // Keeping the old manifest in the root is not enough: the rename backup moved its
+    // service worker out of the root BEFORE the new files were written. If a write then
+    // fails, the old manifest points at a chunk no longer in the root, and the extension
+    // is dead on the next browser restart. A failed upgrade must restore loadable code.
+    const dir = new MoveDir("Kesonode");
+    dir.children.set("manifest.json", new MemFile("manifest.json", manifest("1.5.18", "the-key")));
+    dir.children.set("background.js", new MemFile("background.js", enc.encode("// old worker")));
+    dir.children.set("popup.html", new MemFile("popup.html", enc.encode("old")));
+    dir.failWrites.add("popup.html");
+
+    const pkg: ExtractedPackage = {
+      version: "1.5.19", target: "chromium", manifestKey: "the-key",
+      entries: [
+        { path: "manifest.json", bytes: manifest("1.5.19", "the-key") },
+        { path: "popup.html", bytes: enc.encode("new") },
+        { path: "background.js", bytes: enc.encode("// new worker") },
+      ],
+    };
+    const outcome = await applyPackageToFolder(dir, pkg);
+    expect(outcome.ok).toBe(false);
+    // The old manifest is in the root, so the worker it references must be too.
+    const worker = dir.children.get("background.js");
+    expect(worker instanceof MemFile && new TextDecoder().decode(worker.data)).toContain("old");
   });
 });

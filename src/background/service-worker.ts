@@ -800,6 +800,13 @@ on("alarms", "onAlarm", () => browser.alarms.onAlarm.addListener(async (alarm) =
       await browser.alarms.clear(SYNC_ALARM);
       return;
     }
+    // The direction card, not a timer, owns the decision while first-sync is pending.
+    // The bookmark-change path already skips in this state; without the same guard here,
+    // every periodic tick runs sync(), which broadcasts syncing→idle and makes an open
+    // popup flicker while the user is still choosing which side wins. Keep the alarm so
+    // sync resumes automatically once the card is answered.
+    const before = await getState();
+    if (before.first_sync_pending) return;
     logger.info("Alarm", "Periodic sync triggered");
     await syncEngine.sync();
   }

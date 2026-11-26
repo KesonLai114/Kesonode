@@ -193,7 +193,10 @@ export async function importHistory(
   const pending: Array<{ url: string; key: string; visitTime?: number }> = [];
   const claimed = new Set<string>();
   for (const item of items) {
-    if (!item.url) continue;
+    // Remote packets are only top-level-array checked before we get here. A null / non-object
+    // element (or a URL that isn't a string) must be skipped, not dereferenced — one bad
+    // entry used to throw TypeError and abort the entire batch, dropping every good visit.
+    if (!item || typeof item !== "object" || typeof item.url !== "string" || !item.url) continue;
     const key = canonicalUrlKey(item.url);
     const localTime = localLastVisit.get(key);
     // The peer's time in the form it is stored: Firefox's addUrl takes whole milliseconds

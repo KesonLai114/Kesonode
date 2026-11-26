@@ -117,6 +117,19 @@ describe("orderPeersByTime", () => {
     expect(orderPeersByTime([x, a, m]).map((p) => p.device_id)).toEqual(["a-dev", "m-dev", "x-dev"]);
     expect(orderPeersByTime([m, x, a]).map((p) => p.device_id)).toEqual(["a-dev", "m-dev", "x-dev"]);
   });
+
+  it("survives a malformed device_id without aborting the whole type's sync", () => {
+    // orderPeersByTime runs on the raw downloadAll result, BEFORE openPacket validates
+    // device_id. A single corrupt/legacy peer file with a non-string id must not throw —
+    // otherwise it aborts sorting and no peer of this type gets merged at all.
+    const good = packet({ device_id: "good-dev", timestamp: "2026-01-01T00:00:00.000Z" });
+    const bad = { device_id: 123, timestamp: "2026-01-01T00:00:00.000Z" } as unknown as SyncPacket;
+    expect(() => orderPeersByTime([good, bad])).not.toThrow();
+    // The good peer still lands predictable, ahead of the non-string id coerced to "123".
+    const out = orderPeersByTime([good, bad]);
+    expect(out).toHaveLength(2);
+    expect(out.some((p) => p.device_id === "good-dev")).toBe(true);
+  });
 });
 
 describe("a packet nobody can date must not win, and must not scramble the order", () => {

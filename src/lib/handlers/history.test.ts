@@ -9,6 +9,18 @@ import { exportHistory, importHistory } from "@/lib/handlers/history-handler";
 // re-add loop these tests now cover.
 
 describe("history import/export", () => {
+  it("ignores a malformed null entry instead of throwing for the whole batch", async () => {
+    // Remote packets are only top-level-array checked before importHistory. One null
+    // element must not abort every other entry in the batch.
+    const bad = null as unknown as { url: string; lastVisitTime: number; visitCount: number };
+    await expect(importHistory([bad, { url: "https://still-good.example/", lastVisitTime: 1, visitCount: 1 }]))
+      .resolves.toBeUndefined();
+    // The good entry next to the null must still be stored (it is deliberately not
+    // re-exported — that is CO-6, verified by its own test — so check local history).
+    const stored = await chrome.history.search({ text: "", startTime: 0, maxResults: 100 });
+    expect(stored.some((h) => h.url === "https://still-good.example/")).toBe(true);
+  });
+
   it("does not re-export a URL that was only imported (CO-6)", async () => {
     // A genuine local visit on this device.
     await chrome.history.addUrl({ url: "https://local.com" });

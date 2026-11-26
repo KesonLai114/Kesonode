@@ -147,7 +147,13 @@ export function orderPeersByTime(packets: SyncPacket[]): SyncPacket[] {
     const ta = packetTime(a.timestamp);
     const tb = packetTime(b.timestamp);
     if (ta !== tb) return tb > ta ? 1 : -1;
-    return a.device_id.localeCompare(b.device_id);
+    // This runs on the raw downloadAll result BEFORE openPacket validates device_id, so a
+    // single corrupt/legacy peer file with a non-string id must not abort the sort (and
+    // with it, the whole type's merge). Coerce to a stable string: a malformed id sorts
+    // deterministically by its string form, and openPacket still rejects it downstream.
+    const idA = typeof a.device_id === "string" ? a.device_id : String(a.device_id);
+    const idB = typeof b.device_id === "string" ? b.device_id : String(b.device_id);
+    return idA.localeCompare(idB);
   });
 }
 

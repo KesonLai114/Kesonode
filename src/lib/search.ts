@@ -68,16 +68,19 @@ export function searchDocs(
     .filter((t) => t.length >= MIN_TERM);
   if (!terms.length) return [];
 
-  const seen = new Set<string>();
-  const hits: SearchHit[] = [];
+  // One representative per (source, canonical URL). Keep the BEST-scoring one, not merely
+  // the first seen: the same page can appear twice with different titles (a history row
+  // and a renamed bookmark), and first-seen-wins buried the prefix/short-title match under
+  // a worse one. Ties keep the first, so input order still decides equal scores.
+  const best = new Map<string, SearchHit>();
   for (const doc of docs) {
     if (!doc.url) continue;
     const key = `${doc.source}:${canonicalUrlKey(doc.url)}`;
-    if (seen.has(key)) continue;
     const score = scoreDoc(doc, terms);
     if (score < 0) continue;
-    seen.add(key);
-    hits.push({
+    const prev = best.get(key);
+    if (prev && prev.score >= score) continue;
+    best.set(key, {
       source: doc.source,
       title: doc.title || doc.url,
       url: doc.url,
@@ -86,6 +89,7 @@ export function searchDocs(
       score,
     });
   }
+  const hits = [...best.values()];
 
   hits.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;

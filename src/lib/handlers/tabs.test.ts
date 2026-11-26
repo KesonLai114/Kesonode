@@ -38,6 +38,14 @@ describe("importSession", () => {
     expect(urls).toEqual(["https://fine.com/", "https://ok.com/"]);
   });
 
+  it("ignores a malformed null tab instead of throwing for the whole session", async () => {
+    const s = session(["https://ok.com/"]);
+    s.tabs.push(null as unknown as { url: string; pinned: boolean });
+    await expect(importSession(s)).resolves.toBeTypeOf("number");
+    const urls = (await chrome.tabs.query({})).map((t) => t.url as string);
+    expect(urls).toEqual(["https://ok.com/"]);
+  });
+
   it("opens nothing for an empty session", async () => {
     await importSession(session([]));
     expect((await chrome.tabs.query({})).length).toBe(0);

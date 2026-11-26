@@ -410,4 +410,22 @@ describe("the periodic sync alarm follows auto_sync", () => {
     await startWorker();
     expect(alarms.has(SYNC_ALARM)).toBe(false);
   });
+
+  it("does not run the engine on a periodic tick while the first-sync card is unanswered", async () => {
+    // The bookmark-change path already skips sync while a direction card is pending —
+    // the card, not a timer, owns the decision. The periodic alarm must do the same:
+    // otherwise every minute it runs sync(), which broadcasts syncing→idle and makes
+    // an open popup flicker while the user is still deciding which side wins.
+    await setState({ first_sync_pending: { at: new Date().toISOString(), peer_count: 2 } });
+    await chrome.storage.local.set({
+      [KEYS.SETTINGS]: {
+        ...DEFAULT_SETTINGS, device_id: "test-device", device_label: "Test",
+        auto_sync: true, sync_on_change: true, enabled_types: ["bookmarks"],
+      },
+    });
+    await startWorker(); // re-init with auto_sync on
+    alarms.set(SYNC_ALARM, { name: SYNC_ALARM, scheduledTime: Date.now(), periodInMinutes: 1 });
+    await alarmListener({ name: SYNC_ALARM, scheduledTime: Date.now() });
+    expect(h.sync).not.toHaveBeenCalled();
+  });
 });
