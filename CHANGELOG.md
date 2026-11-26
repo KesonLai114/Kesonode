@@ -8,7 +8,7 @@ All notable changes to Konode. Format loosely follows
 > upstream releases, not to this fork's product name. Kesonode-only changes are recorded
 > in the section immediately below and never change the upstream wire contract.
 
-## [Unreleased]
+## [1.5.29] - 2026-11-26
 
 ### Fixed
 
@@ -75,6 +75,8 @@ All notable changes to Konode. Format loosely follows
 - **WebDAV bookmark peers are re-read every cycle.** This costs one extra GET per peer file
   per cycle, but prevents a same-second, same-length reorder packet from being silently
   replaced by its cached predecessor.
+
+## [Unreleased]
 
 ## [1.5.28] - 2026-11-24
 
