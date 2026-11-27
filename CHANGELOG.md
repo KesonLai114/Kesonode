@@ -76,7 +76,7 @@ All notable changes to Konode. Format loosely follows
   per cycle, but prevents a same-second, same-length reorder packet from being silently
   replaced by its cached predecessor.
 
-## [Unreleased]
+## [1.5.30] - 2026-11-27
 
 ### Fixed
 
@@ -118,6 +118,8 @@ All notable changes to Konode. Format loosely follows
   a device asked which side wins a first sync, each scheduled tick still ran a cycle that
   briefly broadcast "syncing" and then "idle". The periodic alarm now skips the engine while
   that question is unanswered, matching the behaviour of the bookmark-change path.
+
+## [Unreleased]
 
 ## [1.5.28] - 2026-11-24
 
