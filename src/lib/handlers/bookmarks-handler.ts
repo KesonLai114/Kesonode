@@ -2491,15 +2491,30 @@ async function mergeBookmarks(
       // We created this before, it is not here, and nobody has deleted it since, nor has the
       // peer added it again. The browser did not keep what it was given, and creating it again
       // would only repeat that on every sync, which is how one bookmark became thousands (#41).
+      //
+      // One exception: a browser's own bookmark sync can roll the tree back AFTER the
+      // create was confirmed kept (115 field report, 2026-11-26: +10 at 17:10, all ten
+      // gone by 17:22 — past CREATED_CONFIRM_MS). That is NOT the same as a browser that
+      // never keeps what it is given: a bookmark that vanished inside the confirmation
+      // window was never confirmed at all, so it still gives up immediately (#41). A
+      // confirmed create that later disappears earns ONE recreate; the second loss is
+      // final, so a browser that truly drops it settles at two copies, not one per sync.
       const rec = created.get(urlKey);
       if (rec && typeof rec.kept !== "string"
         && (remoteAdd.get(urlKey) ?? 0) <= rec.at && !deletedSince(urlKey, rec.at)) {
         if (rec.kept === undefined) {
           created.set(urlKey, { ...rec, kept: null });
           createdDirty = true;
+          if (Date.now() - rec.at < CREATED_CONFIRM_MS) {
+            logger.event("mergeBookmarks", `This browser did not keep ${node.url}, so it is no longer added again on every sync`);
+            return;
+          }
+          logger.info("mergeBookmarks", `This browser did not keep ${node.url}; restoring it once more before giving up`);
+          // Fall through: create it again, retaining the give-up mark on the new record.
+        } else {
           logger.event("mergeBookmarks", `This browser did not keep ${node.url}, so it is no longer added again on every sync`);
+          return;
         }
-        return;
       }
       // 丢弃携带危险 scheme 的远端书签（javascript:/data:/file: 等），不写入本地浏览器。
       if (!isSafeBookmarkUrl(node.url)) return;
@@ -2520,7 +2535,13 @@ async function mergeBookmarks(
           addedUrls.add(canonicalUrlKey(madeUrl));
           logger.event("mergeBookmarks", `This browser keeps ${node.url} as ${madeUrl}, so the two are now treated as one bookmark`);
         }
-        created.set(urlKey, madeUrl ? { url: node.url, at: Date.now(), kept: madeUrl } : { url: node.url, at: Date.now() });
+        // A retry of a create that vanished once keeps its "one more and stop" mark.
+        // Without this the fresh record would look like a first create and grant another
+        // retry on every sync — one bookmark becoming thousands again (#41).
+        const retried = created.get(urlKey)?.kept === null;
+        created.set(urlKey, madeUrl
+          ? { url: node.url, at: Date.now(), kept: madeUrl }
+          : retried ? { url: node.url, at: Date.now(), kept: null } : { url: node.url, at: Date.now() });
         createdDirty = true;
       } catch (err) {
         logger.error(`Bookmark merge add: ${node.title}`, err);

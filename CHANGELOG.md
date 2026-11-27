@@ -121,6 +121,18 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A bookmark a browser rolled back after keeping it is restored once, not abandoned forever.**
+  A browser's own bookmark sync can overwrite the tree shortly after Kesonode creates a
+  bookmark — a 115 field report showed `+10` at 17:10 and all ten gone by 17:22, with the
+  peer still listing them. Because the bookmark had vanished from the local tree with no
+  tombstone, the #41 "browser did not keep it" guard marked it `kept: null` for 90 days, so
+  the peer's bookmarks never arrived. A create that survived the confirmation window now
+  earns one recreate when it disappears later; a second loss is still final. Bookmarks that
+  vanish inside the confirmation window are abandoned immediately as before, so a browser
+  that never keeps what it is given still settles at one copy instead of one per sync.
+
 ## [1.5.28] - 2026-11-24
 
 ### Fixed
