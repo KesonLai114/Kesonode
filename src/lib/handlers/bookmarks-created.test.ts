@@ -184,4 +184,40 @@ describe("a browser that does not keep a bookmark as given (#41)", () => {
     await importBookmarks(newTab());
     expect(await getCreated()).toEqual([]);
   });
+
+  /**
+   * Characterisation test for the 115-browser field report (2026-11-26). Unlike the cases
+   * above, the browser DID keep the bookmark at create time; its own bookmark sync rolled
+   * the tree back afterwards. There is no tombstone — the user never deleted it through
+   * Kesonode — so this is indistinguishable from "the browser did not keep it" (#41).
+   * The log showed `+10` at 17:10, ten "did not keep" entries at 17:22 (11m46s later, just
+   * past CREATED_CONFIRM_MS), and the bookmarks never returning.
+   *
+   * This asserts the CURRENT behaviour. If we decide the rollback case should be retried,
+   * this test is the one to invert.
+   */
+  it("abandons a bookmark the browser's own sync rolled back after a successful create", async () => {
+    await importBookmarks(newTab());
+    expect(await localUrls()).toContain(PEER);
+    expect((await getCreated()).find((r) => r.url === PEER)?.kept).toBeUndefined();
+
+    // The browser's own sync overwrites the tree in the background. No tombstone is filed.
+    const [peerNode] = (await chrome.bookmarks.getChildren("1")).filter((c) => c.url === PEER);
+    await chrome.bookmarks.remove(peerNode.id);
+    expect(await localUrls()).not.toContain(PEER);
+
+    // Past the confirmation window, the peer still lists the bookmark with the same
+    // dateAdded as before — it genuinely wants it back.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 11 * MINUTE + 46_000);
+    await importBookmarks(newTab());
+
+    expect((await getCreated()).find((r) => r.url === PEER)?.kept).toBeNull();
+    expect(await localUrls()).not.toContain(PEER);
+
+    // Every later sync keeps skipping it, so the peer's bookmark never arrives.
+    await importBookmarks(newTab());
+    await importBookmarks(newTab());
+    expect(await localUrls()).not.toContain(PEER);
+  });
 });
